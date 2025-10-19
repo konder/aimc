@@ -1,0 +1,187 @@
+# ARM64 Native MineDojo Dockerfile
+# 适用于 Apple Silicon Mac
+# 从源码构建，直接修复 MixinGradle 问题
+
+FROM ubuntu:20.04
+
+LABEL maintainer="AIMC Project"
+LABEL description="ARM64 Native MineDojo for Apple Silicon"
+LABEL architecture="arm64"
+
+# 设置非交互式安装
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
+# 国内镜像加速
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+RUN mkdir -p /root/.gradle
+RUN echo 'allprojects {\n\
+    repositories {\n\
+    maven { url "https://maven.aliyun.com/repository/public" }\n\
+    maven { url "https://maven.aliyun.com/repository/central" }\n\
+    maven { url "https://maven.aliyun.com/repository/gradle-plugin" }\n\
+    maven { url "https://maven.aliyun.com/repository/spring" }\n\
+    maven { url "https://maven.aliyun.com/repository/spring-plugin" }\n\
+    maven { url "https://libraries.minecraft.net/" }\n\
+    mavenCentral()\n\
+    gradlePluginPortal()\n\
+    mavenLocal()\n\
+    }\n\
+    }' > /root/.gradle/init.gradle
+
+# 安装基础工具和依赖
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    git \
+    vim \
+    build-essential \
+    xvfb \
+    x11-utils \
+    x11vnc \
+    fluxbox \
+    openjdk-8-jdk \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 设置 Java 环境
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-arm64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# 安装 Miniconda ARM64 版本
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh -O ~/miniconda.sh && \
+    bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+
+ENV PATH=/opt/conda/bin:$PATH
+
+# 创建 Python 3.9 环境
+RUN conda create -n minedojo python=3.9 -y
+
+# 从源码安装 MineDojo
+SHELL ["/bin/bash", "-c"]
+WORKDIR /opt
+
+# Clone MineDojo 源码
+RUN git clone https://github.com/MineDojo/MineDojo.git
+
+# 下载 MixinGradle 缓存（Issue #113 的解决方案）
+RUN cd /opt && mkdir hotfix && cd hotfix && \
+    git clone https://github.com/verityw/MixinGradle-dcfaf61.git
+
+# 修复 MineDojo 源码中的 MixinGradle 问题
+RUN cd /opt/MineDojo/minedojo/sim/Malmo/Minecraft && \
+    sed -i '/repositories {/a\        maven { url "file:///opt/hotfix" }' build.gradle && \
+    sed -i '4i\     maven { url "https://maven.aliyun.com/repository/public" }' build.gradle && \
+    sed -i '5i\     maven { url "https://maven.aliyun.com/repository/central" }' build.gradle && \
+    sed -i '6i\     maven { url "https://libraries.minecraft.net/" }' build.gradle && \
+    sed -i "s|com.github.SpongePowered:MixinGradle:dcfaf61|MixinGradle-dcfaf61:MixinGradle:dcfaf61|g" build.gradle && \
+    sed -i "s|brandonhoughton:ForgeGradle|MineDojo:ForgeGradle|g" build.gradle && \
+    sed -i "s|brandonhoughton:forgegradle|MineDojo:ForgeGradle|g" build.gradle && \
+    sed -i "s|new File('src/main/resources/schemas.index')|new File(projectDir, 'src/main/resources/schemas.index')|g" build.gradle
+
+# 配置 pip 国内镜像源（可选，加速下载）
+# 取消下面的注释以使用清华源
+RUN mkdir -p /root/.pip && \
+    echo "[global]" > /root/.pip/pip.conf && \
+    echo "index-url = https://pypi.tuna.tsinghua.edu.cn/simple" >> /root/.pip/pip.conf && \
+    echo "[install]" >> /root/.pip/pip.conf && \
+    echo "trusted-host = pypi.tuna.tsinghua.edu.cn" >> /root/.pip/pip.conf
+
+# 安装 MineDojo 及其依赖
+# 注意：需要降级 pip/setuptools/wheel 以兼容 gym 0.21.0 的旧式依赖声明
+RUN source activate minedojo && \
+    cd /opt/MineDojo && \
+    pip install "pip<24.1" "setuptools<58" "wheel<0.38.0" && \
+    pip install -e . && \
+    pip install "numpy>=1.21.0,<2.0"
+
+# 构建 JAR 和相关资源
+RUN cd /opt/MineDojo/minedojo/sim/Malmo/Minecraft && \
+    ./gradlew shadowJar
+
+RUN cd /opt/MineDojo/minedojo/sim/Malmo/Minecraft && \
+    mkdir -p run/gradle && \
+    cp -r /root/.gradle/caches run/gradle/
+ 
+# 禁用音频警告
+ENV PULSE_SERVER=null
+ENV SDL_AUDIODRIVER=dummy
+ENV AUDIODEV=null
+ENV PYTHONWARNINGS="ignore::UserWarning"
+ENV GYM_IGNORE_DEPRECATION_WARNINGS=1
+
+# 创建工作目录
+RUN mkdir -p /workspace/logs
+
+# 创建启动脚本（参考 MineRL 的配置）
+RUN cat > /workspace/entrypoint.sh << 'EOF'
+#!/bin/bash
+
+# 激活 conda 环境
+source /opt/conda/bin/activate minedojo
+
+# 设置环境变量
+export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-arm64
+export PATH=$JAVA_HOME/bin:$PATH
+export GYM_IGNORE_DEPRECATION_WARNINGS=1
+export PYTHONWARNINGS="ignore::UserWarning"
+export PULSE_SERVER=null
+export SDL_AUDIODRIVER=dummy
+export AUDIODEV=null
+
+# 确保日志目录存在
+mkdir -p /workspace/logs
+
+# 启动虚拟显示服务器（使用 MineRL 相同的配置）
+echo "Starting Xvfb (ARM64 native)..."
+Xvfb :1 -screen 0 1024x768x24 -ac +extension GLX +render -noreset -nolisten tcp > /workspace/logs/xvfb.log 2>&1 &
+XVFB_PID=$!
+export DISPLAY=:1
+
+# 等待 X 服务器启动
+sleep 3
+
+# 验证 Xvfb 是否运行
+if ps -p $XVFB_PID > /dev/null; then
+    echo "✓ Xvfb started successfully (PID: $XVFB_PID)"
+else
+    echo "✗ Xvfb failed to start"
+    echo "Check logs: /workspace/logs/xvfb.log"
+    exit 1
+fi
+
+echo "================================"
+echo "MineDojo ARM64 Environment Ready"
+echo "================================"
+echo "Java: $(java -version 2>&1 | head -1)"
+echo "Python: $(python --version)"
+echo "MineDojo: $(python -c 'import minedojo; print(minedojo.__version__)' 2>/dev/null || echo 'installed')"
+echo "Architecture: $(uname -m)"
+echo "Display: $DISPLAY"
+echo "================================"
+
+# 如果提供了命令参数，执行它们
+if [ $# -gt 0 ]; then
+    echo "Executing command: $@"
+    exec "$@"
+else
+    echo "No command provided, starting interactive shell..."
+    exec bash
+fi
+EOF
+
+RUN chmod +x /workspace/entrypoint.sh
+
+# 清理临时文件
+RUN rm -rf /tmp/MineDojo /tmp/*.log
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 设置入口点
+ENTRYPOINT ["/workspace/entrypoint.sh"]
+
+# 默认命令
+CMD ["bash"]
