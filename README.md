@@ -1,4 +1,140 @@
-#如何在ARM64上通过Rosetta 2部署minedojo
+# AIMC - MineDojo AI Minecraft 训练工程
+
+AI agent training project for Minecraft using MineDojo.
+
+---
+
+## 快速开始
+
+### 1. 安装依赖
+
+```bash
+# 安装所有依赖
+pip install -r requirements.txt
+```
+
+### 2. 测试环境
+
+```bash
+# 运行Hello World示例
+python src/hello_minedojo.py
+
+# 运行任务演示
+python src/demo_harvest_task.py
+```
+
+### 3. 开始训练
+
+```bash
+# 检查设备支持（查看是否有 GPU 加速）
+python scripts/check_device.py
+
+# 快速测试（10K步，5-10分钟）
+./scripts/train_harvest.sh test
+
+# 完整训练（500K步，2-4小时）
+./scripts/train_harvest.sh
+
+# 监控训练
+./scripts/monitor_training.sh
+```
+
+### 4. 评估模型
+
+```bash
+./scripts/eval_harvest.sh
+```
+
+### 5. 查看训练数据和 Loss
+
+```bash
+# TensorBoard 可视化（查看 loss 曲线）
+tensorboard --logdir logs/tensorboard
+# 浏览器打开: http://localhost:6006
+# 在 SCALARS 标签页查看所有指标
+
+# 实时监控日志
+./scripts/monitor_training.sh
+```
+
+**关键指标位置**：
+- 📈 `rollout/ep_rew_mean` - 平均奖励
+- 📉 `train/policy_loss` - 策略损失
+- 📉 `train/value_loss` - 价值损失
+
+---
+
+## 项目结构
+
+```
+aimc/
+├── src/                      # 源代码
+│   ├── utils/               # 工具模块
+│   │   └── env_wrappers.py  # 环境包装器
+│   ├── training/            # 训练模块
+│   │   └── train_harvest_paper.py  # 训练脚本
+│   ├── examples/            # 示例代码
+│   └── demo_harvest_task.py # 任务演示
+├── scripts/                 # 脚本
+│   ├── train_harvest.sh     # 训练启动脚本
+│   └── eval_harvest.sh      # 评估脚本
+├── config/                  # 配置文件
+│   └── training_config.yaml # 训练配置
+├── docs/                    # 文档
+│   ├── QUICK_START_TRAINING.md       # 快速开始
+│   ├── TRAINING_HARVEST_PAPER.md     # 训练指南
+│   └── MINEDOJO_TASKS_GUIDE.md       # 任务系统指南
+├── checkpoints/             # 模型检查点
+├── logs/                    # 日志
+│   ├── training/           # 训练日志
+│   └── tensorboard/        # TensorBoard日志
+└── requirements.txt         # 依赖
+```
+
+---
+
+## 文档
+
+- **[快速开始](docs/QUICK_START_TRAINING.md)**: 30秒开始训练
+- **[训练指南](docs/TRAINING_HARVEST_PAPER.md)**: 完整训练文档
+- **[任务系统指南](docs/MINEDOJO_TASKS_GUIDE.md)**: MineDojo任务机制详解
+
+---
+
+## 核心特性
+
+✅ **完整的训练流程**: 环境包装 → 模型训练 → 评估监控  
+✅ **成熟的RL框架**: 使用 Stable-Baselines3 + PPO算法  
+✅ **丰富的监控**: TensorBoard + 详细日志  
+✅ **灵活配置**: YAML配置文件 + 命令行参数  
+✅ **详细文档**: 从入门到优化的完整指南  
+
+---
+
+## 重要说明
+
+⚠️ **MineDojo内置任务不提供预训练模型，所有训练从头开始！**
+
+- 默认任务: `harvest_milk`（更稳定）
+- 目标任务: `harvest_1_paper`（可配置）
+- 训练时间: 2-16小时（取决于配置）
+
+---
+
+## 系统要求
+
+| 配置 | 最低 | 推荐 |
+|------|------|------|
+| CPU | 4核 | 8核+ |
+| 内存 | 8GB | 16GB+ |
+| GPU | 无 | GTX 1060+ |
+| 存储 | 10GB | 20GB+ |
+
+---
+
+## ARM64 部署指南
+
+### 如何在ARM64上通过Rosetta 2部署minedojo
 
 - 安装x86的jdk
 ```

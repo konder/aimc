@@ -45,7 +45,7 @@ def main():
     
     # 运行几个随机步骤
     print("\n[3] 执行随机动作...")
-    num_steps = 10
+    num_steps = 100
     for step in range(num_steps):
         # 采样一个随机动作
         action = env.action_space.no_op()  # 使用 no-op 动作而不是随机动作
