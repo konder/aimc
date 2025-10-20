@@ -14,12 +14,14 @@
 import os
 import sys
 import argparse
+import gym
 from datetime import datetime
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import numpy as np
+import gym  # 需要 gym.Wrapper 用于 MineCLIPRewardWrapper
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
