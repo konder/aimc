@@ -25,14 +25,16 @@ echo ""
 
 # 卸载可能冲突的版本
 echo "  卸载旧版本..."
-pip uninstall -y gym shimmy 2>/dev/null || true
+pip uninstall -y gym shimmy stable-baselines3 2>/dev/null || true
 
 # 安装兼容版本
-echo "  安装兼容版本..."
+echo "  安装 gym 0.21.0..."
 pip install -q "gym==0.21.0"
-pip install -q "shimmy==0.2.1"  # 指定明确的兼容版本
 
-echo "  ✓ gym 版本修复完成"
+echo "  降级 stable-baselines3 到 1.8.0（原生支持 gym，无需 shimmy）..."
+pip install -q "stable-baselines3==1.8.0"
+
+echo "  ✓ 环境修复完成"
 echo ""
 
 # 验证
@@ -40,8 +42,8 @@ python -c "import gym; print(f'  ✓ gym: {gym.__version__}')" || {
     echo "  ❌ gym 安装失败"
     exit 1
 }
-python -c "import shimmy; print(f'  ✓ shimmy: {shimmy.__version__}')" || {
-    echo "  ❌ shimmy 安装失败"
+python -c "import stable_baselines3; print(f'  ✓ stable-baselines3: {stable_baselines3.__version__}')" || {
+    echo "  ❌ stable-baselines3 安装失败"
     exit 1
 }
 
