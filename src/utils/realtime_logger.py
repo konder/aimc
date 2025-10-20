@@ -17,9 +17,11 @@ class RealtimeLoggerCallback(BaseCallback):
     Args:
         log_freq: 日志打印频率（步数）
         verbose: 是否打印详细信息
+        save_frames: 是否保存画面截图
+        frames_dir: 画面保存目录
     """
     
-    def __init__(self, log_freq=100, verbose=1):
+    def __init__(self, log_freq=100, verbose=1, save_frames=False, frames_dir="logs/frames"):
         super(RealtimeLoggerCallback, self).__init__(verbose)
         self.log_freq = log_freq
         self.episode_rewards = []  # 完整episode的奖励列表
@@ -33,6 +35,16 @@ class RealtimeLoggerCallback(BaseCallback):
         self.current_episode = 0  # 当前回合数
         self.start_time = None
         self.last_log_step = 0
+        
+        # 画面保存配置
+        self.save_frames = save_frames
+        self.frames_dir = frames_dir
+        if self.save_frames:
+            import os
+            os.makedirs(self.frames_dir, exist_ok=True)
+            print(f"  📸 画面保存: 启用 (保存到 {self.frames_dir})")
+        
+        self.current_obs = None  # 存储当前观察
         
     def _on_training_start(self):
         """训练开始时调用"""
@@ -50,6 +62,15 @@ class RealtimeLoggerCallback(BaseCallback):
         Returns:
             bool: 如果返回 False，训练将停止
         """
+        # 获取当前观察（用于保存画面）
+        if self.save_frames and 'new_obs' in self.locals:
+            obs = self.locals['new_obs']
+            if isinstance(obs, np.ndarray):
+                if len(obs.shape) == 4:  # (batch, C, H, W)
+                    self.current_obs = obs[0]  # 取第一个环境
+                else:  # (C, H, W)
+                    self.current_obs = obs
+        
         # 只记录当前步的值（不累积）
         if 'rewards' in self.locals:
             rewards = self.locals['rewards']
@@ -76,12 +97,49 @@ class RealtimeLoggerCallback(BaseCallback):
                 if 'sparse_weight' in info and self.sparse_weight is None:
                     self.sparse_weight = float(info['sparse_weight'])
         
-        # 检查是否需要打印日志
+        # 检查是否需要打印日志和保存画面
         if self.num_timesteps - self.last_log_step >= self.log_freq:
+            if self.save_frames and self.current_obs is not None:
+                self._save_frame()
             self._log_progress()
             self.last_log_step = self.num_timesteps
         
         return True
+    
+    def _save_frame(self):
+        """保存当前画面到文件"""
+        try:
+            import cv2
+            
+            # 转换图像格式：(C, H, W) -> (H, W, C)
+            frame = self.current_obs.transpose(1, 2, 0)
+            
+            # 如果是[0,1]范围，转换为[0,255]
+            if frame.max() <= 1.0:
+                frame = (frame * 255).astype(np.uint8)
+            else:
+                frame = frame.astype(np.uint8)
+            
+            # RGB -> BGR (OpenCV使用BGR)
+            frame_bgr = frame[..., ::-1]
+            
+            # 构造文件名：step_相似度_MineCLIP奖励.png
+            # 例如: step_000100_sim_0.6337_mc_+0.0018.png
+            filename = (
+                f"step_{self.num_timesteps:06d}_"
+                f"sim_{self.current_similarity:.4f}_"
+                f"mc_{self.current_mineclip_reward:+.4f}_"
+                f"reward_{self.current_reward:+.4f}.png"
+            )
+            filepath = f"{self.frames_dir}/{filename}"
+            
+            # 保存图像
+            cv2.imwrite(filepath, frame_bgr)
+            
+        except Exception as e:
+            # 静默失败，不影响训练
+            if self.verbose > 0:
+                print(f"    ⚠️ 保存画面失败: {e}")
     
     def _on_rollout_end(self):
         """Rollout 结束时调用"""

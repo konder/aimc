@@ -84,6 +84,8 @@ TIMESTEPS=200000
 USE_MINECLIP=""
 DEVICE="auto"
 HEADLESS="true"  # 默认启用无头模式
+LEARNING_RATE="0.0005"  # 默认学习率
+SAVE_FRAMES=""  # 是否保存画面截图
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -123,6 +125,14 @@ while [[ $# -gt 0 ]]; do
             HEADLESS="false"
             shift
             ;;
+        --learning-rate)
+            LEARNING_RATE="$2"
+            shift 2
+            ;;
+        --save-frames)
+            SAVE_FRAMES="--save-frames"
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [模式] [选项]"
             echo ""
@@ -138,6 +148,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --timesteps N       自定义总步数"
             echo "  --headless          启用无头模式，不显示游戏窗口 (默认)"
             echo "  --no-headless       禁用无头模式，显示游戏窗口（调试用）"
+            echo "  --learning-rate LR  学习率 (默认: 0.0005)"
+            echo "  --save-frames       保存每100步画面截图（用于分析MineCLIP）"
             echo "  -h, --help          显示帮助"
             echo ""
             echo "示例:"
@@ -222,6 +234,7 @@ echo ""
 python src/training/train_get_wood.py \
     --total-timesteps "$TIMESTEPS" \
     --device "$DEVICE" \
+    --learning-rate "$LEARNING_RATE" \
     $USE_MINECLIP \
     --sparse-weight 10.0 \
     --mineclip-weight 10.0 \
@@ -231,7 +244,8 @@ python src/training/train_get_wood.py \
     --save-freq 10000 \
     --checkpoint-dir "checkpoints/get_wood" \
     --tensorboard-dir "logs/tensorboard" \
-    --log-dir "logs/training"
+    --log-dir "logs/training" \
+    $SAVE_FRAMES
 
 echo ""
 echo -e "${GREEN}========================================${NC}"

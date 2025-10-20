@@ -199,7 +199,9 @@ def train(args):
     
     logger_callback = RealtimeLoggerCallback(
         log_freq=100,
-        verbose=1
+        verbose=1,
+        save_frames=args.save_frames,
+        frames_dir=args.frames_dir
     )
     
     callbacks = CallbackList([checkpoint_callback, logger_callback])
@@ -281,6 +283,10 @@ def main():
                        help='TensorBoard日志目录')
     parser.add_argument('--log-dir', type=str, default='logs/training',
                        help='训练日志目录')
+    parser.add_argument('--save-frames', action='store_true',
+                       help='保存每100步的画面截图（用于分析MineCLIP评分）')
+    parser.add_argument('--frames-dir', type=str, default='logs/frames',
+                       help='画面截图保存目录')
     
     args = parser.parse_args()
     args.image_size = tuple(args.image_size)
