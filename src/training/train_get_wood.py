@@ -69,12 +69,14 @@ def create_harvest_log_env(use_mineclip=False, image_size=(160, 256)):
     return env
 
 
-class MineCLIPRewardWrapper:
+class MineCLIPRewardWrapper(gym.Wrapper):
     """
     MineCLIP密集奖励包装器
     
     将稀疏奖励（只在获得木头时给奖励）转换为密集奖励
     （每一步都根据是否接近目标给予奖励）
+    
+    注意：继承 gym.Wrapper 以确保与 stable-baselines3 兼容
     """
     
     def __init__(self, env, task_description, sparse_weight=10.0, mineclip_weight=0.1):
@@ -87,7 +89,7 @@ class MineCLIPRewardWrapper:
             sparse_weight: 稀疏奖励的权重
             mineclip_weight: MineCLIP奖励的权重
         """
-        self.env = env
+        super().__init__(env)
         self.task_description = task_description
         self.sparse_weight = sparse_weight
         self.mineclip_weight = mineclip_weight
@@ -133,9 +135,9 @@ class MineCLIPRewardWrapper:
             print(f"    ⚠️ MineCLIP设置失败: {e}")
             return False
     
-    def reset(self):
+    def reset(self, **kwargs):
         """重置环境"""
-        obs = self.env.reset()
+        obs = self.env.reset(**kwargs)
         
         if self.mineclip_available:
             # 记录初始的MineCLIP相似度
@@ -256,14 +258,6 @@ class MineCLIPRewardWrapper:
     def close(self):
         """关闭环境"""
         return self.env.close()
-    
-    @property
-    def observation_space(self):
-        return self.env.observation_space
-    
-    @property
-    def action_space(self):
-        return self.env.action_space
 
 
 def train(args):

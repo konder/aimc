@@ -154,7 +154,12 @@ echo -e "${BLUE}========================================${NC}"
 echo "任务:       harvest_1_log (获得1个原木)"
 echo "模式:       $MODE"
 echo "总步数:     $TIMESTEPS"
-echo "MineCLIP:   ${USE_MINECLIP:-禁用}"
+# 显示 MineCLIP 状态
+if [[ -n "$USE_MINECLIP" ]]; then
+    echo -e "MineCLIP:   ${GREEN}启用${NC}"
+else
+    echo -e "MineCLIP:   ${YELLOW}禁用${NC}"
+fi
 echo "设备:       $DEVICE"
 echo -e "${BLUE}========================================${NC}"
 echo ""
