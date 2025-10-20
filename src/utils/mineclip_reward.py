@@ -154,9 +154,19 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             
             self.model.eval()
             
-            # 加载 tokenizer
+            # 加载 tokenizer（优先使用本地，避免每次访问 HuggingFace）
             from transformers import CLIPTokenizer
-            self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch16")
+            
+            # 本地 tokenizer 路径
+            local_tokenizer_path = "data/clip_tokenizer"
+            
+            if os.path.exists(local_tokenizer_path):
+                print(f"    使用本地 tokenizer: {local_tokenizer_path}")
+                self.tokenizer = CLIPTokenizer.from_pretrained(local_tokenizer_path)
+            else:
+                print(f"    本地 tokenizer 不存在，从 HuggingFace 下载...")
+                print(f"    提示: 运行 'python scripts/download_clip_tokenizer.py' 可离线使用")
+                self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch16")
             
             return True
             
