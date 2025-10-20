@@ -87,6 +87,13 @@ HEADLESS="true"  # 默认启用无头模式
 LEARNING_RATE="0.0005"  # 默认学习率
 SAVE_FRAMES=""  # 是否保存画面截图
 
+# MineCLIP 参数
+SPARSE_WEIGHT="10.0"
+MINECLIP_WEIGHT="10.0"
+WEIGHT_DECAY_STEPS="50000"
+MIN_WEIGHT="0.1"
+USE_DYNAMIC_WEIGHT="--use-dynamic-weight"
+
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -133,6 +140,26 @@ while [[ $# -gt 0 ]]; do
             SAVE_FRAMES="--save-frames"
             shift
             ;;
+        --sparse-weight)
+            SPARSE_WEIGHT="$2"
+            shift 2
+            ;;
+        --mineclip-weight)
+            MINECLIP_WEIGHT="$2"
+            shift 2
+            ;;
+        --weight-decay-steps)
+            WEIGHT_DECAY_STEPS="$2"
+            shift 2
+            ;;
+        --min-weight)
+            MIN_WEIGHT="$2"
+            shift 2
+            ;;
+        --no-dynamic-weight)
+            USE_DYNAMIC_WEIGHT=""
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [模式] [选项]"
             echo ""
@@ -142,22 +169,31 @@ while [[ $# -gt 0 ]]; do
             echo "  standard    标准训练 (200K步, 2-4小时) [默认]"
             echo "  long        长时间训练 (500K步, 5-10小时)"
             echo ""
-            echo "选项:"
-            echo "  --mineclip          使用MineCLIP加速（推荐，3-5倍加速）"
-            echo "  --device DEVICE     设备: auto/cpu/cuda/mps (默认: auto)"
-            echo "  --timesteps N       自定义总步数"
-            echo "  --headless          启用无头模式，不显示游戏窗口 (默认)"
-            echo "  --no-headless       禁用无头模式，显示游戏窗口（调试用）"
-            echo "  --learning-rate LR  学习率 (默认: 0.0005)"
-            echo "  --save-frames       保存每100步画面截图（用于分析MineCLIP）"
-            echo "  -h, --help          显示帮助"
+            echo "基本选项:"
+            echo "  --mineclip              使用MineCLIP加速（推荐，3-5倍加速）"
+            echo "  --device DEVICE         设备: auto/cpu/cuda/mps (默认: auto)"
+            echo "  --timesteps N           自定义总步数"
+            echo "  --headless              启用无头模式，不显示游戏窗口 (默认)"
+            echo "  --no-headless           禁用无头模式，显示游戏窗口（调试用）"
+            echo "  --learning-rate LR      学习率 (默认: 0.0005)"
+            echo "  --save-frames           保存每100步画面截图（用于分析MineCLIP）"
+            echo ""
+            echo "MineCLIP高级选项（需要--mineclip）:"
+            echo "  --sparse-weight W       稀疏奖励权重 (默认: 10.0)"
+            echo "  --mineclip-weight W     MineCLIP初始权重 (默认: 10.0)"
+            echo "  --weight-decay-steps N  权重衰减步数 (默认: 50000)"
+            echo "  --min-weight W          MineCLIP最小权重 (默认: 0.1)"
+            echo "  --no-dynamic-weight     禁用权重衰减（固定权重）"
+            echo ""
+            echo "其他:"
+            echo "  -h, --help              显示帮助"
             echo ""
             echo "示例:"
-            echo "  $0                  # 标准训练"
-            echo "  $0 --mineclip       # 使用MineCLIP加速"
-            echo "  $0 test             # 快速测试"
-            echo "  $0 --no-headless    # 显示游戏窗口（调试）"
-            echo "  $0 long --mineclip  # 长时间训练+MineCLIP"
+            echo "  $0                                    # 标准训练"
+            echo "  $0 --mineclip                         # 使用MineCLIP加速"
+            echo "  $0 test --mineclip --save-frames      # 测试+保存画面"
+            echo "  $0 --mineclip --mineclip-weight 40.0  # 提高MineCLIP权重"
+            echo "  $0 long --mineclip --learning-rate 0.001  # 长时间训练+高学习率"
             exit 0
             ;;
         *)
@@ -236,11 +272,11 @@ python src/training/train_get_wood.py \
     --device "$DEVICE" \
     --learning-rate "$LEARNING_RATE" \
     $USE_MINECLIP \
-    --sparse-weight 10.0 \
-    --mineclip-weight 10.0 \
-    --use-dynamic-weight \
-    --weight-decay-steps 50000 \
-    --min-weight 0.1 \
+    --sparse-weight "$SPARSE_WEIGHT" \
+    --mineclip-weight "$MINECLIP_WEIGHT" \
+    $USE_DYNAMIC_WEIGHT \
+    --weight-decay-steps "$WEIGHT_DECAY_STEPS" \
+    --min-weight "$MIN_WEIGHT" \
     --save-freq 10000 \
     --checkpoint-dir "checkpoints/get_wood" \
     --tensorboard-dir "logs/tensorboard" \
