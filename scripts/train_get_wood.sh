@@ -78,15 +78,12 @@ else
     fi
 fi
 
-# 设置Java无头模式（性能优化）
-export JAVA_OPTS="-Djava.awt.headless=true"
-export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
-
 # 默认参数
 MODE="standard"
 TIMESTEPS=200000
 USE_MINECLIP=""
 DEVICE="auto"
+HEADLESS="true"  # 默认启用无头模式
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -118,6 +115,14 @@ while [[ $# -gt 0 ]]; do
             TIMESTEPS="$2"
             shift 2
             ;;
+        --headless)
+            HEADLESS="true"
+            shift
+            ;;
+        --no-headless)
+            HEADLESS="false"
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [模式] [选项]"
             echo ""
@@ -131,12 +136,15 @@ while [[ $# -gt 0 ]]; do
             echo "  --mineclip          使用MineCLIP加速（推荐，3-5倍加速）"
             echo "  --device DEVICE     设备: auto/cpu/cuda/mps (默认: auto)"
             echo "  --timesteps N       自定义总步数"
+            echo "  --headless          启用无头模式，不显示游戏窗口 (默认)"
+            echo "  --no-headless       禁用无头模式，显示游戏窗口（调试用）"
             echo "  -h, --help          显示帮助"
             echo ""
             echo "示例:"
             echo "  $0                  # 标准训练"
             echo "  $0 --mineclip       # 使用MineCLIP加速"
             echo "  $0 test             # 快速测试"
+            echo "  $0 --no-headless    # 显示游戏窗口（调试）"
             echo "  $0 long --mineclip  # 长时间训练+MineCLIP"
             exit 0
             ;;
@@ -147,6 +155,13 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# 设置Java无头模式
+if [[ "$HEADLESS" == "true" ]]; then
+    export JAVA_OPTS="-Djava.awt.headless=true"
+else
+    export JAVA_OPTS="-Djava.awt.headless=false"
+fi
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}MineDojo 获得木头训练${NC}"
@@ -161,6 +176,12 @@ else
     echo -e "MineCLIP:   ${YELLOW}禁用${NC}"
 fi
 echo "设备:       $DEVICE"
+# 显示无头模式状态
+if [[ "$HEADLESS" == "true" ]]; then
+    echo -e "无头模式:   ${GREEN}启用${NC}"
+else
+    echo -e "无头模式:   ${YELLOW}禁用（显示游戏窗口）${NC}"
+fi
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
@@ -204,6 +225,11 @@ python src/training/train_get_wood.py \
     --total-timesteps "$TIMESTEPS" \
     --device "$DEVICE" \
     $USE_MINECLIP \
+    --sparse-weight 10.0 \
+    --mineclip-weight 10.0 \
+    --use-dynamic-weight \
+    --weight-decay-steps 50000 \
+    --min-weight 0.1 \
     --save-freq 10000 \
     --checkpoint-dir "checkpoints/get_wood" \
     --tensorboard-dir "logs/tensorboard" \

@@ -22,20 +22,27 @@ class RealtimeLoggerCallback(BaseCallback):
     def __init__(self, log_freq=100, verbose=1):
         super(RealtimeLoggerCallback, self).__init__(verbose)
         self.log_freq = log_freq
-        self.episode_rewards = []
-        self.episode_lengths = []
+        self.episode_rewards = []  # 完整episode的奖励列表
+        self.episode_lengths = []  # 完整episode的长度列表
+        self.step_rewards = []  # 每一步的总奖励
+        self.step_mineclip_rewards = []  # 每一步的MineCLIP奖励（未加权）
+        self.step_sparse_rewards = []  # 每一步的稀疏奖励
+        self.step_similarities = []  # 每一步的相似度
+        self.step_mineclip_weights = []  # 每一步的MineCLIP权重
+        self.sparse_weight = None  # 稀疏奖励权重（从info中获取）
+        self.current_episode = 0  # 当前回合数
         self.start_time = None
         self.last_log_step = 0
         
     def _on_training_start(self):
         """训练开始时调用"""
         self.start_time = time.time()
-        print("\n" + "=" * 80)
+        print("\n" + "=" * 130)
         print("🚀 开始训练...")
-        print("=" * 80)
-        print(f"{'步数':>10s} | {'总时间':>10s} | {'FPS':>8s} | "
-              f"{'奖励':>10s} | {'Episode长度':>12s} | {'损失':>10s}")
-        print("-" * 80)
+        print("=" * 130)
+        print(f"{'回合数':>8s} | {'步数':>10s} | {'总时间':>10s} | {'FPS':>8s} | "
+              f"{'总奖励':>10s} | {'MineCLIP':>10s} | {'MC权重':>8s} | {'权重比':>8s} | {'相似度':>8s} | {'损失':>10s}")
+        print("-" * 130)
         
     def _on_step(self) -> bool:
         """
@@ -43,6 +50,44 @@ class RealtimeLoggerCallback(BaseCallback):
         Returns:
             bool: 如果返回 False，训练将停止
         """
+        # 记录每一步的奖励和MineCLIP信息
+        if 'rewards' in self.locals:
+            rewards = self.locals['rewards']
+            if isinstance(rewards, np.ndarray):
+                # 多环境情况，记录所有环境的奖励
+                self.step_rewards.extend(rewards.tolist())
+            else:
+                self.step_rewards.append(float(rewards))
+        
+        # 从info中提取MineCLIP详细信息
+        if 'infos' in self.locals:
+            infos = self.locals['infos']
+            # 处理多环境情况
+            if isinstance(infos, list):
+                for info in infos:
+                    if isinstance(info, dict):
+                        if 'mineclip_reward' in info:
+                            self.step_mineclip_rewards.append(float(info['mineclip_reward']))
+                        if 'sparse_reward' in info:
+                            self.step_sparse_rewards.append(float(info['sparse_reward']))
+                        if 'mineclip_similarity' in info:
+                            self.step_similarities.append(float(info['mineclip_similarity']))
+                        if 'mineclip_weight' in info:
+                            self.step_mineclip_weights.append(float(info['mineclip_weight']))
+                        if 'sparse_weight' in info and self.sparse_weight is None:
+                            self.sparse_weight = float(info['sparse_weight'])
+            elif isinstance(infos, dict):
+                if 'mineclip_reward' in infos:
+                    self.step_mineclip_rewards.append(float(infos['mineclip_reward']))
+                if 'sparse_reward' in infos:
+                    self.step_sparse_rewards.append(float(infos['sparse_reward']))
+                if 'mineclip_similarity' in infos:
+                    self.step_similarities.append(float(infos['mineclip_similarity']))
+                if 'mineclip_weight' in infos:
+                    self.step_mineclip_weights.append(float(infos['mineclip_weight']))
+                if 'sparse_weight' in infos and self.sparse_weight is None:
+                    self.sparse_weight = float(infos['sparse_weight'])
+        
         # 检查是否需要打印日志
         if self.num_timesteps - self.last_log_step >= self.log_freq:
             self._log_progress()
@@ -57,6 +102,7 @@ class RealtimeLoggerCallback(BaseCallback):
             for ep_info in self.model.ep_info_buffer:
                 if 'r' in ep_info:
                     self.episode_rewards.append(ep_info['r'])
+                    self.current_episode += 1  # 完成一个回合
                 if 'l' in ep_info:
                     self.episode_lengths.append(ep_info['l'])
     
@@ -72,13 +118,41 @@ class RealtimeLoggerCallback(BaseCallback):
         seconds = int(elapsed_time % 60)
         time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
-        # 计算平均奖励和长度
-        if len(self.episode_rewards) > 0:
-            mean_reward = np.mean(self.episode_rewards[-100:])  # 最近100个episode
-            mean_length = np.mean(self.episode_lengths[-100:])
+        # 计算最近100步的平均奖励
+        if len(self.step_rewards) >= 100:
+            mean_reward = np.mean(self.step_rewards[-100:])  # 最近100步
+        elif len(self.step_rewards) > 0:
+            mean_reward = np.mean(self.step_rewards)  # 不足100步时使用所有步数
         else:
             mean_reward = 0.0
-            mean_length = 0.0
+        
+        # 计算最近100步的MineCLIP平均奖励（未加权）
+        if len(self.step_mineclip_rewards) >= 100:
+            mean_mineclip = np.mean(self.step_mineclip_rewards[-100:])
+        elif len(self.step_mineclip_rewards) > 0:
+            mean_mineclip = np.mean(self.step_mineclip_rewards)
+        else:
+            mean_mineclip = 0.0
+        
+        # 计算最近100步的平均相似度
+        if len(self.step_similarities) >= 100:
+            mean_similarity = np.mean(self.step_similarities[-100:])
+        elif len(self.step_similarities) > 0:
+            mean_similarity = np.mean(self.step_similarities)
+        else:
+            mean_similarity = 0.0
+        
+        # 获取最新的MineCLIP权重
+        if len(self.step_mineclip_weights) > 0:
+            current_weight = self.step_mineclip_weights[-1]  # 最新权重
+        else:
+            current_weight = 0.0
+        
+        # 计算权重比 (sparse_weight / mineclip_weight)
+        if self.sparse_weight is not None and current_weight > 0:
+            weight_ratio = self.sparse_weight / current_weight
+        else:
+            weight_ratio = 0.0
         
         # 获取损失信息（如果有）
         loss_str = "N/A"
@@ -95,13 +169,18 @@ class RealtimeLoggerCallback(BaseCallback):
             except:
                 pass
         
-        # 打印日志
-        print(f"{self.num_timesteps:>10,} | {time_str:>10s} | {fps:>8.1f} | "
-              f"{mean_reward:>10.2f} | {mean_length:>12.1f} | {loss_str:>10s}")
+        # 打印日志（包含回合数和MineCLIP详细信息）
+        mineclip_str = f"{mean_mineclip:>10.4f}" if mean_mineclip != 0.0 else "N/A".rjust(10)
+        weight_str = f"{current_weight:>8.4f}" if current_weight != 0.0 else "N/A".rjust(8)
+        ratio_str = f"{weight_ratio:>8.2f}" if weight_ratio > 0 else "N/A".rjust(8)
+        similarity_str = f"{mean_similarity:>8.4f}" if mean_similarity != 0.0 else "N/A".rjust(8)
+        
+        print(f"{self.current_episode:>8,} | {self.num_timesteps:>10,} | {time_str:>10s} | {fps:>8.1f} | "
+              f"{mean_reward:>10.4f} | {mineclip_str} | {weight_str} | {ratio_str} | {similarity_str} | {loss_str:>10s}")
     
     def _on_training_end(self):
         """训练结束时调用"""
-        print("-" * 80)
+        print("-" * 130)
         print("✓ 训练完成")
         
         elapsed_time = time.time() - self.start_time

@@ -49,7 +49,10 @@ def _detect_device(device_arg):
 
 
 def create_harvest_log_env(use_mineclip=False, mineclip_model_path=None, 
-                          mineclip_variant="attn", image_size=(160, 256)):
+                          mineclip_variant="attn", image_size=(160, 256),
+                          sparse_weight=10.0, mineclip_weight=10.0,
+                          use_dynamic_weight=True, weight_decay_steps=50000,
+                          min_weight=0.1):
     """
     创建采集木头任务环境
     
@@ -58,12 +61,25 @@ def create_harvest_log_env(use_mineclip=False, mineclip_model_path=None,
         mineclip_model_path: MineCLIP模型权重路径
         mineclip_variant: MineCLIP变体 ("attn" 或 "avg")
         image_size: 图像尺寸
+        sparse_weight: 稀疏奖励权重
+        mineclip_weight: MineCLIP奖励初始权重
+        use_dynamic_weight: 是否使用动态权重调整（课程学习）
+        weight_decay_steps: 权重衰减步数
+        min_weight: MineCLIP权重最小值
         
     Returns:
         MineDojo环境
+        
+    Note:
+        无头模式通过JAVA_OPTS环境变量在外部控制
     """
+    import os
     print(f"创建环境: harvest_1_log (获得1个原木)")
     print(f"  图像尺寸: {image_size}")
+    # 显示无头模式状态（从环境变量读取）
+    java_opts = os.environ.get('JAVA_OPTS', '')
+    headless_enabled = 'headless=true' in java_opts
+    print(f"  无头模式: {'启用' if headless_enabled else '禁用'}")
     print(f"  MineCLIP: {'启用 (' + mineclip_variant + ')' if use_mineclip else '禁用'}")
     
     # 使用 env_wrappers 创建基础环境
@@ -81,8 +97,11 @@ def create_harvest_log_env(use_mineclip=False, mineclip_model_path=None,
             task_prompt="chop down a tree and collect one wood log",
             model_path=mineclip_model_path,
             variant=mineclip_variant,
-            sparse_weight=10.0,
-            mineclip_weight=0.1,
+            sparse_weight=sparse_weight,
+            mineclip_weight=mineclip_weight,
+            use_dynamic_weight=use_dynamic_weight,
+            weight_decay_steps=weight_decay_steps,
+            min_weight=min_weight,
             device='auto'
         )
     
@@ -101,10 +120,20 @@ def train(args):
     print(f"配置:")
     print(f"  总步数: {args.total_timesteps:,}")
     print(f"  设备: {device}")
+    # 显示无头模式（从JAVA_OPTS环境变量读取）
+    java_opts = os.environ.get('JAVA_OPTS', '')
+    headless_enabled = 'headless=true' in java_opts
+    print(f"  无头模式: {'启用 (JAVA_OPTS)' if headless_enabled else '禁用'}")
     print(f"  MineCLIP: {'启用' if args.use_mineclip else '禁用'}")
     if args.use_mineclip:
         print(f"  MineCLIP模型: {args.mineclip_model}")
         print(f"  MineCLIP变体: {args.mineclip_variant}")
+        print(f"  稀疏权重: {args.sparse_weight}")
+        print(f"  MineCLIP初始权重: {args.mineclip_weight}")
+        print(f"  动态权重: {'启用' if args.use_dynamic_weight else '禁用'}")
+        if args.use_dynamic_weight:
+            print(f"    衰减步数: {args.weight_decay_steps:,}")
+            print(f"    最小权重: {args.min_weight}")
     print(f"  学习率: {args.learning_rate}")
     print(f"  图像尺寸: {args.image_size}")
     print("=" * 70)
@@ -121,7 +150,12 @@ def train(args):
         use_mineclip=args.use_mineclip,
         mineclip_model_path=args.mineclip_model if args.use_mineclip else None,
         mineclip_variant=args.mineclip_variant,
-        image_size=args.image_size
+        image_size=args.image_size,
+        sparse_weight=args.sparse_weight,
+        mineclip_weight=args.mineclip_weight,
+        use_dynamic_weight=args.use_dynamic_weight,
+        weight_decay_steps=args.weight_decay_steps,
+        min_weight=args.min_weight
     )
     env = DummyVecEnv([lambda: env_instance])
     print("  ✓ 环境创建成功")
@@ -218,10 +252,23 @@ def main():
     parser.add_argument('--mineclip-variant', type=str, default='attn',
                        choices=['attn', 'avg'],
                        help='MineCLIP变体')
+    parser.add_argument('--sparse-weight', type=float, default=10.0,
+                       help='稀疏奖励权重')
+    parser.add_argument('--mineclip-weight', type=float, default=10.0,
+                       help='MineCLIP奖励初始权重（课程学习起始值，建议与sparse-weight相同或更大）')
+    parser.add_argument('--use-dynamic-weight', action='store_true', default=True,
+                       help='启用动态权重调整（课程学习）')
+    parser.add_argument('--no-dynamic-weight', dest='use_dynamic_weight', action='store_false',
+                       help='禁用动态权重调整')
+    parser.add_argument('--weight-decay-steps', type=int, default=50000,
+                       help='权重从初始值衰减到最小值所需步数')
+    parser.add_argument('--min-weight', type=float, default=0.1,
+                       help='MineCLIP权重最小值（建议为初始权重的1%-10%）')
     
     # 环境参数
     parser.add_argument('--image-size', type=int, nargs=2, default=[160, 256],
                        help='图像尺寸 (height width)')
+    # 注意：无头模式通过Shell脚本的JAVA_OPTS环境变量控制，不在此处设置
     
     # 保存参数
     parser.add_argument('--save-freq', type=int, default=10000,

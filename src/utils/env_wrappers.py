@@ -207,7 +207,8 @@ def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,
         gym.Env: 包装后的环境
         
     Note:
-        MineDojo使用MultiDiscrete(8)动作空间，直接由RL算法处理
+        - MineDojo使用MultiDiscrete(8)动作空间，直接由RL算法处理
+        - 无头模式通过外部JAVA_OPTS环境变量控制（在Shell脚本中设置）
     """
     import minedojo
     

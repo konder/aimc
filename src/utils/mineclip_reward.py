@@ -26,7 +26,10 @@ class MineCLIPRewardWrapper(gym.Wrapper):
                  variant="attn",
                  sparse_weight=10.0, 
                  mineclip_weight=0.1,
-                 device="auto"):
+                 device="auto",
+                 use_dynamic_weight=False,
+                 weight_decay_steps=50000,
+                 min_weight=0.01):
         """
         初始化 MineCLIP 奖励包装器
         
@@ -36,15 +39,25 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             model_path: MineCLIP 模型权重路径（.pth 文件）
             variant: MineCLIP 变体 ("attn" 或 "avg")
             sparse_weight: 稀疏奖励权重
-            mineclip_weight: MineCLIP 密集奖励权重
+            mineclip_weight: MineCLIP 密集奖励初始权重
             device: 运行设备 ("cpu", "cuda", "mps", 或 "auto")
+            use_dynamic_weight: 是否使用动态权重调整（课程学习）
+            weight_decay_steps: 权重衰减到最小值所需的步数
+            min_weight: MineCLIP权重的最小值
         """
         super().__init__(env)
         
         self.task_prompt = task_prompt
         self.sparse_weight = sparse_weight
+        self.initial_mineclip_weight = mineclip_weight
         self.mineclip_weight = mineclip_weight
         self.variant = variant
+        
+        # 动态权重调整参数
+        self.use_dynamic_weight = use_dynamic_weight
+        self.weight_decay_steps = weight_decay_steps
+        self.min_weight = min_weight
+        self.step_count = 0
         
         # 检测设备
         if device == "auto":
@@ -61,7 +74,9 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         print(f"    任务描述: {task_prompt}")
         print(f"    模型变体: {variant}")
         print(f"    稀疏权重: {sparse_weight}")
-        print(f"    MineCLIP权重: {mineclip_weight}")
+        print(f"    MineCLIP权重: {mineclip_weight} (初始值)")
+        if use_dynamic_weight:
+            print(f"    动态权重: 启用 (衰减步数: {weight_decay_steps}, 最小值: {min_weight})")
         print(f"    设备: {self.device}")
         
         # 加载 MineCLIP 模型
@@ -269,6 +284,27 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             print(f"    ⚠️ 相似度计算失败: {e}")
             return 0.0
     
+    def _update_mineclip_weight(self):
+        """
+        根据训练步数动态更新MineCLIP权重（课程学习）
+        
+        策略：使用余弦衰减，从初始权重逐渐衰减到最小权重
+        - 早期：高权重，agent依赖MineCLIP引导
+        - 后期：低权重，agent更多依赖稀疏奖励和自身策略
+        """
+        if not self.use_dynamic_weight:
+            return
+        
+        # 计算衰减进度 [0, 1]
+        progress = min(self.step_count / self.weight_decay_steps, 1.0)
+        
+        # 余弦衰减：从1.0平滑下降到0.0
+        decay_factor = 0.5 * (1.0 + np.cos(np.pi * progress))
+        
+        # 计算当前权重
+        weight_range = self.initial_mineclip_weight - self.min_weight
+        self.mineclip_weight = self.min_weight + weight_range * decay_factor
+    
     def reset(self, **kwargs):
         """重置环境"""
         # MineDojo 的 reset 不接受参数
@@ -297,7 +333,13 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         """
         obs, sparse_reward, done, info = self.env.step(action)
         
+        # 更新步数计数器
+        self.step_count += 1
+        
         if self.mineclip_available:
+            # 更新MineCLIP权重（如果启用动态调整）
+            self._update_mineclip_weight()
+            
             # 计算当前相似度
             current_similarity = self._compute_similarity(obs)
             
@@ -315,6 +357,8 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             info['sparse_reward'] = sparse_reward
             info['mineclip_reward'] = mineclip_reward
             info['mineclip_similarity'] = current_similarity
+            info['mineclip_weight'] = self.mineclip_weight  # 记录当前权重
+            info['sparse_weight'] = self.sparse_weight  # 记录稀疏奖励权重
             info['total_reward'] = total_reward
         else:
             # MineCLIP 不可用，只使用稀疏奖励
