@@ -54,3 +54,7 @@ minecraft_data/
 # Tensorboard
 events.out.tfevents.*
 
+
+# MineCLIP 预训练权重（太大，不上传到 git）
+data/*.pth
+data/mineclip/*.pth
