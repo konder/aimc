@@ -36,6 +36,7 @@ except ImportError:
     sys.exit(1)
 
 from src.utils.realtime_logger import RealtimeLoggerCallback
+from src.utils.env_wrappers import make_minedojo_env
 
 
 def create_harvest_log_env(use_mineclip=False, image_size=(160, 256)):
@@ -53,10 +54,12 @@ def create_harvest_log_env(use_mineclip=False, image_size=(160, 256)):
     print(f"  图像尺寸: {image_size}")
     print(f"  MineCLIP: {'启用' if use_mineclip else '禁用'}")
     
-    # 创建MineDojo内置任务
-    env = minedojo.make(
-        task_id="harvest_1_log",  # MineDojo内置的采集木头任务
+    # 使用 env_wrappers 创建环境（处理观察空间嵌套问题）
+    env = make_minedojo_env(
+        task_id="harvest_1_log",
         image_size=image_size,
+        use_frame_stack=False,  # MVP版本不使用帧堆叠
+        use_discrete_actions=False  # 使用原始MultiDiscrete空间
     )
     
     # 如果启用MineCLIP，包装环境
