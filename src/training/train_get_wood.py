@@ -14,8 +14,8 @@
 import os
 import sys
 import argparse
-import gym
 from datetime import datetime
+import gym  # 必需：MineCLIPRewardWrapper 继承 gym.Wrapper
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
