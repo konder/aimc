@@ -129,6 +129,12 @@ def train(args):
     
     # 创建模型
     print("[2/4] 创建PPO模型...")
+    
+    # 重要：normalize_images=False 因为观察已经归一化到 [0, 1]
+    policy_kwargs = dict(
+        normalize_images=False
+    )
+    
     model = PPO(
         policy="CnnPolicy",
         env=env,
@@ -139,7 +145,8 @@ def train(args):
         gamma=0.99,
         device=device,
         verbose=1,
-        tensorboard_log=args.tensorboard_dir
+        tensorboard_log=args.tensorboard_dir,
+        policy_kwargs=policy_kwargs
     )
     
     total_params = sum(p.numel() for p in model.policy.parameters())

@@ -91,15 +91,51 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             # 导入 MineCLIP
             from mineclip import MineCLIP
             
+            # MineCLIP 配置（attn 和 avg 的区别在 pool_type）
+            configs = {
+                "attn": {
+                    "arch": "vit_base_p16_fz.v2.t2",
+                    "pool_type": "attn.d2.nh8.glusw",
+                    "resolution": (160, 256),
+                    "image_feature_dim": 512,
+                    "mlp_adapter_spec": "v0-2.t0",
+                    "hidden_dim": 512
+                },
+                "avg": {
+                    "arch": "vit_base_p16_fz.v2.t2",
+                    "pool_type": "avg",
+                    "resolution": (160, 256),
+                    "image_feature_dim": 512,
+                    "mlp_adapter_spec": "v0-2.t0",
+                    "hidden_dim": 512
+                }
+            }
+            
+            if self.variant not in configs:
+                print(f"    ✗ 未知的 variant: {self.variant}")
+                return False
+            
             # 创建模型
             print(f"    正在加载 MineCLIP {self.variant} 模型...")
-            self.model = MineCLIP(variant=self.variant).to(self.device)
+            config = configs[self.variant]
+            self.model = MineCLIP(**config).to(self.device)
             
             # 加载预训练权重
             if model_path and os.path.exists(model_path):
                 print(f"    从 {model_path} 加载权重...")
                 checkpoint = torch.load(model_path, map_location=self.device)
-                self.model.load_state_dict(checkpoint)
+                
+                # checkpoint 可能是字典或直接是 state_dict
+                if isinstance(checkpoint, dict):
+                    if 'state_dict' in checkpoint:
+                        self.model.load_state_dict(checkpoint['state_dict'])
+                    elif 'model' in checkpoint:
+                        self.model.load_state_dict(checkpoint['model'])
+                    else:
+                        self.model.load_state_dict(checkpoint)
+                else:
+                    self.model.load_state_dict(checkpoint)
+                
                 print(f"    ✓ 权重加载成功")
             else:
                 print(f"    ⚠️ 未指定模型路径，使用随机初始化（性能会很差）")
