@@ -10,13 +10,17 @@ if [ "$CURRENT_ARCH" = "arm64" ]; then
     echo "切换到x86_64架构..."
     echo ""
     # 重新在x86模式下执行此脚本
-    exec arch -x86_64 /bin/bash "$0" "$@"
+    exec arch -x86_64 /bin/zsh "$0" "$@"
 fi
 
 # 现在我们在x86模式下，设置JAVA_HOME
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-8.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
 #export JAVA_OPTS="-Djava.awt.headless=true"
+
+# 设置 locale 环境变量，解决 Python subprocess 的编码问题
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
 
 echo "=========================================="
 echo "MineDojo x86 环境"
@@ -42,6 +46,10 @@ conda activate minedojo-x86 2>/dev/null || {
 # 确保conda激活后JAVA_HOME和PATH依然正确
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-8.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
+
+# 再次确保 locale 设置正确
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
 
 # 如果有参数，执行传入的命令
 if [ $# -eq 0 ]; then

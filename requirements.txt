@@ -16,6 +16,9 @@ matplotlib>=3.5.0
 tensorboard>=2.9.0
 pyyaml>=6.0
 
+# 性能监控
+psutil>=5.9.0
+
 # 可选：高级日志工具
 # wandb
 
