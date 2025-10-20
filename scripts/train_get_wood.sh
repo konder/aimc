@@ -16,51 +16,66 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # 激活 conda 环境
-if command -v conda &> /dev/null; then
-    # 检测 conda 是否已初始化
-    if declare -f conda &> /dev/null; then
-        # conda 函数存在，可以直接激活
-        if [[ "$CONDA_DEFAULT_ENV" != "minedojo" ]]; then
-            echo "激活 minedojo 环境..."
-            conda activate minedojo
-        else
-            echo "已在 minedojo 环境中"
-        fi
+# 支持 minedojo 和 minedojo-x86 环境
+if [[ -n "$CONDA_DEFAULT_ENV" ]]; then
+    # 已经在 conda 环境中
+    if [[ "$CONDA_DEFAULT_ENV" == "minedojo"* ]]; then
+        echo -e "${GREEN}✓ 使用环境: $CONDA_DEFAULT_ENV${NC}"
     else
-        # conda 未初始化，尝试初始化
-        echo "正在初始化 conda..."
-        
-        # 尝试找到 conda.sh
-        CONDA_BASE=$(conda info --base 2>/dev/null)
-        if [[ -n "$CONDA_BASE" ]] && [[ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]]; then
-            source "$CONDA_BASE/etc/profile.d/conda.sh"
-        elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
-            source "$HOME/miniconda3/etc/profile.d/conda.sh"
-        elif [[ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]]; then
-            source "$HOME/anaconda3/etc/profile.d/conda.sh"
-        elif [[ -f "/opt/anaconda3/etc/profile.d/conda.sh" ]]; then
-            source "/opt/anaconda3/etc/profile.d/conda.sh"
-        elif [[ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]]; then
-            source "/opt/miniconda3/etc/profile.d/conda.sh"
-        elif [[ -f "/usr/local/Caskroom/miniforge/base/etc/profile.d/conda.sh" ]]; then
-            source "/usr/local/Caskroom/miniforge/base/etc/profile.d/conda.sh"
-        else
-            echo -e "${YELLOW}⚠️  无法找到 conda.sh，请手动激活环境：${NC}"
-            echo -e "${YELLOW}   source ~/miniconda3/etc/profile.d/conda.sh${NC}"
-            echo -e "${YELLOW}   conda activate minedojo${NC}"
-            echo -e "${YELLOW}   然后重新运行此脚本${NC}"
-            echo ""
-        fi
-        
-        # 再次尝试激活
-        if declare -f conda &> /dev/null; then
-            conda activate minedojo
-            echo "✓ minedojo 环境已激活"
-        fi
+        echo -e "${YELLOW}⚠️  当前环境: $CONDA_DEFAULT_ENV${NC}"
+        echo -e "${YELLOW}   推荐使用: minedojo 或 minedojo-x86${NC}"
+        echo -e "${YELLOW}   继续使用当前环境...${NC}"
     fi
 else
-    echo -e "${RED}✗ conda 未安装${NC}"
-    exit 1
+    # 未在 conda 环境中，尝试激活
+    if command -v conda &> /dev/null; then
+        # 检测 conda 是否已初始化
+        if declare -f conda &> /dev/null; then
+            echo "激活 minedojo 环境..."
+            conda activate minedojo 2>/dev/null || conda activate minedojo-x86 2>/dev/null || {
+                echo -e "${RED}✗ 无法激活 minedojo 或 minedojo-x86 环境${NC}"
+                echo -e "${YELLOW}请先运行: conda activate minedojo${NC}"
+                exit 1
+            }
+        else
+            # conda 未初始化，尝试初始化
+            echo "正在初始化 conda..."
+            
+            # 尝试找到 conda.sh
+            CONDA_BASE=$(conda info --base 2>/dev/null)
+            if [[ -n "$CONDA_BASE" ]] && [[ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]]; then
+                source "$CONDA_BASE/etc/profile.d/conda.sh"
+            elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
+                source "$HOME/miniconda3/etc/profile.d/conda.sh"
+            elif [[ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]]; then
+                source "$HOME/anaconda3/etc/profile.d/conda.sh"
+            elif [[ -f "/opt/anaconda3/etc/profile.d/conda.sh" ]]; then
+                source "/opt/anaconda3/etc/profile.d/conda.sh"
+            elif [[ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]]; then
+                source "/opt/miniconda3/etc/profile.d/conda.sh"
+            elif [[ -f "/usr/local/Caskroom/miniforge/base/etc/profile.d/conda.sh" ]]; then
+                source "/usr/local/Caskroom/miniforge/base/etc/profile.d/conda.sh"
+            else
+                echo -e "${YELLOW}⚠️  无法找到 conda.sh，请手动激活环境：${NC}"
+                echo -e "${YELLOW}   source ~/miniconda3/etc/profile.d/conda.sh${NC}"
+                echo -e "${YELLOW}   conda activate minedojo${NC}"
+                echo -e "${YELLOW}   然后重新运行此脚本${NC}"
+                exit 1
+            fi
+            
+            # 再次尝试激活
+            if declare -f conda &> /dev/null; then
+                conda activate minedojo 2>/dev/null || conda activate minedojo-x86 2>/dev/null || {
+                    echo -e "${RED}✗ 无法激活环境${NC}"
+                    exit 1
+                }
+                echo "✓ minedojo 环境已激活"
+            fi
+        fi
+    else
+        echo -e "${RED}✗ conda 未安装${NC}"
+        exit 1
+    fi
 fi
 
 # 设置Java无头模式（性能优化）
