@@ -49,7 +49,8 @@ class MinedojoWrapper(gym.Wrapper):
         Returns:
             np.ndarray: 处理后的RGB图像
         """
-        obs_dict = self.env.reset(**kwargs)
+        # MineDojo 的 reset 不接受参数
+        obs_dict = self.env.reset()
         return self._process_obs(obs_dict)
     
     def step(self, action):
@@ -116,7 +117,8 @@ class FrameStack(gym.Wrapper):
     
     def reset(self, **kwargs):
         """重置环境并初始化帧缓存"""
-        obs = self.env.reset(**kwargs)
+        # MineDojo 的 reset 不接受参数
+        obs = self.env.reset()
         # 用初始观察填充所有帧
         for _ in range(self.n_frames):
             self.frames.append(obs)
@@ -185,7 +187,8 @@ class ActionWrapper(gym.Wrapper):
     
     def reset(self, **kwargs):
         """重置环境"""
-        return self.env.reset(**kwargs)
+        # MineDojo 的 reset 不接受参数
+        return self.env.reset()
 
 
 def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,

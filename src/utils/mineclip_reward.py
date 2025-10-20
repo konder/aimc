@@ -271,7 +271,8 @@ class MineCLIPRewardWrapper(gym.Wrapper):
     
     def reset(self, **kwargs):
         """重置环境"""
-        obs = self.env.reset(**kwargs)
+        # MineDojo 的 reset 不接受参数
+        obs = self.env.reset()
         
         if self.mineclip_available:
             # 计算初始相似度
