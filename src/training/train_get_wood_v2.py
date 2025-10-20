@@ -162,8 +162,8 @@ def train(args):
     )
     
     logger_callback = RealtimeLoggerCallback(
-        log_dir=args.log_dir,
-        log_interval=100
+        log_freq=100,
+        verbose=1
     )
     
     callbacks = CallbackList([checkpoint_callback, logger_callback])
@@ -213,7 +213,7 @@ def main():
     # MineCLIP 参数
     parser.add_argument('--use-mineclip', action='store_true',
                        help='启用MineCLIP密集奖励')
-    parser.add_argument('--mineclip-model', type=str, default='data/attn.pth',
+    parser.add_argument('--mineclip-model', type=str, default='data/mineclip/attn.pth',
                        help='MineCLIP模型权重路径')
     parser.add_argument('--mineclip-variant', type=str, default='attn',
                        choices=['attn', 'avg'],

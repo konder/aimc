@@ -126,16 +126,27 @@ class MineCLIPRewardWrapper(gym.Wrapper):
                 checkpoint = torch.load(model_path, map_location=self.device)
                 
                 # checkpoint 可能是字典或直接是 state_dict
+                state_dict = None
                 if isinstance(checkpoint, dict):
                     if 'state_dict' in checkpoint:
-                        self.model.load_state_dict(checkpoint['state_dict'])
+                        state_dict = checkpoint['state_dict']
                     elif 'model' in checkpoint:
-                        self.model.load_state_dict(checkpoint['model'])
+                        state_dict = checkpoint['model']
                     else:
-                        self.model.load_state_dict(checkpoint)
+                        state_dict = checkpoint
                 else:
-                    self.model.load_state_dict(checkpoint)
+                    state_dict = checkpoint
                 
+                # 处理键名：去掉 'model.' 前缀（如果存在）
+                new_state_dict = {}
+                for key, value in state_dict.items():
+                    if key.startswith('model.'):
+                        new_key = key[6:]  # 去掉 'model.' 前缀
+                        new_state_dict[new_key] = value
+                    else:
+                        new_state_dict[key] = value
+                
+                self.model.load_state_dict(new_state_dict)
                 print(f"    ✓ 权重加载成功")
             else:
                 print(f"    ⚠️ 未指定模型路径，使用随机初始化（性能会很差）")

@@ -1,5 +1,3 @@
-logs
-
 # Python
 __pycache__/
 *.py[cod]
@@ -46,6 +44,7 @@ models/
 outputs/
 runs/
 wandb/
+data/
 
 # MineDojo specific
 .minedojo/
@@ -53,7 +52,3 @@ minecraft_data/
 
 # Tensorboard
 events.out.tfevents.*
-
-
-# MineCLIP 预训练权重（太大，不上传到 git）
-data/
