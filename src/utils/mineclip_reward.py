@@ -153,6 +153,11 @@ class MineCLIPRewardWrapper(gym.Wrapper):
                 print(f"    请下载预训练模型: https://github.com/MineDojo/MineCLIP")
             
             self.model.eval()
+            
+            # 加载 tokenizer
+            from transformers import CLIPTokenizer
+            self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch16")
+            
             return True
             
         except ImportError as e:
@@ -174,8 +179,20 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             torch.Tensor: 文本特征向量
         """
         with torch.no_grad():
-            # MineCLIP 的文本编码
-            text_features = self.model.encode_text([text])
+            # Tokenize 文本（固定长度 77）
+            tokens = self.tokenizer(
+                text,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=77,
+                truncation=True
+            )
+            
+            # 移到设备
+            token_ids = tokens['input_ids'].to(self.device)
+            
+            # MineCLIP 编码文本
+            text_features = self.model.encode_text(token_ids)
             return text_features
     
     def _encode_image(self, image):
@@ -204,8 +221,8 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             # 移到设备
             image = image.to(self.device)
             
-            # MineCLIP 编码
-            image_features = self.model.encode_image(image)
+            # MineCLIP 编码图像（使用 forward_image_features）
+            image_features = self.model.forward_image_features(image)
             return image_features
     
     def _compute_similarity(self, image):

@@ -657,11 +657,7 @@ python src/training/train_get_wood.py --use-mineclip --n-envs 4
 3. 创建 x86 Python 环境：`conda create -n minedojo-x86 python=3.9`
 4. 编译 Minecraft（需要修复多个配置）
 
-### Q4: MineCLIP 需要联网吗？
-
-**A**: 仅首次使用时需要下载模型（~250-350MB），之后完全离线运行。模型保存在 `~/.minedojo/models/`。
-
-### Q5: 如何查看训练进度？
+### Q4: 如何查看训练进度？
 
 **A**: 
 ```bash
@@ -673,6 +669,12 @@ tensorboard --logdir logs/tensorboard
 # - rollout/ep_rew_mean（平均奖励）
 # - train/policy_loss（策略损失）
 # - rollout/success_rate（成功率，如果有）
+```
+
+### Q5: 对我有用的网络问题
+```bash
+export http_proxy=socks5h://127.0.0.1:13659
+export https_proxy=socks5h://127.0.0.1:13659
 ```
 
 ### Q6: 模型不学习怎么办？
@@ -736,70 +738,6 @@ python -c "import minedojo; print(minedojo.tasks.ALL_PROGRAMMATIC_TASK_IDS[:20])
 - ❓ 详细 FAQ：`docs/FAQ.md`
 - 🔧 诊断工具：`python scripts/validate_install.py`
 - 📊 任务参考：`docs/technical/MINEDOJO_TASKS_REFERENCE.md`
-
----
-
-## 📊 预期训练时间线
-
-### 使用 MineCLIP（推荐）
-
-| 步数 | 时间 | 里程碑 |
-|------|------|--------|
-| 10K | 5-10分钟 | 测试完成，验证环境 |
-| 20-50K | 20-40分钟 | 首次成功获得木头 |
-| 100K | 1-2小时 | 成功率约 50% |
-| 200K | 2-4小时 | 成功率约 80%，可以使用 |
-| 500K | 5-10小时 | 成功率约 90%，性能优秀 |
-
-### 不使用 MineCLIP
-
-| 步数 | 时间 | 里程碑 |
-|------|------|--------|
-| 100K | 1-3小时 | 可能还未成功 |
-| 200K | 3-6小时 | 首次成功 |
-| 500K | 8-16小时 | 成功率约 60% |
-| 1M+ | 16+小时 | 成功率约 70-80% |
-
-**结论**：MineCLIP 加速约 **3-5 倍**！
-
----
-
-## 🎉 成功标志
-
-当你看到以下情况，说明训练成功：
-
-1. ✅ **评估成功率 ≥ 80%**
-2. ✅ **平均成功步数 < 500 步**
-3. ✅ **TensorBoard 中 ep_rew_mean 稳定上升**
-4. ✅ **模型能在测试中多次成功获得木头**
-
----
-
-## 🤝 贡献
-
-欢迎贡献代码、文档或提出建议！
-
-### 开发规范
-
-- **Python 代码**: 遵循 PEP 8，小写下划线命名
-- **类名**: 驼峰命名 `class MyAgent`
-- **文档**: 大写下划线命名 `TECHNICAL_GUIDE.md`
-- **Git 提交**: `[类型] 简短描述`（feat/fix/docs/refactor/test/chore）
-
-### 提交流程
-
-```bash
-# 1. Fork 项目
-# 2. 创建分支
-git checkout -b feature/my-feature
-
-# 3. 提交代码
-git add .
-git commit -m "[feat] 添加新功能"
-
-# 4. 推送并创建 Pull Request
-git push origin feature/my-feature
-```
 
 ---
 
