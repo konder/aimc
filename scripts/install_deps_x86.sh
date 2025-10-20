@@ -36,8 +36,14 @@ pip install tensorboard
 
 # 安装其他依赖
 echo ""
-echo "[4/4] 安装其他依赖..."
+echo "[4/5] 安装其他依赖..."
 pip install tqdm pyyaml opencv-python
+
+# 修复 gym 版本兼容性问题
+echo ""
+echo "[5/5] 修复 gym 版本兼容性..."
+# MineDojo 使用 gym 0.21，但需要兼容的 shimmy 版本
+pip install "gym==0.21.0" "shimmy<1.0.0"
 
 echo ""
 echo "========================================"
@@ -51,7 +57,19 @@ python -c "import tensorboard; print('✓ TensorBoard')"
 python -c "import minedojo; print('✓ MineDojo')"
 
 echo ""
-echo "现在可以运行训练了："
+echo "========================================"
+echo "💡 运行训练示例："
+echo "========================================"
+echo ""
+echo "快速测试（10K步，不使用MineCLIP）："
+echo "  scripts/train_get_wood.sh test"
+echo ""
+echo "快速测试（10K步，使用MineCLIP，推荐）："
 echo "  scripts/train_get_wood.sh test --mineclip"
+echo ""
+echo "标准训练（200K步，使用MineCLIP）："
+echo "  scripts/train_get_wood.sh standard --mineclip"
+echo ""
+echo "⚠️  注意：一定要加 --mineclip 参数才能启用MineCLIP加速！"
 echo ""
 
