@@ -55,7 +55,6 @@ aimc/
 │
 ├── scripts/                      # 脚本
 │   ├── train_get_wood.sh         # 获得木头训练启动脚本
-│   ├── train_harvest.sh          # 采集任务训练脚本
 │   ├── tensorboard_manager.sh    # TensorBoard 管理脚本
 │   ├── run_minedojo_x86.sh       # x86/Rosetta2 运行脚本
 │   └── validate_install.py       # 安装验证脚本
@@ -65,20 +64,8 @@ aimc/
 │
 ├── docs/                         # 文档
 │   ├── guides/                   # 指南文档
-│   │   ├── GET_WOOD_TRAINING_GUIDE.md           # 获得木头训练指南
-│   │   ├── QUICK_START_ACCELERATED_TRAINING.md  # 加速训练快速开始
-│   │   ├── TRAINING_ACCELERATION_GUIDE.md       # 加速训练完整指南
-│   │   ├── MINECLIP_EXPLAINED.md                # MineCLIP 详解
-│   │   ├── MINERL_DATASET_GUIDE.md              # MineRL 数据集指南
-│   │   ├── ADVANCED_TRAINING_SOLUTIONS.md       # 高级训练解决方案
-│   │   ├── TASKS_QUICK_START.md                 # 任务快速开始
-│   │   └── TENSORBOARD_中文指南.md              # TensorBoard 中文指南
 │   ├── summaries/                # 总结文档
-│   │   ├── TRAINING_HARVEST_PAPER.md            # harvest_paper 训练总结
-│   │   └── ACCELERATED_TRAINING_SUMMARY.md      # 加速训练总结
 │   ├── technical/                # 技术文档
-│   │   └── MINEDOJO_TASKS_REFERENCE.md          # MineDojo 任务参考
-│   └── FAQ.md                    # 常见问题解答
 │
 ├── checkpoints/                  # 模型检查点
 │   └── harvest_paper/            # harvest_paper 任务检查点
@@ -88,7 +75,6 @@ aimc/
 │   ├── tensorboard/              # TensorBoard 日志
 │   └── watchdog/                 # 监控日志
 │
-├── GET_STARTED.md                # 快速开始指南
 ├── README.md                     # 项目说明（本文件）
 └── requirements.txt              # Python 依赖
 ```
