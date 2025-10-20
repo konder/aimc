@@ -159,8 +159,6 @@ done
 # 设置Java无头模式
 if [[ "$HEADLESS" == "true" ]]; then
     export JAVA_OPTS="-Djava.awt.headless=true"
-else
-    export JAVA_OPTS="-Djava.awt.headless=false"
 fi
 
 echo -e "${BLUE}========================================${NC}"

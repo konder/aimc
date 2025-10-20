@@ -24,12 +24,12 @@ class RealtimeLoggerCallback(BaseCallback):
         self.log_freq = log_freq
         self.episode_rewards = []  # 完整episode的奖励列表
         self.episode_lengths = []  # 完整episode的长度列表
-        self.step_rewards = []  # 每一步的总奖励
-        self.step_mineclip_rewards = []  # 每一步的MineCLIP奖励（未加权）
-        self.step_sparse_rewards = []  # 每一步的稀疏奖励
-        self.step_similarities = []  # 每一步的相似度
-        self.step_mineclip_weights = []  # 每一步的MineCLIP权重
-        self.sparse_weight = None  # 稀疏奖励权重（从info中获取）
+        # 当前步的值（不再累积）
+        self.current_reward = 0.0
+        self.current_mineclip_reward = 0.0
+        self.current_similarity = 0.0
+        self.current_mineclip_weight = 0.0
+        self.sparse_weight = None
         self.current_episode = 0  # 当前回合数
         self.start_time = None
         self.last_log_step = 0
@@ -50,43 +50,31 @@ class RealtimeLoggerCallback(BaseCallback):
         Returns:
             bool: 如果返回 False，训练将停止
         """
-        # 记录每一步的奖励和MineCLIP信息
+        # 只记录当前步的值（不累积）
         if 'rewards' in self.locals:
             rewards = self.locals['rewards']
             if isinstance(rewards, np.ndarray):
-                # 多环境情况，记录所有环境的奖励
-                self.step_rewards.extend(rewards.tolist())
+                self.current_reward = float(rewards[0])  # 取第一个环境
             else:
-                self.step_rewards.append(float(rewards))
+                self.current_reward = float(rewards)
         
-        # 从info中提取MineCLIP详细信息
+        # 从info中提取MineCLIP详细信息（只记录当前步）
         if 'infos' in self.locals:
             infos = self.locals['infos']
             # 处理多环境情况
-            if isinstance(infos, list):
-                for info in infos:
-                    if isinstance(info, dict):
-                        if 'mineclip_reward' in info:
-                            self.step_mineclip_rewards.append(float(info['mineclip_reward']))
-                        if 'sparse_reward' in info:
-                            self.step_sparse_rewards.append(float(info['sparse_reward']))
-                        if 'mineclip_similarity' in info:
-                            self.step_similarities.append(float(info['mineclip_similarity']))
-                        if 'mineclip_weight' in info:
-                            self.step_mineclip_weights.append(float(info['mineclip_weight']))
-                        if 'sparse_weight' in info and self.sparse_weight is None:
-                            self.sparse_weight = float(info['sparse_weight'])
+            if isinstance(infos, list) and len(infos) > 0:
+                info = infos[0]  # 取第一个环境
             elif isinstance(infos, dict):
-                if 'mineclip_reward' in infos:
-                    self.step_mineclip_rewards.append(float(infos['mineclip_reward']))
-                if 'sparse_reward' in infos:
-                    self.step_sparse_rewards.append(float(infos['sparse_reward']))
-                if 'mineclip_similarity' in infos:
-                    self.step_similarities.append(float(infos['mineclip_similarity']))
-                if 'mineclip_weight' in infos:
-                    self.step_mineclip_weights.append(float(infos['mineclip_weight']))
-                if 'sparse_weight' in infos and self.sparse_weight is None:
-                    self.sparse_weight = float(infos['sparse_weight'])
+                info = infos
+            else:
+                info = {}
+            
+            if isinstance(info, dict):
+                self.current_mineclip_reward = float(info.get('mineclip_reward', 0.0))
+                self.current_similarity = float(info.get('mineclip_similarity', 0.0))
+                self.current_mineclip_weight = float(info.get('mineclip_weight', 0.0))
+                if 'sparse_weight' in info and self.sparse_weight is None:
+                    self.sparse_weight = float(info['sparse_weight'])
         
         # 检查是否需要打印日志
         if self.num_timesteps - self.last_log_step >= self.log_freq:
@@ -118,35 +106,11 @@ class RealtimeLoggerCallback(BaseCallback):
         seconds = int(elapsed_time % 60)
         time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
-        # 计算最近100步的平均奖励
-        if len(self.step_rewards) >= 100:
-            mean_reward = np.mean(self.step_rewards[-100:])  # 最近100步
-        elif len(self.step_rewards) > 0:
-            mean_reward = np.mean(self.step_rewards)  # 不足100步时使用所有步数
-        else:
-            mean_reward = 0.0
-        
-        # 计算最近100步的MineCLIP平均奖励（未加权）
-        if len(self.step_mineclip_rewards) >= 100:
-            mean_mineclip = np.mean(self.step_mineclip_rewards[-100:])
-        elif len(self.step_mineclip_rewards) > 0:
-            mean_mineclip = np.mean(self.step_mineclip_rewards)
-        else:
-            mean_mineclip = 0.0
-        
-        # 计算最近100步的平均相似度
-        if len(self.step_similarities) >= 100:
-            mean_similarity = np.mean(self.step_similarities[-100:])
-        elif len(self.step_similarities) > 0:
-            mean_similarity = np.mean(self.step_similarities)
-        else:
-            mean_similarity = 0.0
-        
-        # 获取最新的MineCLIP权重
-        if len(self.step_mineclip_weights) > 0:
-            current_weight = self.step_mineclip_weights[-1]  # 最新权重
-        else:
-            current_weight = 0.0
+        # 使用当前步的值（不再计算平均）
+        mean_reward = self.current_reward
+        mean_mineclip = self.current_mineclip_reward
+        mean_similarity = self.current_similarity
+        current_weight = self.current_mineclip_weight
         
         # 计算权重比 (sparse_weight / mineclip_weight)
         if self.sparse_weight is not None and current_weight > 0:

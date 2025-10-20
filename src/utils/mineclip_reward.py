@@ -228,7 +228,7 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             image: 图像（numpy array, shape: (C, H, W), 范围 [0, 1]）
             
         Returns:
-            torch.Tensor: 图像特征向量
+            image_features: 图像特征向量
         """
         with torch.no_grad():
             # 转换为 tensor 并添加 batch 维度
@@ -246,8 +246,14 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             # 移到设备
             image = image.to(self.device)
             
+            # CLIP标准归一化（ImageNet均值和标准差）
+            mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 3, 1, 1)
+            std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 3, 1, 1)
+            image = (image - mean) / std
+            
             # MineCLIP 编码图像（使用 forward_image_features）
             image_features = self.model.forward_image_features(image)
+            
             return image_features
     
     def _compute_similarity(self, image):
@@ -258,7 +264,7 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             image: 当前观察图像
             
         Returns:
-            float: 相似度分数（0-1之间）
+            similarity: 相似度分数（0-1之间）
         """
         if not self.mineclip_available:
             return 0.0
@@ -345,13 +351,15 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             
             # MineCLIP 密集奖励 = 进步量
             mineclip_reward = current_similarity - self.previous_similarity
-            self.previous_similarity = current_similarity
             
             # 组合奖励
             total_reward = (
                 sparse_reward * self.sparse_weight + 
                 mineclip_reward * self.mineclip_weight
             )
+            
+            # 更新上一步相似度
+            self.previous_similarity = current_similarity
             
             # 记录详细信息
             info['sparse_reward'] = sparse_reward

@@ -52,7 +52,7 @@ def create_harvest_log_env(use_mineclip=False, mineclip_model_path=None,
                           mineclip_variant="attn", image_size=(160, 256),
                           sparse_weight=10.0, mineclip_weight=10.0,
                           use_dynamic_weight=True, weight_decay_steps=50000,
-                          min_weight=0.1):
+                          min_weight=0.1, device='auto'):
     """
     创建采集木头任务环境
     
@@ -66,6 +66,7 @@ def create_harvest_log_env(use_mineclip=False, mineclip_model_path=None,
         use_dynamic_weight: 是否使用动态权重调整（课程学习）
         weight_decay_steps: 权重衰减步数
         min_weight: MineCLIP权重最小值
+        device: 运行设备 ('auto', 'cuda', 'mps', 'cpu')
         
     Returns:
         MineDojo环境
@@ -102,7 +103,7 @@ def create_harvest_log_env(use_mineclip=False, mineclip_model_path=None,
             use_dynamic_weight=use_dynamic_weight,
             weight_decay_steps=weight_decay_steps,
             min_weight=min_weight,
-            device='auto'
+            device=device
         )
     
     return env
@@ -155,7 +156,8 @@ def train(args):
         mineclip_weight=args.mineclip_weight,
         use_dynamic_weight=args.use_dynamic_weight,
         weight_decay_steps=args.weight_decay_steps,
-        min_weight=args.min_weight
+        min_weight=args.min_weight,
+        device=args.device
     )
     env = DummyVecEnv([lambda: env_instance])
     print("  ✓ 环境创建成功")
