@@ -13,7 +13,10 @@ print()
 # 1. 检查 MineDojo 版本
 try:
     import minedojo
-    print(f"✓ MineDojo 版本: {minedojo.__version__}")
+    version = getattr(minedojo, '__version__', '未知')
+    print(f"✓ MineDojo 已安装")
+    print(f"  版本: {version}")
+    print(f"  位置: {minedojo.__file__}")
 except Exception as e:
     print(f"✗ MineDojo 导入失败: {e}")
     sys.exit(1)
