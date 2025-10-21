@@ -1,0 +1,474 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+录制手动砍树序列（键盘控制）
+用于验证MineCLIP的16帧视频模式效果
+"""
+
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import minedojo
+import numpy as np
+from PIL import Image
+import time
+import cv2
+
+class KeyboardController:
+    """
+    键盘控制器 - MineDojo MultiDiscrete(8) 动作空间
+    """
+    
+    def __init__(self, camera_delta=4):
+        """
+        初始化键盘控制器
+        
+        Args:
+            camera_delta: 相机转动角度增量（默认1，范围1-12）
+                         1 = 约15度，2 = 约30度，4 = 约60度
+        """
+        # 使用字典存储每个动作的状态，而不是按键
+        self.actions = {
+            'forward': False,
+            'back': False,
+            'left': False,
+            'right': False,
+            'jump': False,
+            'pitch_up': False,
+            'pitch_down': False,
+            'yaw_left': False,
+            'yaw_right': False,
+            'attack': False,
+        }
+        self.running = True
+        
+        # 相机转动参数
+        self.camera_delta = camera_delta
+        
+        # 键盘码映射
+        self.key_map = {
+            ord('w'): 'forward',
+            ord('W'): 'forward',
+            ord('s'): 'back',
+            ord('S'): 'back',
+            ord('a'): 'left',
+            ord('A'): 'left',
+            ord('d'): 'right',
+            ord('D'): 'right',
+            32: 'jump',  # Space
+            ord('i'): 'pitch_up',
+            ord('I'): 'pitch_up',
+            ord('k'): 'pitch_down',
+            ord('K'): 'pitch_down',
+            ord('j'): 'yaw_left',
+            ord('J'): 'yaw_left',
+            ord('l'): 'yaw_right',
+            ord('L'): 'yaw_right',
+            ord('f'): 'attack',
+            ord('F'): 'attack',
+        }
+        
+        print("\n" + "=" * 80)
+        print("🎮 键盘控制说明")
+        print("=" * 80)
+        print("\n移动控制:")
+        print("  W - 前进")
+        print("  S - 后退")
+        print("  A - 左移")
+        print("  D - 右移")
+        print("  Space - 跳跃")
+        print("\n相机控制:")
+        print("  I - 向上看")
+        print("  K - 向下看")
+        print("  J - 向左看")
+        print("  L - 向右看")
+        print("\n动作:")
+        print("  F - 攻击/挖掘（砍树）⭐")
+        print("\n系统:")
+        print("  Q - 停止录制并保存")
+        print("  ESC - 紧急退出（不保存）")
+        print("\n" + "=" * 80)
+        print("提示: 点击OpenCV窗口，然后使用键盘控制")
+        print("提示: 按住按键可以持续执行动作")
+        print("=" * 80 + "\n")
+    
+    def update_action(self, key, press=True):
+        """
+        更新动作状态
+        
+        Args:
+            key: 键盘码
+            press: True=按下, False=释放
+        """
+        if key in self.key_map:
+            action_name = self.key_map[key]
+            self.actions[action_name] = press
+    
+    def get_action(self):
+        """
+        根据当前动作状态生成MineDojo动作
+        
+        Returns:
+            action: 8维MultiDiscrete动作
+        """
+        # 初始化为中性动作
+        action = np.array([0, 0, 0, 12, 12, 0, 0, 0], dtype=np.int32)
+        
+        # action[0]: forward/back (0=stay, 1=forward, 2=back)
+        if self.actions['forward']:
+            action[0] = 1
+        elif self.actions['back']:
+            action[0] = 2
+        
+        # action[1]: left/right (0=stay, 1=left, 2=right)
+        if self.actions['left']:
+            action[1] = 1
+        elif self.actions['right']:
+            action[1] = 2
+        
+        # action[2]: jump (0=no, 1=jump, 2=?, 3=sprint+jump)
+        if self.actions['jump']:
+            action[2] = 1
+        
+        # action[3]: pitch (12=center, range 0-24)
+        # 简单模式：按一次就转一次
+        if self.actions['pitch_up']:
+            action[3] = 12 - self.camera_delta  # 向上看
+        elif self.actions['pitch_down']:
+            action[3] = 12 + self.camera_delta  # 向下看
+        else:
+            action[3] = 12  # 中心
+        
+        # action[4]: yaw (12=center, range 0-24)
+        # 简单模式：按一次就转一次
+        if self.actions['yaw_left']:
+            action[4] = 12 - self.camera_delta  # 向左看
+        elif self.actions['yaw_right']:
+            action[4] = 12 + self.camera_delta  # 向右看
+        else:
+            action[4] = 12  # 中心
+        
+        # action[5]: functional (3=攻击，已验证 ✅)
+        if self.actions['attack']:
+            action[5] = 3  # 攻击动作（已确认有效）
+        
+        return action
+
+def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, camera_delta=4, max_rounds=10, start_round=0):
+    """
+    录制砍树过程（手动控制，支持多回合）
+    
+    Args:
+        base_dir: 基础输出目录（会在下面创建round_0, round_1...）
+        max_frames: 每回合最大帧数
+        camera_delta: 相机转动角度增量（1-12，默认4约60度）
+        max_rounds: 最大录制回合数（默认10）
+        start_round: 起始回合编号（默认0，用于断点续录）
+    """
+    # 确保基础目录存在
+    os.makedirs(base_dir, exist_ok=True)
+    
+    # 检查已有的round数量（如果start_round=0，给出提示）
+    if start_round == 0:
+        existing_rounds = [d for d in os.listdir(base_dir) if d.startswith('round_') and os.path.isdir(os.path.join(base_dir, d))]
+        if existing_rounds:
+            print(f"\n⚠️  检测到已有 {len(existing_rounds)} 个回合: {sorted(existing_rounds)}")
+            print(f"提示: 使用 --start-round {len(existing_rounds)} 可以继续录制")
+            response = input(f"\n是否删除所有已有数据并从头开始？(y/N): ")
+            if response.lower() == 'y':
+                import shutil
+                for rd in existing_rounds:
+                    shutil.rmtree(os.path.join(base_dir, rd))
+                print("✓ 已删除所有旧数据")
+            else:
+                print("❌ 取消录制")
+                return
+    
+    print("=" * 80)
+    print("MineCLIP 砍树序列录制工具（多回合录制）")
+    print("=" * 80)
+    print(f"\n基础目录: {base_dir}")
+    print(f"回合范围: round_{start_round} ~ round_{start_round + max_rounds - 1}")
+    print(f"每回合最大帧数: {max_frames}")
+    
+    # 创建环境
+    print("\n[1/3] 创建MineDojo环境...")
+    print("  任务: harvest_1_log_forest (森林中砍树)")
+    
+    env = minedojo.make(
+        task_id="harvest_1_log_forest",
+        image_size=(160, 256),
+        world_seed=None,  # 每次随机种子，增加数据多样性
+        fast_reset=True
+    )
+    print("  ✓ 环境创建成功")
+    print(f"  动作空间: {env.action_space}")
+    
+    # 初始化键盘控制器
+    controller = KeyboardController(camera_delta=camera_delta)
+    print(f"\n⚙️  相机设置: delta={camera_delta} (约{camera_delta*15}度/次)")
+    
+    # 显示窗口
+    window_name = "MineCraft - 多回合录制"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1024, 640)
+    
+    # 全局统计
+    completed_rounds = 0
+    global_continue = True
+    
+    print("\n[2/3] 开始多回合录制...")
+    print("\n" + "=" * 80)
+    print("🎬 多回合录制模式")
+    print("=" * 80)
+    print("  ✅ 完成任务(done=True) → 自动保存当前回合")
+    print("  ❌ 按Q键/ESC → 不保存当前回合，退出程序")
+    print("=" * 80 + "\n")
+    
+    try:
+        # 多回合循环
+        for round_idx in range(start_round, start_round + max_rounds):
+            if not global_continue:
+                break
+                
+            # 重置环境，开始新回合
+            print(f"\n{'='*80}")
+            print(f"🎮 Round {round_idx}")
+            print(f"{'='*80}")
+            
+            print(f"  重置环境中...")
+            obs_dict = env.reset()
+            obs = obs_dict['rgb']  # (C, H, W)
+            
+            # 转换为 (H, W, C) 格式
+            if obs.shape[0] == 3:
+                obs = obs.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+            
+            print(f"  ✓ 环境已重置，新的世界已生成")
+            
+            # 本回合数据
+            frames = []
+            step_count = 0
+            total_reward = 0
+            task_completed = False
+            
+            # 显示初始画面，让用户看到新环境
+            display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
+            display_frame = cv2.resize(display_frame, (1024, 640))
+            cv2.putText(display_frame, f"Round {round_idx} - Ready! Press any key to start", 
+                       (200, 320), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.imshow(window_name, display_frame)
+            cv2.waitKey(1000)  # 等待1秒，让用户看到新环境
+            
+            print(f"  开始录制 round_{round_idx}...")
+            print(f"  目标: 完成任务 (done=True)")
+            print(f"  提示: 按Q/ESC不会保存，只有done=True才会保存\n")
+            
+            # 本回合主循环
+            while step_count < max_frames:
+                # 先处理键盘事件，更新controller.actions
+                keys_pressed = []
+                for _ in range(10):  # 检测多次以捕获更多按键
+                    key = cv2.waitKey(1) & 0xFF
+                    if key != 255:
+                        keys_pressed.append(key)
+                
+                # 处理系统按键
+                if ord('q') in keys_pressed or ord('Q') in keys_pressed:
+                    print(f"\n⏸️  停止所有录制（用户按下Q）")
+                    global_continue = False
+                    break
+                elif 27 in keys_pressed:  # ESC
+                    print(f"\n❌ 紧急退出（用户按下ESC）")
+                    global_continue = False
+                    frames = []
+                    break
+                
+                # 更新动作状态（每帧重置，只保留当前检测到的按键）
+                # 先重置所有动作
+                for action_name in controller.actions:
+                    controller.actions[action_name] = False
+                
+                # 然后设置当前检测到的按键
+                if len(keys_pressed) > 0:
+                    for key in keys_pressed:
+                        controller.update_action(key, press=True)
+                
+                # 然后获取动作
+                action = controller.get_action()
+                
+                # 执行动作
+                obs_dict, reward, done, info = env.step(action)
+                obs = obs_dict['rgb']  # (C, H, W)
+                
+                # 转换为 (H, W, C) 格式
+                if obs.shape[0] == 3:
+                    obs = obs.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+                
+                # 保存帧
+                frames.append(obs.copy())
+                step_count += 1
+                total_reward += reward
+                
+                # 显示当前帧
+                display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
+                display_frame = cv2.resize(display_frame, (1024, 640))
+                
+                # 添加信息overlay
+                info_text = [
+                    f"Round: {round_idx} (目标: {start_round + max_rounds - 1})",
+                    f"Completed: {completed_rounds}",
+                    f"Frame: {step_count}/{max_frames}",
+                    f"Reward: {reward:.3f}",
+                    f"Total: {total_reward:.3f}",
+                    f"Status: {'DONE!' if task_completed else 'Recording...'}",
+                    "",
+                    "Q/ESC=quit (no save) | Done=auto save"
+                ]
+                
+                y_offset = 30
+                for i, text in enumerate(info_text):
+                    color = (0, 255, 0) if task_completed and i == 4 else (255, 255, 255)
+                    cv2.putText(display_frame, text, (10, y_offset + i * 25),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                
+                # 添加动作状态显示
+                active_actions = [name for name, active in controller.actions.items() if active]
+                if active_actions:
+                    action_text = f"Actions: {', '.join(active_actions)}"
+                    cv2.putText(display_frame, action_text, (10, y_offset + 200),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                
+                cv2.imshow(window_name, display_frame)
+                
+                # 检查任务是否完成（通过done信号）
+                if done:
+                    task_completed = True
+                    print(f"\n🎉 round_{round_idx}: 任务完成！已录制 {step_count} 帧")
+                    # 检查是否是因为获得了目标物品
+                    inventory = info.get('delta_inv', {})
+                    if inventory:
+                        print(f"    物品变化: {inventory}")
+                    # 立即跳出循环，准备保存和reset
+                    break
+                
+                # 控制帧率
+                time.sleep(0.05)
+            
+            # 回合结束后保存数据（只有done=True才保存）
+            if task_completed and len(frames) > 0:
+                # 创建round目录
+                round_dir = os.path.join(base_dir, f"round_{round_idx}")
+                os.makedirs(round_dir, exist_ok=True)
+                
+                print(f"\n  💾 保存 round_{round_idx} 数据...")
+                for i, frame in enumerate(frames):
+                    img = Image.fromarray(frame)
+                    filename = f"frame_{i:05d}.png"
+                    filepath = os.path.join(round_dir, filename)
+                    img.save(filepath)
+                
+                # 保存回合元数据
+                metadata_path = os.path.join(round_dir, "metadata.txt")
+                with open(metadata_path, 'w') as f:
+                    f.write(f"Round: {round_idx}\n")
+                    f.write(f"Frames: {len(frames)}\n")
+                    f.write(f"Total Reward: {total_reward:.3f}\n")
+                    f.write(f"Task Completed: True\n")
+                    f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                
+                print(f"  ✓ round_{round_idx} 已保存: {len(frames)} 帧 -> {round_dir}")
+                completed_rounds += 1
+            elif not task_completed:
+                print(f"\n  ⚠️  round_{round_idx} 未完成 (done=False)，不保存")
+                if not global_continue:
+                    print("  用户中断，退出录制")
+                    break
+            else:
+                print(f"\n  ⚠️  round_{round_idx} 没有录制任何帧，跳过")
+    
+    except KeyboardInterrupt:
+        print("\n\n⏸️  录制停止（Ctrl+C）")
+    
+    finally:
+        cv2.destroyAllWindows()
+    
+    # 最终统计
+    print(f"\n\n{'='*80}")
+    print("📊 录制完成统计")
+    print(f"{'='*80}")
+    
+    if completed_rounds == 0:
+        print("\n❌ 没有完成任何回合（done=True的回合数为0）")
+        print("提示: 只有done=True时才会保存回合数据")
+        env.close()
+        return
+    
+    print(f"\n✅ 成功完成回合数: {completed_rounds}")
+    print(f"回合范围: round_{start_round} ~ round_{start_round + completed_rounds - 1}")
+    print(f"\n保存位置: {base_dir}/")
+    
+    # 列出已保存的round
+    saved_rounds = sorted([d for d in os.listdir(base_dir) if d.startswith('round_') and os.path.isdir(os.path.join(base_dir, d))])
+    print(f"\n已保存的回合:")
+    for rd in saved_rounds:
+        rd_path = os.path.join(base_dir, rd)
+        frame_count = len([f for f in os.listdir(rd_path) if f.endswith('.png')])
+        print(f"  {rd}: {frame_count} 帧")
+    
+    # 保存全局元数据
+    summary_path = os.path.join(base_dir, "summary.txt")
+    with open(summary_path, 'w') as f:
+        f.write(f"Total Completed Rounds: {completed_rounds}\n")
+        f.write(f"Round Range: round_{start_round} ~ round_{start_round + completed_rounds - 1}\n")
+        f.write(f"Camera Delta: {camera_delta}\n")
+        f.write(f"Max Frames per Round: {max_frames}\n")
+        f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"\nSaved Rounds:\n")
+        for rd in saved_rounds:
+            rd_path = os.path.join(base_dir, rd)
+            frame_count = len([f for f in os.listdir(rd_path) if f.endswith('.png')])
+            f.write(f"  {rd}: {frame_count} frames\n")
+    
+    print(f"\n✓ 统计信息已保存到: {summary_path}")
+    
+    # 关闭环境
+    env.close()
+    
+    print("\n" + "=" * 80)
+    print("✅ 多回合录制完成！")
+    print("=" * 80)
+    print(f"\n继续录制提示:")
+    print(f"  python tools/record_manual_chopping.py --start-round {start_round + completed_rounds}")
+    
+    print(f"\n🔬 下一步: 运行验证脚本分析这些帧")
+    print(f"  python tools/verify_mineclip_16frames.py --sequence-dir {base_dir}/round_0")
+    print()
+    
+    return base_dir
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="录制砍树序列用于验证MineCLIP（多回合录制）")
+    parser.add_argument('--base-dir', type=str, default='data/expert_demos',
+                       help='基础输出目录（会在下面创建round_0, round_1...，默认: data/expert_demos）')
+    parser.add_argument('--max-frames', type=int, default=1000,
+                       help='每回合最大录制帧数（默认: 1000）')
+    parser.add_argument('--max-rounds', type=int, default=10,
+                       help='最大录制回合数（默认: 10）')
+    parser.add_argument('--start-round', type=int, default=0,
+                       help='起始回合编号（默认: 0，用于断点续录）')
+    parser.add_argument('--camera-delta', type=int, default=4,
+                       help='相机转动角度增量（1-12，默认4约60度，2约30度，6约90度）')
+    
+    args = parser.parse_args()
+    
+    # 验证camera_delta范围
+    if args.camera_delta < 1 or args.camera_delta > 12:
+        print(f"⚠️  警告: camera_delta={args.camera_delta} 超出推荐范围[1-12]，已调整为4")
+        args.camera_delta = 4
+    
+    record_chopping_sequence(args.base_dir, args.max_frames, args.camera_delta, args.max_rounds, args.start_round)
+
