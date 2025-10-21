@@ -155,7 +155,7 @@ class KeyboardController:
         
         return action
 
-def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, camera_delta=4, max_rounds=10, start_round=0):
+def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, camera_delta=4, max_rounds=10, start_round=0, fast_reset=False):
     """
     录制砍树过程（手动控制，支持多回合）
     
@@ -165,6 +165,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
         camera_delta: 相机转动角度增量（1-12，默认4约60度）
         max_rounds: 最大录制回合数（默认10）
         start_round: 起始回合编号（默认0，用于断点续录）
+        fast_reset: 是否使用快速重置（True=重用世界快速，False=重新生成世界慢但多样）
     """
     # 确保基础目录存在
     os.makedirs(base_dir, exist_ok=True)
@@ -191,6 +192,9 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     print(f"\n基础目录: {base_dir}")
     print(f"回合范围: round_{start_round} ~ round_{start_round + max_rounds - 1}")
     print(f"每回合最大帧数: {max_frames}")
+    print(f"Reset模式: {'快速模式(重用世界)' if fast_reset else '完整模式(重新生成世界)'}")
+    if not fast_reset:
+        print("  ⚠️  完整模式reset较慢(5-10秒)，但数据多样性高")
     
     # 创建环境
     print("\n[1/3] 创建MineDojo环境...")
@@ -200,7 +204,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
         task_id="harvest_1_log_forest",
         image_size=(160, 256),
         world_seed=None,  # 每次随机种子，增加数据多样性
-        fast_reset=False  # False=每次reset重新生成世界，True=重用世界只重置位置
+        fast_reset=fast_reset
     )
     print("  ✓ 环境创建成功")
     print(f"  动作空间: {env.action_space}")
@@ -479,7 +483,12 @@ if __name__ == "__main__":
     parser.add_argument('--start-round', type=int, default=0,
                        help='起始回合编号（默认: 0，用于断点续录）')
     parser.add_argument('--camera-delta', type=int, default=1,
-                       help='相机转动角度增量（1-12，默认4约60度，2约30度，6约90度）')
+                       help='相机转动角度增量（1-12，默认1约15度，2约30度，4约60度）')
+    parser.add_argument('--fast-reset', action='store_true',
+                       help='使用快速重置模式（重用世界，快但数据多样性低）')
+    parser.add_argument('--no-fast-reset', dest='fast_reset', action='store_false',
+                       help='使用完整重置模式（重新生成世界，慢但数据多样性高，默认）')
+    parser.set_defaults(fast_reset=False)
     
     args = parser.parse_args()
     
@@ -488,5 +497,5 @@ if __name__ == "__main__":
         print(f"⚠️  警告: camera_delta={args.camera_delta} 超出推荐范围[1-12]，已调整为4")
         args.camera_delta = 4
     
-    record_chopping_sequence(args.base_dir, args.max_frames, args.camera_delta, args.max_rounds, args.start_round)
+    record_chopping_sequence(args.base_dir, args.max_frames, args.camera_delta, args.max_rounds, args.start_round, args.fast_reset)
 
