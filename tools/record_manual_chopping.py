@@ -222,15 +222,20 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     print("\n" + "=" * 80)
     print("🎬 多回合录制模式")
     print("=" * 80)
-    print("  ✅ 完成任务(done=True) → 自动保存当前回合")
-    print("  ❌ 按Q键/ESC → 不保存当前回合，退出程序")
+    print("  ✅ 完成任务(done=True) → 自动保存当前回合，进入下一回合")
+    print("  🔄 按Q键 → 不保存当前回合，重新录制当前回合")
+    print("  ❌ 按ESC → 不保存当前回合，退出程序")
     print("=" * 80 + "\n")
     
     try:
         # 多回合循环
-        for round_idx in range(start_round, start_round + max_rounds):
+        round_idx = start_round
+        while round_idx < start_round + max_rounds:
             if not global_continue:
                 break
+            
+            # 重新录制标志
+            retry_current_round = False
                 
             # 重置环境，开始新回合
             print(f"\n{'='*80}")
@@ -263,7 +268,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
             
             print(f"  开始录制 round_{round_idx}...")
             print(f"  目标: 完成任务 (done=True)")
-            print(f"  提示: 按Q/ESC不会保存，只有done=True才会保存\n")
+            print(f"  控制: Q=重录当前回合 | ESC=退出程序 | 完成=自动保存\n")
             
             # 本回合主循环
             while step_count < max_frames:
@@ -276,14 +281,17 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 
                 # 处理系统按键
                 if ord('q') in keys_pressed or ord('Q') in keys_pressed:
-                    print(f"\n⏸️  停止所有录制（用户按下Q）")
-                    global_continue = False
-                    break
+                    print(f"\n🔄 重新录制 round_{round_idx}（用户按下Q）")
+                    print(f"   当前回合数据不保存，即将重置环境...")
+                    retry_current_round = True  # 标记需要重新录制当前round
+                    frames = []  # 清空帧数据
+                    break  # 跳出while循环，重新开始当前round
                 elif 27 in keys_pressed:  # ESC
-                    print(f"\n❌ 紧急退出（用户按下ESC）")
-                    global_continue = False
-                    frames = []
-                    break
+                    print(f"\n❌ 退出程序（用户按下ESC）")
+                    print(f"   当前回合数据不保存")
+                    global_continue = False  # 停止所有录制
+                    frames = []  # 清空帧数据
+                    break  # 跳出while循环并退出for循环
                 
                 # 更新动作状态（每帧重置，只保留当前检测到的按键）
                 # 先重置所有动作
@@ -324,7 +332,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                     f"Total: {total_reward:.3f}",
                     f"Status: {'DONE!' if task_completed else 'Recording...'}",
                     "",
-                    "Q/ESC=quit (no save) | Done=auto save"
+                    "Q=retry | ESC=quit | Done=auto save&next"
                 ]
                 
                 y_offset = 30
@@ -356,7 +364,14 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 # 控制帧率
                 time.sleep(0.05)
             
-            # 回合结束后保存数据（只有done=True才保存）
+            # 回合结束后的处理
+            if retry_current_round:
+                # 按了Q键，重新录制当前round
+                print(f"  准备重新录制 round_{round_idx}...")
+                # round_idx不变，继续while循环
+                continue
+            
+            # 正常结束：保存数据（只有done=True才保存）
             if task_completed and len(frames) > 0:
                 # 创建round目录
                 round_dir = os.path.join(base_dir, f"round_{round_idx}")
@@ -383,10 +398,13 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
             elif not task_completed:
                 print(f"\n  ⚠️  round_{round_idx} 未完成 (done=False)，不保存")
                 if not global_continue:
-                    print("  用户中断，退出录制")
+                    print("  用户按下ESC，退出录制")
                     break
             else:
                 print(f"\n  ⚠️  round_{round_idx} 没有录制任何帧，跳过")
+            
+            # 进入下一个round
+            round_idx += 1
     
     except KeyboardInterrupt:
         print("\n\n⏸️  录制停止（Ctrl+C）")
@@ -460,7 +478,7 @@ if __name__ == "__main__":
                        help='最大录制回合数（默认: 10）')
     parser.add_argument('--start-round', type=int, default=0,
                        help='起始回合编号（默认: 0，用于断点续录）')
-    parser.add_argument('--camera-delta', type=int, default=4,
+    parser.add_argument('--camera-delta', type=int, default=1,
                        help='相机转动角度增量（1-12，默认4约60度，2约30度，6约90度）')
     
     args = parser.parse_args()
