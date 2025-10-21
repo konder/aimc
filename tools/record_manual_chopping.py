@@ -200,7 +200,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
         task_id="harvest_1_log_forest",
         image_size=(160, 256),
         world_seed=None,  # 每次随机种子，增加数据多样性
-        fast_reset=True
+        fast_reset=False  # False=每次reset重新生成世界，True=重用世界只重置位置
     )
     print("  ✓ 环境创建成功")
     print(f"  动作空间: {env.action_space}")
