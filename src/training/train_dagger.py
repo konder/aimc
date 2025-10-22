@@ -33,8 +33,8 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.training.train_bc import load_expert_demonstrations, train_bc_with_ppo
-from tools.run_policy_collect_states import collect_policy_states
-from tools.evaluate_policy import evaluate_policy
+from tools.dagger.run_policy_collect_states import collect_policy_states
+from tools.dagger.evaluate_policy import evaluate_policy
 
 
 def aggregate_data(base_data_path, new_data_path, output_path):
