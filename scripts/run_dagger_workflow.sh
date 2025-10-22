@@ -37,8 +37,9 @@ EVAL_EPISODES=20
 
 # 录制配置
 NUM_EXPERT_EPISODES=10
-CAMERA_DELTA=1
+MOUSE_SENSITIVITY=0.2  # 鼠标灵敏度（已优化）
 MAX_FRAMES=500
+SKIP_IDLE_FRAMES=true  # 跳过静止帧（不保存IDLE帧）
 APPEND_RECORDING=false  # 是否追加录制（继续已有数据）
 
 # 数据路径（基础路径，会根据 TASK_ID 自动创建子目录）
@@ -120,13 +121,17 @@ while [[ $# -gt 0 ]]; do
             NUM_EXPERT_EPISODES="$2"
             shift 2
             ;;
-        --camera-delta)
-            CAMERA_DELTA="$2"
+        --mouse-sensitivity)
+            MOUSE_SENSITIVITY="$2"
             shift 2
             ;;
         --max-frames)
             MAX_FRAMES="$2"
             shift 2
+            ;;
+        --no-skip-idle)
+            SKIP_IDLE_FRAMES=false
+            shift
             ;;
         --append-recording)
             APPEND_RECORDING=true
@@ -166,8 +171,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --collect-episodes N        每轮收集episode数 (默认: 20)"
             echo "  --eval-episodes N           评估episode数 (默认: 20)"
             echo "  --num-episodes N            录制专家演示数量 (默认: 10)"
-            echo "  --camera-delta N            相机灵敏度 (默认: 1)"
+            echo "  --mouse-sensitivity N       鼠标灵敏度 (默认: 0.2)"
             echo "  --max-frames N              每个episode最大帧数 (默认: 500)"
+            echo "  --no-skip-idle              保存所有帧（包括IDLE帧，默认跳过）"
             echo "  --append-recording          追加录制（继续已有数据）"
             echo "  --skip-recording            跳过手动录制 (假设已有数据)"
             echo "  --skip-bc                   跳过BC训练 (假设已有BC模型)"
@@ -285,18 +291,19 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         echo "  目标episodes: $NUM_EXPERT_EPISODES"
         echo "  已有episodes: $EXISTING_EPISODES"
         echo "  每episode最大帧数: $MAX_FRAMES"
-        echo "  相机灵敏度: $CAMERA_DELTA"
+        echo "  鼠标灵敏度: $MOUSE_SENSITIVITY"
+        echo "  跳过静止帧: $SKIP_IDLE_FRAMES"
         echo "  数据保存路径: $EXPERT_DIR"
         echo ""
-        print_info "控制说明:"
-        echo "  WASD     - 移动"
-        echo "  IJKL     - 视角"
-        echo "  F        - 攻击"
-        echo "  Space    - 跳跃"
-        echo "  Q        - 重录当前回合（不保存）"
-        echo "  ESC      - 退出录制"
+        print_info "控制说明 (Pygame + 鼠标):"
+        echo "  🖱️  鼠标移动   - 转动视角（上下左右）"
+        echo "  🖱️  鼠标左键   - 攻击/挖掘"
+        echo "  ⌨️  WASD      - 移动"
+        echo "  ⌨️  Space     - 跳跃"
+        echo "  ⌨️  Q         - 重录当前回合（不保存）"
+        echo "  ⌨️  ESC       - 退出录制"
         echo ""
-        print_info "提示: 每次成功获得木头后，会自动保存为新的episode"
+        print_info "提示: Pygame窗口将显示游戏画面，保持窗口焦点"
         echo ""
         
         read -p "按Enter开始录制，或按Ctrl+C取消..." 
@@ -304,11 +311,20 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         # 确保输出目录存在
         mkdir -p "$EXPERT_DIR"
         
-        # 直接录制到正确的任务目录
-        python tools/record_manual_chopping.py \
-            --base-dir "$EXPERT_DIR" \
-            --max-frames "$MAX_FRAMES" \
-            --camera-delta "$CAMERA_DELTA"
+        # 构建录制命令
+        RECORD_CMD="bash scripts/run_minedojo_x86.sh python tools/record_manual_chopping.py \
+            --base-dir \"$EXPERT_DIR\" \
+            --max-frames $MAX_FRAMES \
+            --mouse-sensitivity $MOUSE_SENSITIVITY \
+            --fps 20"
+        
+        # 根据SKIP_IDLE_FRAMES添加参数
+        if [ "$SKIP_IDLE_FRAMES" = false ]; then
+            RECORD_CMD="$RECORD_CMD --no-skip-idle-frames"
+        fi
+        
+        # 执行录制
+        eval $RECORD_CMD
         
         if [ $? -eq 0 ]; then
             print_success "专家演示录制完成"

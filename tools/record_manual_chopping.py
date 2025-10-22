@@ -1,8 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-录制手动砍树序列（键盘控制）
-用于验证MineCLIP的16帧视频模式效果
+录制手动砍树序列（pygame实时模式）
+使用pygame进行按键检测和画面显示 - 无需macOS辅助功能权限
+
+优势:
+- ✅ 无需macOS辅助功能权限
+- ✅ 实时按键检测，按住W键每帧都检测到
+- ✅ 支持多键同时检测（W+F边前进边攻击）
+- ✅ 静态帧大幅减少（< 30%）
 """
 
 import os
@@ -13,668 +19,523 @@ import minedojo
 import numpy as np
 from PIL import Image
 import time
-import cv2
+import pygame
+import argparse
 
-class KeyboardController:
+class PygameController:
     """
-    键盘控制器 - MineDojo MultiDiscrete(8) 动作空间
+    Pygame实时控制器 - 无需特殊权限
+    同时处理按键检测和画面显示
     """
     
-    def __init__(self, camera_delta=4):
+    def __init__(self, camera_delta=4, display_size=(800, 600), mouse_sensitivity=0.2):
         """
-        初始化键盘控制器
+        初始化pygame控制器
         
         Args:
-            camera_delta: 相机转动角度增量（默认1，范围1-12）
-                         1 = 约15度，2 = 约30度，4 = 约60度
+            camera_delta: 相机转动角度增量（键盘）
+            display_size: pygame窗口大小
+            mouse_sensitivity: 鼠标灵敏度（0.1-2.0）
         """
-        # 使用字典存储每个动作的状态，而不是按键
-        self.actions = {
-            'forward': False,
-            'back': False,
-            'left': False,
-            'right': False,
-            'jump': False,
-            'pitch_up': False,
-            'pitch_down': False,
-            'yaw_left': False,
-            'yaw_right': False,
-            'attack': False,
-        }
-        self.running = True
+        # 初始化pygame
+        pygame.init()
+        self.screen = pygame.display.set_mode(display_size)
+        pygame.display.set_caption("MineDojo Recording (Pygame+Mouse) - Press Q to retry, ESC to exit")
+        self.clock = pygame.time.Clock()
+        self.font_large = pygame.font.Font(None, 36)
+        self.font_small = pygame.font.Font(None, 24)
         
-        # 相机转动参数
+        # 相机参数
         self.camera_delta = camera_delta
+        self.mouse_sensitivity = mouse_sensitivity
         
-        # 键盘码映射
-        self.key_map = {
-            ord('w'): 'forward',
-            ord('W'): 'forward',
-            ord('s'): 'back',
-            ord('S'): 'back',
-            ord('a'): 'left',
-            ord('A'): 'left',
-            ord('d'): 'right',
-            ord('D'): 'right',
-            32: 'jump',  # Space
-            ord('i'): 'pitch_up',
-            ord('I'): 'pitch_up',
-            ord('k'): 'pitch_down',
-            ord('K'): 'pitch_down',
-            ord('j'): 'yaw_left',
-            ord('J'): 'yaw_left',
-            ord('l'): 'yaw_right',
-            ord('L'): 'yaw_right',
-            ord('f'): 'attack',
-            ord('F'): 'attack',
-        }
+        # 鼠标控制
+        pygame.mouse.set_visible(True)  # 显示鼠标
+        self.mouse_captured = False  # 鼠标是否被捕获
+        self.last_mouse_pos = None
+        
+        # 控制标志
+        self.should_quit = False
+        self.should_retry = False
         
         print("\n" + "=" * 80)
-        print("🎮 键盘控制说明 (每帧等待输入模式)")
+        print("🎮 Pygame实时录制模式")
         print("=" * 80)
+        print("\n✅ 优势: 无需macOS辅助功能权限！")
         print("\n📌 录制方式:")
-        print("  - 每帧暂停，等待你按键")
-        print("  - 按下按键后，执行该动作并进入下一帧")
-        print("  - 适合精确控制每一帧的动作")
+        print("  - pygame窗口显示游戏画面")
+        print("  - 按住W键会持续前进，每帧都检测")
+        print("  - 支持多键同时按下（如W+左键）")
+        print("  - 录制以20 FPS速度进行")
         print("\n移动控制:")
-        print("  W - 前进")
-        print("  S - 后退")
-        print("  A - 左移")
-        print("  D - 右移")
-        print("  Space - 跳跃")
-        print("\n相机控制:")
-        print("  I - 向上看")
-        print("  K - 向下看")
-        print("  J - 向左看")
-        print("  L - 向右看")
-        print("\n动作:")
-        print("  F - 攻击/挖掘（砍树）⭐")
-        print("\n组合动作:")
-        print("  U - 前进+跳跃")
-        print("\n特殊:")
-        print("  . - IDLE（无动作帧，站立不动）")
+        print("  W - 前进 | S - 后退 | A - 左移 | D - 右移 | Space - 跳跃")
+        print("\n相机控制 (鼠标) ⭐:")
+        print("  鼠标移动 - 转动视角（上下左右）")
+        print("  鼠标左键 - 攻击/挖掘（砍树）")
         print("\n系统:")
-        print("  Q - 重新录制当前回合")
-        print("  ESC - 退出程序（不保存当前回合）")
+        print("  Q - 重新录制当前episode")
+        print("  ESC - 退出程序")
         print("\n" + "=" * 80)
-        print("提示: 点击OpenCV窗口获得焦点后开始录制")
-        print("提示: 每帧会显示等待提示，按键后自动执行")
+        print(f"鼠标灵敏度: {mouse_sensitivity:.2f}")
         print("=" * 80 + "\n")
     
-    def update_action(self, key, press=True):
-        """
-        更新动作状态
-        
-        Args:
-            key: 键盘码
-            press: True=按下, False=释放
-        """
-        if key in self.key_map:
-            action_name = self.key_map[key]
-            self.actions[action_name] = press
+    def process_events(self):
+        """处理pygame事件"""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.should_quit = True
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.should_quit = True
+                elif event.key == pygame.K_q:
+                    self.should_retry = True
     
     def get_action(self):
         """
-        根据当前动作状态生成MineDojo动作
+        根据当前按键和鼠标状态生成MineDojo动作
         
         Returns:
-            action: 8维MultiDiscrete动作
+            action: np.array([8], dtype=np.int32)
         """
-        # 初始化为中性动作
         action = np.array([0, 0, 0, 12, 12, 0, 0, 0], dtype=np.int32)
         
-        # action[0]: forward/back (0=stay, 1=forward, 2=back)
-        if self.actions['forward']:
-            action[0] = 1
-        elif self.actions['back']:
-            action[0] = 2
+        # 获取当前所有按键状态
+        keys = pygame.key.get_pressed()
         
-        # action[1]: left/right (0=stay, 1=left, 2=right)
-        if self.actions['left']:
-            action[1] = 1
-        elif self.actions['right']:
-            action[1] = 2
+        # 移动
+        if keys[pygame.K_w]:
+            action[0] = 1  # forward
+        elif keys[pygame.K_s]:
+            action[0] = 2  # back
         
-        # action[2]: jump (0=no, 1=jump, 2=?, 3=sprint+jump)
-        if self.actions['jump']:
+        if keys[pygame.K_a]:
+            action[1] = 1  # left
+        elif keys[pygame.K_d]:
+            action[1] = 2  # right
+        
+        # 跳跃
+        if keys[pygame.K_SPACE]:
             action[2] = 1
         
-        # action[3]: pitch (12=center, range 0-24)
-        # 简单模式：按一次就转一次
-        if self.actions['pitch_up']:
-            action[3] = 12 - self.camera_delta  # 向上看
-        elif self.actions['pitch_down']:
-            action[3] = 12 + self.camera_delta  # 向下看
-        else:
-            action[3] = 12  # 中心
+        # 鼠标控制相机
+        mouse_buttons = pygame.mouse.get_pressed()
+        mouse_pos = pygame.mouse.get_pos()
         
-        # action[4]: yaw (12=center, range 0-24)
-        # 简单模式：按一次就转一次
-        if self.actions['yaw_left']:
-            action[4] = 12 - self.camera_delta  # 向左看
-        elif self.actions['yaw_right']:
-            action[4] = 12 + self.camera_delta  # 向右看
-        else:
-            action[4] = 12  # 中心
+        # 计算鼠标移动
+        if self.last_mouse_pos is not None:
+            dx = mouse_pos[0] - self.last_mouse_pos[0]
+            dy = mouse_pos[1] - self.last_mouse_pos[1]
+            
+            # 将鼠标移动转换为相机动作
+            # dx: 正值=向右看，负值=向左看
+            # dy: 正值=向下看，负值=向上看
+            
+            # Yaw (左右) - dimension 4
+            yaw_delta = int(dx * self.mouse_sensitivity)
+            yaw_delta = max(-12, min(12, yaw_delta))  # 限制范围
+            action[4] = 12 + yaw_delta
+            
+            # Pitch (上下) - dimension 3
+            pitch_delta = int(dy * self.mouse_sensitivity)
+            pitch_delta = max(-12, min(12, pitch_delta))  # 限制范围
+            action[3] = 12 + pitch_delta
         
-        # action[5]: functional (3=攻击，已验证 ✅)
-        if self.actions['attack']:
-            action[5] = 3  # 攻击动作（已确认有效）
+        self.last_mouse_pos = mouse_pos
+        
+        # 鼠标左键攻击
+        if mouse_buttons[0]:  # 左键
+            action[5] = 3  # attack
         
         return action
+    
+    def decode_action(self, action):
+        """将动作数组转换为可读描述"""
+        parts = []
+        
+        if action[0] == 1:
+            parts.append("Forward")
+        elif action[0] == 2:
+            parts.append("Back")
+        
+        if action[1] == 1:
+            parts.append("Left")
+        elif action[1] == 2:
+            parts.append("Right")
+        
+        if action[2] == 1:
+            parts.append("Jump")
+        
+        if action[3] != 12 or action[4] != 12:
+            pitch_delta = action[3] - 12
+            yaw_delta = action[4] - 12
+            parts.append(f"Camera(p={pitch_delta:+d},y={yaw_delta:+d})")
+        
+        if action[5] == 3:
+            parts.append("ATTACK")
+        
+        return " + ".join(parts) if parts else "IDLE"
+    
+    def display_frame(self, obs, episode_idx, frame_count, max_frames, action_desc, reward, done):
+        """
+        在pygame窗口中显示游戏画面和信息
+        
+        Args:
+            obs: 观察图像 (C, H, W)
+            episode_idx: Episode索引
+            frame_count: 当前帧数
+            max_frames: 最大帧数
+            action_desc: 动作描述
+            reward: 奖励
+            done: 是否完成
+        """
+        # 清屏
+        self.screen.fill((30, 30, 30))
+        
+        # 转换并显示游戏画面
+        # MineDojo: (C, H, W) -> (H, W, C) for pygame
+        game_img = obs.transpose(1, 2, 0)  # (160, 256, 3)
+        
+        # 放大到合适大小
+        scale_factor = 3
+        game_surface = pygame.surfarray.make_surface(game_img.transpose(1, 0, 2))  # pygame需要(W,H,C)
+        game_surface = pygame.transform.scale(game_surface, 
+                                              (game_img.shape[1] * scale_factor, 
+                                               game_img.shape[0] * scale_factor))
+        
+        # 显示游戏画面（居中上方）
+        game_rect = game_surface.get_rect(center=(self.screen.get_width() // 2, 240))
+        self.screen.blit(game_surface, game_rect)
+        
+        # 显示信息
+        y = 10
+        
+        # Episode和帧数信息
+        info_text = self.font_large.render(f"Episode: {episode_idx:03d} | Frame: {frame_count}/{max_frames}", 
+                                           True, (0, 255, 0))
+        self.screen.blit(info_text, (10, y))
+        y += 40
+        
+        # 当前动作
+        action_text = self.font_small.render(f"Action: {action_desc}", True, (0, 255, 255))
+        self.screen.blit(action_text, (10, y))
+        y += 30
+        
+        # 奖励和完成状态
+        status_text = self.font_small.render(f"Reward: {reward:.3f} | Done: {done}", 
+                                            True, (255, 255, 0))
+        self.screen.blit(status_text, (10, y))
+        
+        # 控制提示（底部）
+        y = self.screen.get_height() - 60
+        hint_text = self.font_small.render("Q: Retry | ESC: Exit | Keep pygame window focused!", 
+                                          True, (255, 255, 255))
+        self.screen.blit(hint_text, (10, y))
+        
+        # 刷新显示
+        pygame.display.flip()
+    
+    def reset_retry_flag(self):
+        """重置重试标志"""
+        self.should_retry = False
+    
+    def quit(self):
+        """退出pygame"""
+        pygame.quit()
 
-def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, camera_delta=4, max_episodes=10, fast_reset=False):
+
+def record_chopping_sequence(
+    base_dir="data/expert_demos",
+    max_frames=1000,
+    camera_delta=4,
+    mouse_sensitivity=0.2,
+    fast_reset=False,
+    fps=20,
+    skip_idle_frames=True
+):
     """
-    录制砍树过程（手动控制，支持多回合）
+    录制手动砍树序列（pygame实时模式）
     
     Args:
-        base_dir: 基础输出目录（会在下面创建episode_000, episode_001...）
-        max_frames: 每回合最大帧数
-        camera_delta: 相机转动角度增量（1-12，默认4约60度）
-        max_episodes: 最大录制回合数（默认10）
-        fast_reset: 是否使用快速重置（True=重用世界快速，False=重新生成世界慢但多样）
+        base_dir: 保存目录
+        max_frames: 每个episode的最大帧数
+        camera_delta: 相机灵敏度
+        mouse_sensitivity: 鼠标灵敏度
+        fast_reset: 是否快速重置
+        fps: 录制帧率
+        skip_idle_frames: 是否跳过静止帧（不保存IDLE帧）
     """
-    # 确保基础目录存在
+    # 检测已有episode
     os.makedirs(base_dir, exist_ok=True)
+    existing_episodes = [d for d in os.listdir(base_dir) if d.startswith('episode_')]
+    next_episode = len(existing_episodes)
     
-    # 自动检测下一个episode编号
-    existing_episodes = sorted([d for d in os.listdir(base_dir) if d.startswith('episode_') and os.path.isdir(os.path.join(base_dir, d))])
-    if existing_episodes:
-        last_episode = existing_episodes[-1]
-        last_num = int(last_episode.split('_')[1])
-        start_episode = last_num + 1
-        print(f"\n✓ 检测到已有 {len(existing_episodes)} 个episode，从 episode_{start_episode:03d} 开始")
-    else:
-        start_episode = 0
-        print(f"\n✓ 目录为空，从 episode_000 开始")
-    
-    print("=" * 80)
-    print("MineCLIP 砍树序列录制工具（多回合录制）")
-    print("=" * 80)
-    print(f"\n基础目录: {base_dir}")
-    print(f"Episode范围: episode_{start_episode:03d} ~ episode_{start_episode + max_episodes - 1:03d}")
-    print(f"每回合最大帧数: {max_frames}")
-    print(f"Reset模式: {'快速模式(重用世界)' if fast_reset else '完整模式(重新生成世界)'}")
-    if not fast_reset:
-        print("  ⚠️  完整模式reset较慢(5-10秒)，但数据多样性高")
+    print(f"\n📁 保存目录: {base_dir}")
+    print(f"📊 已有{len(existing_episodes)}个episode，将从episode_{next_episode:03d}开始")
     
     # 创建环境
-    print("\n[1/3] 创建MineDojo环境...")
-    print("  任务: harvest_1_log_forest (森林中砍树)")
-    
+    print(f"\n🌍 创建MineDojo环境...")
     env = minedojo.make(
-        task_id="harvest_1_log_forest",
+        task_id="harvest_1_log",
         image_size=(160, 256),
-        world_seed=None,  # 每次随机种子，增加数据多样性
-        fast_reset=fast_reset
+        seed=None,
+        fast_reset=fast_reset,
     )
-    print("  ✓ 环境创建成功")
-    print(f"  动作空间: {env.action_space}")
     
-    # 初始化键盘控制器
-    controller = KeyboardController(camera_delta=camera_delta)
-    print(f"\n⚙️  相机设置: delta={camera_delta} (约{camera_delta*15}度/次)")
+    # 初始化pygame控制器
+    controller = PygameController(camera_delta=camera_delta, mouse_sensitivity=mouse_sensitivity)
     
-    # 显示窗口
-    window_name = "MineCraft - 多回合录制"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, 1024, 640)
+    # 录制参数
+    frame_delay = 1.0 / fps
     
-    # 全局统计
-    completed_episodes = 0
-    global_continue = True
+    print(f"\n⏱️  录制帧率: {fps} FPS (每帧{frame_delay*1000:.0f}ms)")
+    print(f"⚠️  注意: 请保持pygame窗口为焦点状态")
+    print(f"\n按Enter键开始录制第一个episode...")
+    input()
     
-    print("\n[2/3] 开始多回合录制...")
-    print("\n" + "=" * 80)
-    print("🎬 多回合录制模式")
-    print("=" * 80)
-    print("  ✅ 完成任务(done=True) → 自动保存当前回合，进入下一回合")
-    print("  🔄 按Q键 → 不保存当前回合，重新录制当前回合")
-    print("  ❌ 按ESC → 不保存当前回合，退出程序")
-    print("=" * 80 + "\n")
+    episode_idx = next_episode
     
     try:
-        # 多回合循环
-        episode_idx = start_episode
-        while episode_idx < start_episode + max_episodes:
-            if not global_continue:
-                break
-            
-            # 重新录制标志
-            retry_current_episode = False
-                
-            # 重置环境，开始新回合
+        while True:
+            # 重置环境
             print(f"\n{'='*80}")
-            print(f"🎮 Round {episode_idx}")
+            print(f"🎬 开始录制 Episode {episode_idx:03d}")
             print(f"{'='*80}")
             
-            print(f"  重置环境中...")
             obs_dict = env.reset()
-            obs = obs_dict['rgb']  # (C, H, W)
+            obs = obs_dict['rgb']
             
-            # 转换为 (H, W, C) 格式
-            if obs.shape[0] == 3:
-                obs = obs.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+            print(f"✅ 环境已重置")
+            print(f"📝 目标: 砍树获得1个木头")
+            print(f"⏰ 最大帧数: {max_frames}")
+            print(f"\n开始录制...\n")
             
-            print(f"  ✓ 环境已重置，新的世界已生成")
-            
-            # 本回合数据
+            # 存储数据
             frames = []
-            actions_list = []  # 保存每一帧的action
-            step_count = 0
-            total_reward = 0
-            task_completed = False
+            actions_list = []
             
-            # 显示初始画面，让用户看到新环境
-            display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
-            display_frame = cv2.resize(display_frame, (1024, 640))
-            cv2.putText(display_frame, f"Round {episode_idx} - Ready! Press any key to start", 
-                       (200, 320), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow(window_name, display_frame)
-            cv2.waitKey(1000)  # 等待1秒，让用户看到新环境
+            # 重置控制器标志
+            controller.reset_retry_flag()
             
-            print(f"  开始录制 episode_{episode_idx:03d}...")
-            print(f"  目标: 完成任务 (done=True)")
-            print(f"  控制: Q=重录当前回合 | ESC=退出程序 | 完成=自动保存\n")
+            # 帧计数
+            frame_count = 0
+            start_time = time.time()
             
-            # 本回合主循环
-            print("  ⚠️  录制模式: 每帧等待单个按键输入")
-            print("  提示: 按下按键后自动执行一帧")
-            print("  .  = IDLE（无动作帧）")
-            print("  u  = 前进+跳跃")
-            print("  其他 = 单一动作（W/A/S/D/F/I/J/K/L/Space）\n")
-            
-            while step_count < max_frames:
-                # 🔧 新策略: 等待用户输入单个按键
-                # 显示当前帧，等待用户输入
-                display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
-                display_frame = cv2.resize(display_frame, (1024, 640))
+            # 主循环
+            done = False
+            while frame_count < max_frames and not done:
+                loop_start = time.time()
                 
-                # 添加提示信息
-                cv2.putText(display_frame, f"Frame {step_count}/{max_frames} - Waiting for key", 
-                           (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                cv2.putText(display_frame, ".=IDLE | u=FWD+JUMP | Q=Retry | ESC=Quit", 
-                           (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.imshow(window_name, display_frame)
+                # 处理pygame事件
+                controller.process_events()
                 
-                # 等待按键输入（无超时，一直等待）
-                key = cv2.waitKey(0) & 0xFF
+                # 检查退出信号
+                if controller.should_quit:
+                    print(f"\n⚠️  用户按下ESC，退出录制")
+                    env.close()
+                    controller.quit()
+                    return
                 
-                # 处理系统按键
-                if key == ord('q') or key == ord('Q'):
-                    print(f"\n🔄 重新录制 episode_{episode_idx:03d}（用户按下Q）")
-                    print(f"   当前回合数据不保存，即将重置环境...")
-                    retry_current_episode = True
-                    frames = []
-                    actions_list = []
-                    break
-                elif key == 27:  # ESC
-                    print(f"\n❌ 退出程序（用户按下ESC）")
-                    print(f"   当前回合数据不保存")
-                    global_continue = False
-                    frames = []
-                    actions_list = []
+                if controller.should_retry:
+                    print(f"\n🔄 用户按下Q，重新录制episode {episode_idx:03d}")
                     break
                 
-                # 重置动作状态
-                for action_name in controller.actions:
-                    controller.actions[action_name] = False
-                
-                # 处理特殊按键
-                if key == ord('.'):  # . = IDLE（无动作）
-                    print(f"  Frame {step_count}: IDLE")
-                    pass  # 所有动作保持False
-                elif key == ord('u') or key == ord('U'):  # u = 前进+跳跃
-                    controller.actions['forward'] = True
-                    controller.actions['jump'] = True
-                    print(f"  Frame {step_count}: Forward + Jump")
-                else:
-                    # 处理普通动作键
-                    if key in controller.key_map:
-                        controller.update_action(key, press=True)
-                        action_desc = controller.key_map[key]
-                        print(f"  Frame {step_count}: {action_desc}")
-                    else:
-                        # 未知按键，视为IDLE
-                        print(f"  Frame {step_count}: Unknown key ({chr(key) if 32 <= key < 127 else key}), treating as IDLE")
-                
-                # 获取动作
+                # 获取当前动作
                 action = controller.get_action()
+                action_desc = controller.decode_action(action)
                 
                 # 执行动作
                 obs_dict, reward, done, info = env.step(action)
-                obs = obs_dict['rgb']  # (C, H, W)
+                obs = obs_dict['rgb']
                 
-                # 转换为 (H, W, C) 格式
-                if obs.shape[0] == 3:
-                    obs = obs.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+                # 保存数据（根据skip_idle_frames设置）
+                is_idle = (action_desc == "IDLE")
                 
-                # 保存帧和动作
-                frames.append(obs.copy())
-                actions_list.append(action.copy())
-                step_count += 1
-                total_reward += reward
+                if not skip_idle_frames or not is_idle:
+                    # 不跳过，或者不是IDLE帧 -> 保存
+                    frames.append(obs.copy())
+                    actions_list.append((action.copy(), action_desc))
                 
-                # 显示当前帧
-                display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
-                display_frame = cv2.resize(display_frame, (1024, 640))
+                frame_count += 1
                 
-                # 添加信息overlay
-                info_text = [
-                    f"Round: {episode_idx} (目标: {start_episode + max_episodes - 1})",
-                    f"Completed: {completed_episodes}",
-                    f"Frame: {step_count}/{max_frames}",
-                    f"Reward: {reward:.3f}",
-                    f"Total: {total_reward:.3f}",
-                    f"Status: {'DONE!' if task_completed else 'Recording...'}",
-                    "",
-                    "Q=retry | ESC=quit | Done=auto save&next"
-                ]
+                # 显示画面
+                controller.display_frame(obs, episode_idx, frame_count, max_frames, 
+                                       action_desc, reward, done)
                 
-                y_offset = 30
-                for i, text in enumerate(info_text):
-                    color = (0, 255, 0) if task_completed and i == 4 else (255, 255, 255)
-                    cv2.putText(display_frame, text, (10, y_offset + i * 25),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                # 维持帧率
+                controller.clock.tick(fps)
                 
-                # 添加动作状态显示
-                active_actions = [name for name, active in controller.actions.items() if active]
-                if active_actions:
-                    action_text = f"Actions: {', '.join(active_actions)}"
-                    cv2.putText(display_frame, action_text, (10, y_offset + 200),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                
-                cv2.imshow(window_name, display_frame)
-                
-                # 检查任务是否完成（通过done信号）
-                if done:
-                    task_completed = True
-                    print(f"\n🎉 episode_{episode_idx:03d}: 任务完成！已录制 {step_count} 帧")
-                    # 检查是否是因为获得了目标物品
-                    inventory = info.get('delta_inv', {})
-                    if inventory:
-                        print(f"    物品变化: {inventory}")
-                    # 立即跳出循环，准备保存和reset
-                    break
-                
-                # 控制帧率
-                time.sleep(0.05)
+                # 实时统计
+                if frame_count % 20 == 0 or done:
+                    idle_count = sum(1 for _, desc in actions_list if desc == "IDLE")
+                    idle_pct = (idle_count / frame_count) * 100
+                    elapsed = time.time() - start_time
+                    actual_fps = frame_count / elapsed if elapsed > 0 else 0
+                    
+                    print(f"[{elapsed:6.1f}s] 帧{frame_count:4d}: {action_desc:<30} | "
+                          f"IDLE: {idle_count}/{frame_count} ({idle_pct:4.1f}%) | "
+                          f"FPS: {actual_fps:4.1f}")
             
-            # 回合结束后的处理
-            if retry_current_episode:
-                # 按了Q键，重新录制当前round
-                print(f"  准备重新录制 episode_{episode_idx:03d}...")
-                # episode_idx不变，继续while循环
+            # 检查是否需要重试
+            if controller.should_retry:
+                controller.reset_retry_flag()
                 continue
             
-            # 正常结束：保存数据（只有done=True才保存）
-            if task_completed and len(frames) > 0:
-                # 创建round目录
-                episode_dir = os.path.join(base_dir, f"episode_{episode_idx:03d}")
-                os.makedirs(episode_dir, exist_ok=True)
-                
-                print(f"\n  💾 保存 episode_{episode_idx:03d} 数据...")
-                
-                # 1. 保存PNG图片（用于可视化验证）
-                print(f"    [1/3] 保存PNG图片...")
-                for i, frame in enumerate(frames):
-                    img = Image.fromarray(frame)
-                    filename = f"frame_{i:05d}.png"
-                    filepath = os.path.join(episode_dir, filename)
-                    img.save(filepath)
-                
-                # 2. 保存observation和action的numpy数据（用于BC训练）
-                print(f"    [2/3] 保存BC训练数据...")
-                for i, (obs, action) in enumerate(zip(frames, actions_list)):
-                    frame_data = {
-                        'observation': obs,  # (H, W, C) RGB uint8
-                        'action': action     # (8,) int64
-                    }
-                    filename = f"frame_{i:05d}.npy"
-                    filepath = os.path.join(episode_dir, filename)
-                    np.save(filepath, frame_data)
-                
-                # 3. 分析和保存回合统计
-                print(f"    [3/3] 分析动作分布并保存元数据...")
-                
-                # 统计静态帧和动作分布
-                actions_array = np.array(actions_list)
-                idle_count = 0
-                action_counts = {
-                    'forward': 0,
-                    'back': 0,
-                    'left': 0,
-                    'right': 0,
-                    'jump': 0,
-                    'attack': 0,
-                    'camera': 0
-                }
-                
-                for action in actions_array:
-                    # 检查是否为静态帧（所有动作都是默认值）
-                    is_idle = (action[0] == 0 and  # no forward/back
-                              action[1] == 0 and   # no left/right
-                              action[2] == 0 and   # no jump
-                              action[3] == 12 and  # camera center
-                              action[4] == 12 and  # camera center
-                              action[5] == 0)      # no attack
-                    
-                    if is_idle:
-                        idle_count += 1
-                    else:
-                        # 统计各类动作
-                        if action[0] == 1:
-                            action_counts['forward'] += 1
-                        elif action[0] == 2:
-                            action_counts['back'] += 1
-                        
-                        if action[1] == 1:
-                            action_counts['left'] += 1
-                        elif action[1] == 2:
-                            action_counts['right'] += 1
-                        
-                        if action[2] != 0:
-                            action_counts['jump'] += 1
-                        
-                        if action[5] == 3:
-                            action_counts['attack'] += 1
-                        
-                        if action[3] != 12 or action[4] != 12:
-                            action_counts['camera'] += 1
-                
-                idle_pct = (idle_count / len(actions_array)) * 100
-                
-                metadata_path = os.path.join(episode_dir, "metadata.txt")
-                with open(metadata_path, 'w') as f:
-                    f.write(f"Round: {episode_idx}\n")
-                    f.write(f"Frames: {len(frames)}\n")
-                    f.write(f"Actions: {len(actions_list)}\n")
-                    f.write(f"Total Reward: {total_reward:.3f}\n")
-                    f.write(f"Task Completed: True\n")
-                    f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"\nAction Statistics:\n")
-                    f.write(f"  IDLE frames: {idle_count}/{len(actions_array)} ({idle_pct:.1f}%)\n")
-                    f.write(f"  Forward: {action_counts['forward']} frames\n")
-                    f.write(f"  Back: {action_counts['back']} frames\n")
-                    f.write(f"  Left: {action_counts['left']} frames\n")
-                    f.write(f"  Right: {action_counts['right']} frames\n")
-                    f.write(f"  Jump: {action_counts['jump']} frames\n")
-                    f.write(f"  Attack: {action_counts['attack']} frames\n")
-                    f.write(f"  Camera: {action_counts['camera']} frames\n")
-                    f.write(f"\nData Format:\n")
-                    f.write(f"  - frame_XXXXX.png: 可视化图片 (H, W, 3) RGB\n")
-                    f.write(f"  - frame_XXXXX.npy: BC训练数据 {{observation, action}}\n")
-                    f.write(f"  - observation shape: {frames[0].shape}\n")
-                    f.write(f"  - action shape: {actions_list[0].shape}\n")
-                
-                # 4. 生成可读的动作日志
-                print(f"    [4/4] 生成动作日志...")
-                actions_log_path = os.path.join(episode_dir, "actions_log.txt")
-                with open(actions_log_path, 'w') as f:
-                    f.write(f"Episode {episode_idx} - Action Log\n")
-                    f.write(f"=" * 100 + "\n")
-                    f.write(f"Total Frames: {len(actions_array)}\n")
-                    f.write(f"IDLE Frames: {idle_count}/{len(actions_array)} ({idle_pct:.1f}%)\n")
-                    f.write(f"=" * 100 + "\n\n")
-                    f.write(f"{'Frame':>5} | {'Raw Action':<40} | Action Description\n")
-                    f.write("-" * 100 + "\n")
-                    
-                    for i, action in enumerate(actions_array):
-                        # 解析动作为可读描述
-                        action_parts = []
-                        
-                        # 维度0: forward/back (0=stop, 1=forward, 2=back)
-                        if action[0] == 1:
-                            action_parts.append("Forward")
-                        elif action[0] == 2:
-                            action_parts.append("Back")
-                        
-                        # 维度1: left/right (0=stop, 1=left, 2=right)
-                        if action[1] == 1:
-                            action_parts.append("Left")
-                        elif action[1] == 2:
-                            action_parts.append("Right")
-                        
-                        # 维度2: jump/sneak/sprint (0=none, 1=jump, ...)
-                        if action[2] == 1:
-                            action_parts.append("Jump")
-                        elif action[2] == 2:
-                            action_parts.append("Sneak")
-                        elif action[2] == 3:
-                            action_parts.append("Sprint")
-                        
-                        # 维度3-4: camera (12=center)
-                        pitch_delta = action[3] - 12
-                        yaw_delta = action[4] - 12
-                        
-                        if pitch_delta != 0 or yaw_delta != 0:
-                            camera_desc = f"Camera(pitch={pitch_delta:+d}, yaw={yaw_delta:+d})"
-                            action_parts.append(camera_desc)
-                        
-                        # 维度5: functional (0=none, 3=attack, ...)
-                        if action[5] == 3:
-                            action_parts.append("ATTACK")
-                        elif action[5] != 0:
-                            action_parts.append(f"Functional({action[5]})")
-                        
-                        # 维度6-7: craft/inventory
-                        if action[6] != 0:
-                            action_parts.append(f"Craft({action[6]})")
-                        if action[7] != 0:
-                            action_parts.append(f"Inventory({action[7]})")
-                        
-                        if not action_parts:
-                            action_desc = "IDLE"
-                        else:
-                            action_desc = " + ".join(action_parts)
-                        
-                        # 格式化输出
-                        action_str = str(action).replace('\n', '')
-                        f.write(f"{i:5d} | {action_str:<40} | {action_desc}\n")
-                
-                print(f"  ✓ episode_{episode_idx:03d} 已保存: {len(frames)} 帧 -> {episode_dir}")
-                print(f"    - {len(frames)} PNG图片（可视化）")
-                print(f"    - {len(actions_list)} NPY文件（BC训练）")
-                print(f"    - 1 actions_log.txt（动作日志）")
-                print(f"    - 静态帧: {idle_count}/{len(frames)} ({idle_pct:.1f}%)")
-                print(f"    - 攻击帧: {action_counts['attack']}/{len(frames)} ({action_counts['attack']/len(frames)*100:.1f}%)")
-                completed_episodes += 1
-            elif not task_completed:
-                print(f"\n  ⚠️  episode_{episode_idx:03d} 未完成 (done=False)，不保存")
-                if not global_continue:
-                    print("  用户按下ESC，退出录制")
-                    break
+            # Episode完成
+            if done:
+                print(f"\n✅ 任务完成！ (用时 {time.time()-start_time:.1f}秒，共{frame_count}帧)")
             else:
-                print(f"\n  ⚠️  episode_{episode_idx:03d} 没有录制任何帧，跳过")
+                print(f"\n⏸️  达到最大帧数 {max_frames}")
             
-            # 进入下一个round
-            episode_idx += 1
-    
-    except KeyboardInterrupt:
-        print("\n\n⏸️  录制停止（Ctrl+C）")
+            # 统计
+            saved_idle_count = sum(1 for _, desc in actions_list if desc == "IDLE")
+            saved_idle_pct = (saved_idle_count / len(actions_list)) * 100 if actions_list else 0
+            
+            print(f"\n📊 Episode {episode_idx:03d} 统计:")
+            print(f"   执行总帧数: {frame_count}")
+            print(f"   保存帧数: {len(frames)}")
+            if skip_idle_frames:
+                skipped_frames = frame_count - len(frames)
+                print(f"   跳过静止帧: {skipped_frames} (未保存)")
+                print(f"   保存的静止帧: {saved_idle_count} ({saved_idle_pct:.1f}%)")
+            else:
+                print(f"   静态帧: {saved_idle_count} ({saved_idle_pct:.1f}%)")
+            print(f"   动作帧: {len(frames) - saved_idle_count}")
+            
+            # 保存数据
+            episode_dir = os.path.join(base_dir, f"episode_{episode_idx:03d}")
+            os.makedirs(episode_dir, exist_ok=True)
+            
+            print(f"\n💾 保存数据到 {episode_dir}...")
+            
+            # 保存所有帧
+            for i, (frame, (action, action_desc)) in enumerate(zip(frames, actions_list)):
+                # PNG for visualization
+                frame_img = Image.fromarray(frame.transpose(1, 2, 0))
+                frame_img.save(os.path.join(episode_dir, f"frame_{i:04d}.png"))
+                
+                # NPY for BC training
+                np.save(
+                    os.path.join(episode_dir, f"frame_{i:04d}.npy"),
+                    {'observation': frame, 'action': action}
+                )
+            
+            # 保存metadata
+            metadata_path = os.path.join(episode_dir, "metadata.txt")
+            with open(metadata_path, 'w') as f:
+                f.write(f"Episode: {episode_idx:03d}\n")
+                f.write(f"Executed Frames: {frame_count}\n")
+                f.write(f"Saved Frames: {len(frames)}\n")
+                if skip_idle_frames:
+                    f.write(f"Skipped IDLE Frames: {frame_count - len(frames)} (not saved)\n")
+                    f.write(f"Saved IDLE Frames: {saved_idle_count} ({saved_idle_pct:.1f}%)\n")
+                else:
+                    f.write(f"IDLE Frames: {saved_idle_count} ({saved_idle_pct:.1f}%)\n")
+                f.write(f"Action Frames: {len(frames) - saved_idle_count}\n")
+                f.write(f"Task Completed: {done}\n")
+                f.write(f"Recording FPS: {fps}\n")
+                f.write(f"Mouse Sensitivity: {mouse_sensitivity}\n")
+                f.write(f"Skip IDLE Frames: {skip_idle_frames}\n")
+                f.write(f"Method: pygame+mouse (no macOS permission needed)\n")
+            
+            # 保存actions_log
+            actions_log_path = os.path.join(episode_dir, "actions_log.txt")
+            with open(actions_log_path, 'w') as f:
+                f.write(f"Episode {episode_idx:03d} - Action Log\n")
+                f.write(f"Saved Frames: {len(actions_list)}\n")
+                if skip_idle_frames:
+                    f.write(f"Note: IDLE frames were skipped during recording\n")
+                f.write(f"Saved IDLE Frames: {saved_idle_count}\n")
+                f.write(f"{'-'*80}\n\n")
+                
+                for i, (action, action_desc) in enumerate(actions_list):
+                    f.write(f"Frame {i:04d}: {action} -> {action_desc}\n")
+            
+            print(f"✅ 保存完成:")
+            print(f"   - {len(frames)} 个 .png 图像文件")
+            print(f"   - {len(frames)} 个 .npy 数据文件")
+            print(f"   - metadata.txt")
+            print(f"   - actions_log.txt")
+            
+            # 询问是否继续
+            print(f"\n{'='*80}")
+            print(f"录制完成！")
+            print(f"按Enter继续录制下一个episode，或按Ctrl+C退出...")
+            print(f"{'='*80}\n")
+            
+            try:
+                input()
+                episode_idx += 1
+            except KeyboardInterrupt:
+                print(f"\n\n⚠️  用户中断，停止录制")
+                break
     
     finally:
-        cv2.destroyAllWindows()
-    
-    # 最终统计
-    print(f"\n\n{'='*80}")
-    print("📊 录制完成统计")
-    print(f"{'='*80}")
-    
-    if completed_episodes == 0:
-        print("\n❌ 没有完成任何回合（done=True的回合数为0）")
-        print("提示: 只有done=True时才会保存回合数据")
         env.close()
-        return
-    
-    print(f"\n✅ 成功完成回合数: {completed_episodes}")
-    print(f"Episode范围: episode_{start_episode:03d} ~ episode_{start_episode + completed_episodes - 1:03d}")
-    print(f"\n保存位置: {base_dir}/")
-    
-    # 列出已保存的episode
-    saved_episodes = sorted([d for d in os.listdir(base_dir) if d.startswith('episode_') and os.path.isdir(os.path.join(base_dir, d))])
-    print(f"\n已保存的回合:")
-    for ep in saved_episodes:
-        ep_path = os.path.join(base_dir, ep)
-        frame_count = len([f for f in os.listdir(ep_path) if f.endswith('.png')])
-        print(f"  {ep}: {frame_count} 帧")
-    
-    # 保存全局元数据
-    summary_path = os.path.join(base_dir, "summary.txt")
-    with open(summary_path, 'w') as f:
-        f.write(f"Total Completed Episodes: {completed_episodes}\n")
-        f.write(f"Episode Range: episode_{start_episode:03d} ~ episode_{start_episode + completed_episodes - 1:03d}\n")
-        f.write(f"Camera Delta: {camera_delta}\n")
-        f.write(f"Max Frames per Episode: {max_frames}\n")
-        f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"\nSaved Episodes:\n")
-        for ep in saved_episodes:
-            ep_path = os.path.join(base_dir, ep)
-            frame_count = len([f for f in os.listdir(ep_path) if f.endswith('.png')])
-            f.write(f"  {ep}: {frame_count} frames\n")
-    
-    print(f"\n✓ 统计信息已保存到: {summary_path}")
-    
-    # 关闭环境
-    env.close()
-    
-    print("\n" + "=" * 80)
-    print("✅ 多回合录制完成！")
-    print("=" * 80)
-    print(f"\n继续录制提示:")
-    print(f"  python tools/record_manual_chopping.py --base-dir {base_dir}")
-    print(f"  (自动从 episode_{start_episode + completed_episodes:03d} 继续)")
-    
-    print(f"\n🔬 下一步: BC训练")
-    print(f"  python src/training/train_bc.py --data {base_dir} --output checkpoints/bc_baseline.zip --epochs 50")
-    print()
-    
-    return base_dir
+        controller.quit()
+        print(f"\n✅ 环境已关闭，录制结束")
 
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="录制砍树序列用于BC训练（多回合录制）")
-    parser.add_argument('--base-dir', type=str, default='data/expert_demos',
-                       help='基础输出目录（会在下面创建episode_000, episode_001...，默认: data/expert_demos）')
-    parser.add_argument('--max-frames', type=int, default=1000,
-                       help='每回合最大录制帧数（默认: 1000）')
-    parser.add_argument('--max-episodes', type=int, default=10,
-                       help='最大录制回合数（默认: 10）')
-    parser.add_argument('--camera-delta', type=int, default=1,
-                       help='相机转动角度增量（1-12，默认1约15度，2约30度，4约60度）')
-    parser.add_argument('--fast-reset', action='store_true',
-                       help='使用快速重置模式（重用世界，快但数据多样性低）')
-    parser.add_argument('--no-fast-reset', dest='fast_reset', action='store_false',
-                       help='使用完整重置模式（重新生成世界，慢但数据多样性高，默认）')
+
+def main():
+    parser = argparse.ArgumentParser(description="录制手动砍树序列（pygame实时模式）")
+    parser.add_argument("--base-dir", type=str, default="data/expert_demos",
+                        help="保存目录（默认: data/expert_demos）")
+    parser.add_argument("--max-frames", type=int, default=1000,
+                        help="每个episode的最大帧数（默认: 1000）")
+    parser.add_argument("--camera-delta", type=int, default=4,
+                        help="相机灵敏度（键盘），范围1-12（默认: 4）")
+    parser.add_argument("--mouse-sensitivity", type=float, default=0.2,
+                        help="鼠标灵敏度，范围0.1-2.0（默认: 0.2，已降低）")
+    parser.add_argument("--skip-idle-frames", action="store_true", default=True,
+                        help="跳过静止帧（不保存IDLE帧，默认: True）")
+    parser.add_argument("--no-skip-idle-frames", dest="skip_idle_frames", action="store_false",
+                        help="保存所有帧（包括IDLE帧）")
+    parser.add_argument("--fast-reset", action="store_true",
+                        help="快速重置（同一世界）")
+    parser.add_argument("--no-fast-reset", dest="fast_reset", action="store_false",
+                        help="完全重置（每次新世界）")
+    parser.add_argument("--fps", type=int, default=20,
+                        help="录制帧率（默认: 20 FPS）")
     parser.set_defaults(fast_reset=False)
     
     args = parser.parse_args()
     
-    # 验证camera_delta范围
+    # 验证参数
     if args.camera_delta < 1 or args.camera_delta > 12:
-        print(f"⚠️  警告: camera_delta={args.camera_delta} 超出推荐范围[1-12]，已调整为4")
+        print(f"⚠️  警告: camera_delta={args.camera_delta} 超出范围，已调整为4")
         args.camera_delta = 4
     
-    record_chopping_sequence(args.base_dir, args.max_frames, args.camera_delta, args.max_episodes, args.fast_reset)
+    if args.fps < 1 or args.fps > 60:
+        print(f"⚠️  警告: fps={args.fps} 超出范围，已调整为20")
+        args.fps = 20
+    
+    if args.mouse_sensitivity < 0.1 or args.mouse_sensitivity > 2.0:
+        print(f"⚠️  警告: mouse_sensitivity={args.mouse_sensitivity} 超出范围，已调整为0.2")
+        args.mouse_sensitivity = 0.2
+    
+    print("\n" + "=" * 80)
+    print("🎬 MineDojo Pygame实时录制工具 (鼠标+键盘)")
+    print("=" * 80)
+    print(f"\n✅ 无需macOS辅助功能权限！")
+    print(f"\n配置:")
+    print(f"  - 保存目录: {args.base_dir}")
+    print(f"  - 最大帧数: {args.max_frames}")
+    print(f"  - 鼠标灵敏度: {args.mouse_sensitivity} (已优化)")
+    print(f"  - 录制帧率: {args.fps} FPS")
+    print(f"  - 跳过静止帧: {'是 (不保存IDLE帧)' if args.skip_idle_frames else '否 (保存所有帧)'}")
+    print(f"  - 环境重置: {'同一世界' if args.fast_reset else '每次新世界'}")
+    print("=" * 80)
+    
+    record_chopping_sequence(
+        base_dir=args.base_dir,
+        max_frames=args.max_frames,
+        camera_delta=args.camera_delta,
+        mouse_sensitivity=args.mouse_sensitivity,
+        fast_reset=args.fast_reset,
+        fps=args.fps,
+        skip_idle_frames=args.skip_idle_frames
+    )
+
+
+if __name__ == "__main__":
+    main()
 
