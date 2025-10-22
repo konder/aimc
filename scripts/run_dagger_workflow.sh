@@ -51,6 +51,7 @@ CHECKPOINTS_DIR="checkpoints/${TASK_ID}"
 # 标注配置
 SMART_SAMPLING=true
 FAILURE_WINDOW=10
+RANDOM_SAMPLE_RATE=0.1  # 成功episode的随机采样率（10%）
 
 # ============================================================================
 # 颜色输出
@@ -135,6 +136,14 @@ while [[ $# -gt 0 ]]; do
             SKIP_BC=true
             shift
             ;;
+        --continue-from)
+            CONTINUE_FROM="$2"
+            shift 2
+            ;;
+        --start-iteration)
+            START_ITERATION="$2"
+            shift 2
+            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -150,7 +159,17 @@ while [[ $# -gt 0 ]]; do
             echo "  --append-recording          追加录制（继续已有数据）"
             echo "  --skip-recording            跳过手动录制 (假设已有数据)"
             echo "  --skip-bc                   跳过BC训练 (假设已有BC模型)"
+            echo "  --continue-from MODEL       从指定模型继续DAgger训练"
+            echo "  --start-iteration N         从第N轮DAgger开始（与--continue-from配合）"
             echo "  -h, --help                  显示帮助信息"
+            echo ""
+            echo "标注优化（默认已启用）:"
+            echo "  智能采样: 只标注失败前${FAILURE_WINDOW}步 + 成功episode的${RANDOM_SAMPLE_RATE}%"
+            echo "  组合键: Q(前进+攻击), R(前进+跳跃), G(前进+跳跃+攻击)"
+            echo "  快捷操作: N(跳过), Z(撤销), X/ESC(完成)"
+            echo ""
+            echo "继续训练示例:"
+            echo "  bash $0 --task harvest_1_log --continue-from checkpoints/harvest_1_log/dagger_iter_1.zip --start-iteration 2 --iterations 5"
             exit 0
             ;;
         *)
@@ -312,26 +331,66 @@ fi
 # 阶段2: 评估BC基线
 # ============================================================================
 
-print_header "阶段2: 评估BC基线"
-
-print_info "评估BC策略 (${EVAL_EPISODES} episodes)..."
-
-python tools/evaluate_policy.py \
-    --model "$BC_MODEL" \
-    --episodes "$EVAL_EPISODES" \
-    --task-id "$TASK_ID" \
-    --max-steps "$MAX_STEPS" > /tmp/bc_eval.txt
-
-BC_SUCCESS_RATE=$(grep "成功率:" /tmp/bc_eval.txt | awk '{print $2}')
-print_success "BC基线成功率: $BC_SUCCESS_RATE"
+if [[ -z "$CONTINUE_FROM" ]]; then
+    # 仅在从头开始时评估BC基线
+    print_header "阶段2: 评估BC基线"
+    
+    print_info "评估BC策略 (${EVAL_EPISODES} episodes)..."
+    
+    python tools/evaluate_policy.py \
+        --model "$BC_MODEL" \
+        --episodes "$EVAL_EPISODES" \
+        --task-id "$TASK_ID" \
+        --max-steps "$MAX_STEPS" > /tmp/bc_eval.txt
+    
+    BC_SUCCESS_RATE=$(grep "成功率:" /tmp/bc_eval.txt | awk '{print $2}')
+    print_success "BC基线成功率: $BC_SUCCESS_RATE"
+else
+    print_info "继续训练模式: 跳过BC基线评估"
+fi
 
 # ============================================================================
 # 阶段3: DAgger迭代优化
 # ============================================================================
 
-CURRENT_MODEL="$BC_MODEL"
+# 确定起始模型和迭代编号
+if [[ -n "$CONTINUE_FROM" ]]; then
+    # 继续训练模式
+    print_info "继续训练模式: 从 $CONTINUE_FROM 开始"
+    CURRENT_MODEL="$CONTINUE_FROM"
+    
+    if [ ! -f "$CURRENT_MODEL" ]; then
+        print_error "指定的模型不存在: $CURRENT_MODEL"
+        exit 1
+    fi
+    
+    # 确定起始迭代编号
+    if [[ -n "$START_ITERATION" ]]; then
+        START_ITER=$START_ITERATION
+    else
+        # 从模型文件名自动推断
+        if [[ "$CURRENT_MODEL" =~ dagger_iter_([0-9]+) ]]; then
+            LAST_ITER=${BASH_REMATCH[1]}
+            START_ITER=$((LAST_ITER + 1))
+            print_info "自动检测: 上一轮为 iter_${LAST_ITER}，从 iter_${START_ITER} 开始"
+        else
+            print_error "无法从模型文件名推断迭代编号，请使用 --start-iteration 指定"
+            exit 1
+        fi
+    fi
+    
+    # 自动跳过录制和BC训练
+    SKIP_RECORDING=true
+    SKIP_BC=true
+    
+    print_success "将执行 DAgger 迭代 $START_ITER 到 $DAGGER_ITERATIONS"
+else
+    # 从头开始训练
+    CURRENT_MODEL="$BC_MODEL"
+    START_ITER=1
+fi
 
-for iter in $(seq 1 $DAGGER_ITERATIONS); do
+for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     print_header "阶段3: DAgger迭代 $iter/$DAGGER_ITERATIONS"
     
     # 3.1 收集失败状态
@@ -357,11 +416,20 @@ for iter in $(seq 1 $DAGGER_ITERATIONS); do
     print_info "[$iter] 步骤2: 智能标注失败场景..."
     print_warning "即将打开标注界面，请手动标注失败场景"
     echo ""
+    print_info "智能采样已启用:"
+    echo "  - 失败前 $FAILURE_WINDOW 步: 100%标注（关键决策）"
+    echo "  - 成功episode: ${RANDOM_SAMPLE_RATE}%随机采样"
+    echo "  - 预计节省 80%+ 标注时间"
+    echo ""
     print_info "标注控制:"
-    echo "  WASD/IJKL/F  - 标注动作"
-    echo "  N            - 跳过当前状态"
-    echo "  Z            - 撤销上一个标注"
-    echo "  X/ESC        - 完成标注"
+    echo "  基础动作: W/A/S/D (移动), I/J/K/L (视角), F (攻击), Space (跳跃)"
+    echo "  组合动作: Q (前进+攻击), R (前进+跳跃), G (前进+跳跃+攻击)"
+    echo "  快捷操作: N (跳过), Z (撤销), X/ESC (完成)"
+    echo ""
+    print_info "标注策略:"
+    echo "  - 专注失败前的关键步骤"
+    echo "  - 标注'应该做什么'而非'不应该做什么'"
+    echo "  - 不确定的状态直接按 N 跳过"
     echo ""
     
     read -p "按Enter开始标注..." 
@@ -370,7 +438,7 @@ for iter in $(seq 1 $DAGGER_ITERATIONS); do
     
     LABEL_ARGS="--states $STATES_DIR --output $LABELS_FILE"
     if [ "$SMART_SAMPLING" = true ]; then
-        LABEL_ARGS="$LABEL_ARGS --smart-sampling --failure-window $FAILURE_WINDOW"
+        LABEL_ARGS="$LABEL_ARGS --smart-sampling --failure-window $FAILURE_WINDOW --random-sample-rate $RANDOM_SAMPLE_RATE"
     fi
     
     python tools/label_states.py $LABEL_ARGS
