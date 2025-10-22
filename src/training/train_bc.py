@@ -208,9 +208,8 @@ def train_bc_with_ppo(
     def make_env():
         return make_minedojo_env(
             task_id=task_id,
-            use_mineclip=False,
             use_camera_smoothing=False,
-            max_steps=1000
+            max_episode_steps=1000
         )
     
     env = DummyVecEnv([make_env])
