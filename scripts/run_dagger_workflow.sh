@@ -385,7 +385,7 @@ if [[ -z "$CONTINUE_FROM" ]]; then
     # 仅在从头开始时评估BC基线
     print_header "阶段2: 评估BC基线"
     
-    print_info "评估BC策略 (${EVAL_EPISODES} episodes)..."
+    print_info "评估BC策略 $BC_MODEL (${EVAL_EPISODES} episodes)..."
     
     python tools/evaluate_policy.py \
         --model "$BC_MODEL" \
