@@ -155,42 +155,36 @@ class KeyboardController:
         
         return action
 
-def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, camera_delta=4, max_rounds=10, start_round=0, fast_reset=False):
+def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, camera_delta=4, max_episodes=10, fast_reset=False):
     """
     录制砍树过程（手动控制，支持多回合）
     
     Args:
-        base_dir: 基础输出目录（会在下面创建round_0, round_1...）
+        base_dir: 基础输出目录（会在下面创建episode_000, episode_001...）
         max_frames: 每回合最大帧数
         camera_delta: 相机转动角度增量（1-12，默认4约60度）
-        max_rounds: 最大录制回合数（默认10）
-        start_round: 起始回合编号（默认0，用于断点续录）
+        max_episodes: 最大录制回合数（默认10）
         fast_reset: 是否使用快速重置（True=重用世界快速，False=重新生成世界慢但多样）
     """
     # 确保基础目录存在
     os.makedirs(base_dir, exist_ok=True)
     
-    # 检查已有的round数量（如果start_round=0，给出提示）
-    if start_round == 0:
-        existing_rounds = [d for d in os.listdir(base_dir) if d.startswith('round_') and os.path.isdir(os.path.join(base_dir, d))]
-        if existing_rounds:
-            print(f"\n⚠️  检测到已有 {len(existing_rounds)} 个回合: {sorted(existing_rounds)}")
-            print(f"提示: 使用 --start-round {len(existing_rounds)} 可以继续录制")
-            response = input(f"\n是否删除所有已有数据并从头开始？(y/N): ")
-            if response.lower() == 'y':
-                import shutil
-                for rd in existing_rounds:
-                    shutil.rmtree(os.path.join(base_dir, rd))
-                print("✓ 已删除所有旧数据")
-            else:
-                print("❌ 取消录制")
-                return
+    # 自动检测下一个episode编号
+    existing_episodes = sorted([d for d in os.listdir(base_dir) if d.startswith('episode_') and os.path.isdir(os.path.join(base_dir, d))])
+    if existing_episodes:
+        last_episode = existing_episodes[-1]
+        last_num = int(last_episode.split('_')[1])
+        start_episode = last_num + 1
+        print(f"\n✓ 检测到已有 {len(existing_episodes)} 个episode，从 episode_{start_episode:03d} 开始")
+    else:
+        start_episode = 0
+        print(f"\n✓ 目录为空，从 episode_000 开始")
     
     print("=" * 80)
     print("MineCLIP 砍树序列录制工具（多回合录制）")
     print("=" * 80)
     print(f"\n基础目录: {base_dir}")
-    print(f"回合范围: round_{start_round} ~ round_{start_round + max_rounds - 1}")
+    print(f"Episode范围: episode_{start_episode:03d} ~ episode_{start_episode + max_episodes - 1:03d}")
     print(f"每回合最大帧数: {max_frames}")
     print(f"Reset模式: {'快速模式(重用世界)' if fast_reset else '完整模式(重新生成世界)'}")
     if not fast_reset:
@@ -219,7 +213,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     cv2.resizeWindow(window_name, 1024, 640)
     
     # 全局统计
-    completed_rounds = 0
+    completed_episodes = 0
     global_continue = True
     
     print("\n[2/3] 开始多回合录制...")
@@ -233,17 +227,17 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     
     try:
         # 多回合循环
-        round_idx = start_round
-        while round_idx < start_round + max_rounds:
+        episode_idx = start_episode
+        while episode_idx < start_episode + max_episodes:
             if not global_continue:
                 break
             
             # 重新录制标志
-            retry_current_round = False
+            retry_current_episode = False
                 
             # 重置环境，开始新回合
             print(f"\n{'='*80}")
-            print(f"🎮 Round {round_idx}")
+            print(f"🎮 Round {episode_idx}")
             print(f"{'='*80}")
             
             print(f"  重置环境中...")
@@ -258,6 +252,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
             
             # 本回合数据
             frames = []
+            actions_list = []  # 保存每一帧的action
             step_count = 0
             total_reward = 0
             task_completed = False
@@ -265,12 +260,12 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
             # 显示初始画面，让用户看到新环境
             display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
             display_frame = cv2.resize(display_frame, (1024, 640))
-            cv2.putText(display_frame, f"Round {round_idx} - Ready! Press any key to start", 
+            cv2.putText(display_frame, f"Round {episode_idx} - Ready! Press any key to start", 
                        (200, 320), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             cv2.imshow(window_name, display_frame)
             cv2.waitKey(1000)  # 等待1秒，让用户看到新环境
             
-            print(f"  开始录制 round_{round_idx}...")
+            print(f"  开始录制 episode_{episode_idx:03d}...")
             print(f"  目标: 完成任务 (done=True)")
             print(f"  控制: Q=重录当前回合 | ESC=退出程序 | 完成=自动保存\n")
             
@@ -285,16 +280,18 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 
                 # 处理系统按键
                 if ord('q') in keys_pressed or ord('Q') in keys_pressed:
-                    print(f"\n🔄 重新录制 round_{round_idx}（用户按下Q）")
+                    print(f"\n🔄 重新录制 episode_{episode_idx:03d}（用户按下Q）")
                     print(f"   当前回合数据不保存，即将重置环境...")
-                    retry_current_round = True  # 标记需要重新录制当前round
+                    retry_current_episode = True  # 标记需要重新录制当前round
                     frames = []  # 清空帧数据
+                    actions_list = []  # 清空动作数据
                     break  # 跳出while循环，重新开始当前round
                 elif 27 in keys_pressed:  # ESC
                     print(f"\n❌ 退出程序（用户按下ESC）")
                     print(f"   当前回合数据不保存")
                     global_continue = False  # 停止所有录制
                     frames = []  # 清空帧数据
+                    actions_list = []  # 清空动作数据
                     break  # 跳出while循环并退出for循环
                 
                 # 更新动作状态（每帧重置，只保留当前检测到的按键）
@@ -318,8 +315,9 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 if obs.shape[0] == 3:
                     obs = obs.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
                 
-                # 保存帧
+                # 保存帧和动作
                 frames.append(obs.copy())
+                actions_list.append(action.copy())
                 step_count += 1
                 total_reward += reward
                 
@@ -329,8 +327,8 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 
                 # 添加信息overlay
                 info_text = [
-                    f"Round: {round_idx} (目标: {start_round + max_rounds - 1})",
-                    f"Completed: {completed_rounds}",
+                    f"Round: {episode_idx} (目标: {start_episode + max_episodes - 1})",
+                    f"Completed: {completed_episodes}",
                     f"Frame: {step_count}/{max_frames}",
                     f"Reward: {reward:.3f}",
                     f"Total: {total_reward:.3f}",
@@ -357,7 +355,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 # 检查任务是否完成（通过done信号）
                 if done:
                     task_completed = True
-                    print(f"\n🎉 round_{round_idx}: 任务完成！已录制 {step_count} 帧")
+                    print(f"\n🎉 episode_{episode_idx:03d}: 任务完成！已录制 {step_count} 帧")
                     # 检查是否是因为获得了目标物品
                     inventory = info.get('delta_inv', {})
                     if inventory:
@@ -369,46 +367,69 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 time.sleep(0.05)
             
             # 回合结束后的处理
-            if retry_current_round:
+            if retry_current_episode:
                 # 按了Q键，重新录制当前round
-                print(f"  准备重新录制 round_{round_idx}...")
-                # round_idx不变，继续while循环
+                print(f"  准备重新录制 episode_{episode_idx:03d}...")
+                # episode_idx不变，继续while循环
                 continue
             
             # 正常结束：保存数据（只有done=True才保存）
             if task_completed and len(frames) > 0:
                 # 创建round目录
-                round_dir = os.path.join(base_dir, f"round_{round_idx}")
-                os.makedirs(round_dir, exist_ok=True)
+                episode_dir = os.path.join(base_dir, f"episode_{episode_idx:03d}")
+                os.makedirs(episode_dir, exist_ok=True)
                 
-                print(f"\n  💾 保存 round_{round_idx} 数据...")
+                print(f"\n  💾 保存 episode_{episode_idx:03d} 数据...")
+                
+                # 1. 保存PNG图片（用于可视化验证）
+                print(f"    [1/3] 保存PNG图片...")
                 for i, frame in enumerate(frames):
                     img = Image.fromarray(frame)
                     filename = f"frame_{i:05d}.png"
-                    filepath = os.path.join(round_dir, filename)
+                    filepath = os.path.join(episode_dir, filename)
                     img.save(filepath)
                 
-                # 保存回合元数据
-                metadata_path = os.path.join(round_dir, "metadata.txt")
+                # 2. 保存observation和action的numpy数据（用于BC训练）
+                print(f"    [2/3] 保存BC训练数据...")
+                for i, (obs, action) in enumerate(zip(frames, actions_list)):
+                    frame_data = {
+                        'observation': obs,  # (H, W, C) RGB uint8
+                        'action': action     # (8,) int64
+                    }
+                    filename = f"frame_{i:05d}.npy"
+                    filepath = os.path.join(episode_dir, filename)
+                    np.save(filepath, frame_data)
+                
+                # 3. 保存回合元数据
+                print(f"    [3/3] 保存元数据...")
+                metadata_path = os.path.join(episode_dir, "metadata.txt")
                 with open(metadata_path, 'w') as f:
-                    f.write(f"Round: {round_idx}\n")
+                    f.write(f"Round: {episode_idx}\n")
                     f.write(f"Frames: {len(frames)}\n")
+                    f.write(f"Actions: {len(actions_list)}\n")
                     f.write(f"Total Reward: {total_reward:.3f}\n")
                     f.write(f"Task Completed: True\n")
                     f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"\nData Format:\n")
+                    f.write(f"  - frame_XXXXX.png: 可视化图片 (H, W, 3) RGB\n")
+                    f.write(f"  - frame_XXXXX.npy: BC训练数据 {{observation, action}}\n")
+                    f.write(f"  - observation shape: {frames[0].shape}\n")
+                    f.write(f"  - action shape: {actions_list[0].shape}\n")
                 
-                print(f"  ✓ round_{round_idx} 已保存: {len(frames)} 帧 -> {round_dir}")
-                completed_rounds += 1
+                print(f"  ✓ episode_{episode_idx:03d} 已保存: {len(frames)} 帧 -> {episode_dir}")
+                print(f"    - {len(frames)} PNG图片")
+                print(f"    - {len(actions_list)} NPY文件（BC训练）")
+                completed_episodes += 1
             elif not task_completed:
-                print(f"\n  ⚠️  round_{round_idx} 未完成 (done=False)，不保存")
+                print(f"\n  ⚠️  episode_{episode_idx:03d} 未完成 (done=False)，不保存")
                 if not global_continue:
                     print("  用户按下ESC，退出录制")
                     break
             else:
-                print(f"\n  ⚠️  round_{round_idx} 没有录制任何帧，跳过")
+                print(f"\n  ⚠️  episode_{episode_idx:03d} 没有录制任何帧，跳过")
             
             # 进入下一个round
-            round_idx += 1
+            episode_idx += 1
     
     except KeyboardInterrupt:
         print("\n\n⏸️  录制停止（Ctrl+C）")
@@ -421,37 +442,37 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     print("📊 录制完成统计")
     print(f"{'='*80}")
     
-    if completed_rounds == 0:
+    if completed_episodes == 0:
         print("\n❌ 没有完成任何回合（done=True的回合数为0）")
         print("提示: 只有done=True时才会保存回合数据")
         env.close()
         return
     
-    print(f"\n✅ 成功完成回合数: {completed_rounds}")
-    print(f"回合范围: round_{start_round} ~ round_{start_round + completed_rounds - 1}")
+    print(f"\n✅ 成功完成回合数: {completed_episodes}")
+    print(f"Episode范围: episode_{start_episode:03d} ~ episode_{start_episode + completed_episodes - 1:03d}")
     print(f"\n保存位置: {base_dir}/")
     
-    # 列出已保存的round
-    saved_rounds = sorted([d for d in os.listdir(base_dir) if d.startswith('round_') and os.path.isdir(os.path.join(base_dir, d))])
+    # 列出已保存的episode
+    saved_episodes = sorted([d for d in os.listdir(base_dir) if d.startswith('episode_') and os.path.isdir(os.path.join(base_dir, d))])
     print(f"\n已保存的回合:")
-    for rd in saved_rounds:
-        rd_path = os.path.join(base_dir, rd)
-        frame_count = len([f for f in os.listdir(rd_path) if f.endswith('.png')])
-        print(f"  {rd}: {frame_count} 帧")
+    for ep in saved_episodes:
+        ep_path = os.path.join(base_dir, ep)
+        frame_count = len([f for f in os.listdir(ep_path) if f.endswith('.png')])
+        print(f"  {ep}: {frame_count} 帧")
     
     # 保存全局元数据
     summary_path = os.path.join(base_dir, "summary.txt")
     with open(summary_path, 'w') as f:
-        f.write(f"Total Completed Rounds: {completed_rounds}\n")
-        f.write(f"Round Range: round_{start_round} ~ round_{start_round + completed_rounds - 1}\n")
+        f.write(f"Total Completed Episodes: {completed_episodes}\n")
+        f.write(f"Episode Range: episode_{start_episode:03d} ~ episode_{start_episode + completed_episodes - 1:03d}\n")
         f.write(f"Camera Delta: {camera_delta}\n")
-        f.write(f"Max Frames per Round: {max_frames}\n")
+        f.write(f"Max Frames per Episode: {max_frames}\n")
         f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"\nSaved Rounds:\n")
-        for rd in saved_rounds:
-            rd_path = os.path.join(base_dir, rd)
-            frame_count = len([f for f in os.listdir(rd_path) if f.endswith('.png')])
-            f.write(f"  {rd}: {frame_count} frames\n")
+        f.write(f"\nSaved Episodes:\n")
+        for ep in saved_episodes:
+            ep_path = os.path.join(base_dir, ep)
+            frame_count = len([f for f in os.listdir(ep_path) if f.endswith('.png')])
+            f.write(f"  {ep}: {frame_count} frames\n")
     
     print(f"\n✓ 统计信息已保存到: {summary_path}")
     
@@ -462,10 +483,11 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     print("✅ 多回合录制完成！")
     print("=" * 80)
     print(f"\n继续录制提示:")
-    print(f"  python tools/record_manual_chopping.py --start-round {start_round + completed_rounds}")
+    print(f"  python tools/record_manual_chopping.py --base-dir {base_dir}")
+    print(f"  (自动从 episode_{start_episode + completed_episodes:03d} 继续)")
     
-    print(f"\n🔬 下一步: 运行验证脚本分析这些帧")
-    print(f"  python tools/verify_mineclip_16frames.py --sequence-dir {base_dir}/round_0")
+    print(f"\n🔬 下一步: BC训练")
+    print(f"  python src/training/train_bc.py --data {base_dir} --output checkpoints/bc_baseline.zip")
     print()
     
     return base_dir
@@ -473,15 +495,13 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="录制砍树序列用于验证MineCLIP（多回合录制）")
+    parser = argparse.ArgumentParser(description="录制砍树序列用于BC训练（多回合录制）")
     parser.add_argument('--base-dir', type=str, default='data/expert_demos',
-                       help='基础输出目录（会在下面创建round_0, round_1...，默认: data/expert_demos）')
+                       help='基础输出目录（会在下面创建episode_000, episode_001...，默认: data/expert_demos）')
     parser.add_argument('--max-frames', type=int, default=1000,
                        help='每回合最大录制帧数（默认: 1000）')
-    parser.add_argument('--max-rounds', type=int, default=10,
+    parser.add_argument('--max-episodes', type=int, default=10,
                        help='最大录制回合数（默认: 10）')
-    parser.add_argument('--start-round', type=int, default=0,
-                       help='起始回合编号（默认: 0，用于断点续录）')
     parser.add_argument('--camera-delta', type=int, default=1,
                        help='相机转动角度增量（1-12，默认1约15度，2约30度，4约60度）')
     parser.add_argument('--fast-reset', action='store_true',
@@ -497,5 +517,5 @@ if __name__ == "__main__":
         print(f"⚠️  警告: camera_delta={args.camera_delta} 超出推荐范围[1-12]，已调整为4")
         args.camera_delta = 4
     
-    record_chopping_sequence(args.base_dir, args.max_frames, args.camera_delta, args.max_rounds, args.start_round, args.fast_reset)
+    record_chopping_sequence(args.base_dir, args.max_frames, args.camera_delta, args.max_episodes, args.fast_reset)
 
