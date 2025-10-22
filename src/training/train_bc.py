@@ -202,6 +202,14 @@ def train_bc_with_ppo(
         device: 计算设备
     """
     
+    # MPS设备稳定性调整
+    if device == "mps":
+        print(f"\n⚠️  MPS设备检测到，应用稳定性优化:")
+        print(f"  - 降低学习率: 3e-4 -> 1e-4")
+        print(f"  - 启用梯度裁剪")
+        print(f"  - 添加数值稳定性保护\n")
+        learning_rate = 1e-4  # MPS上使用更低的学习率
+    
     print(f"\n{'='*60}")
     print(f"行为克隆训练")
     print(f"{'='*60}")
@@ -249,6 +257,19 @@ def train_bc_with_ppo(
     print(f"{'='*60}\n")
     
     dataset = ExpertDataset(observations, actions)
+    
+    # 验证数据归一化（调试信息）
+    sample_obs = dataset.observations[:4]
+    print(f"数据集样本检查:")
+    print(f"  形状: {sample_obs.shape}")
+    print(f"  类型: {sample_obs.dtype}")
+    print(f"  范围: [{sample_obs.min().item():.3f}, {sample_obs.max().item():.3f}]")
+    print(f"  均值: {sample_obs.mean().item():.3f}")
+    if sample_obs.max() > 1.5:
+        print(f"  ⚠️  警告: 数据未正确归一化！应该在[0,1]范围内")
+    else:
+        print(f"  ✓ 数据归一化正确\n")
+    
     dataloader = DataLoader(
         dataset, 
         batch_size=batch_size, 
@@ -269,6 +290,7 @@ def train_bc_with_ppo(
         epoch_loss = 0.0
         epoch_acc = 0.0
         num_batches = 0
+        num_skipped = 0
         
         for batch_obs, batch_actions in dataloader:
             batch_obs = batch_obs.to(model.device)
@@ -307,16 +329,29 @@ def train_bc_with_ppo(
             # BC loss = -log_prob (最大化专家动作的概率)
             loss = -log_prob.mean()
             
+            # 检查loss有效性（MPS稳定性保护）
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"  警告: Batch {num_batches} loss无效 (NaN/Inf)，跳过")
+                num_skipped += 1
+                continue
+            
             # 反向传播
             loss.backward()
+            
+            # 梯度裁剪（关键！MPS设备必需）
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
+            
             optimizer.step()
             
             epoch_loss += loss.item()
             num_batches += 1
         
-        avg_loss = epoch_loss / num_batches
+        avg_loss = epoch_loss / num_batches if num_batches > 0 else float('inf')
         
-        print(f"Epoch {epoch+1}/{n_epochs} | Loss: {avg_loss:.4f}")
+        status_msg = f"Epoch {epoch+1}/{n_epochs} | Loss: {avg_loss:.4f}"
+        if num_skipped > 0:
+            status_msg += f" | 跳过: {num_skipped} batches"
+        print(status_msg)
     
     print(f"\n{'='*60}")
     print(f"预训练完成！")

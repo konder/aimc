@@ -93,18 +93,59 @@ def evaluate_policy(
         
         print(f"Episode {ep+1}/{num_episodes} ", end="", flush=True)
         
+        # 动作统计
+        action_counts = {
+            'idle': 0,
+            'forward': 0,
+            'back': 0,
+            'left': 0,
+            'right': 0,
+            'jump': 0,
+            'attack': 0,
+            'camera_move': 0
+        }
+        
         while not done and episode_length < max_steps:
             action, _ = policy.predict(obs, deterministic=deterministic)
             
-            # 调试：打印前几步的动作
-            if episode_length < 5 or (episode_length < 50 and episode_length % 10 == 0):
-                print(f"\n  步骤{episode_length}: 动作={action}")
+            # 统计动作
+            is_idle = (action[0] == 0 and action[1] == 0 and action[2] == 0 and 
+                      action[3] == 12 and action[4] == 12 and action[5] == 0)
+            
+            if is_idle:
+                action_counts['idle'] += 1
+            else:
+                if action[0] == 1:
+                    action_counts['forward'] += 1
+                elif action[0] == 2:
+                    action_counts['back'] += 1
+                
+                if action[1] == 1:
+                    action_counts['left'] += 1
+                elif action[1] == 2:
+                    action_counts['right'] += 1
+                
+                if action[2] == 1:
+                    action_counts['jump'] += 1
+                
+                if action[5] == 3:
+                    action_counts['attack'] += 1
+                
+                if action[3] != 12 or action[4] != 12:
+                    action_counts['camera_move'] += 1
+            
+            # 打印前20步的详细动作
+            if episode_length < 20:
+                action_str = "IDLE" if is_idle else str(action)
+                print(f"\n  步骤{episode_length:3d}: {action_str}")
+            elif episode_length == 20:
+                print(f"\n  ... (后续步骤省略，仅显示统计)")
             
             obs, reward, done, info = env.step(action)
             episode_reward += reward
             episode_length += 1
             
-            if episode_length % 50 == 0:
+            if episode_length % 100 == 0:
                 print(".", end="", flush=True)
         
         # 判断成功
@@ -114,7 +155,18 @@ def evaluate_policy(
         episode_lengths.append(episode_length)
         
         status = "✓" if success else "✗"
-        print(f" {status} | 步数:{episode_length:3d} | 奖励:{episode_reward:6.2f}")
+        
+        # 打印动作统计
+        total_actions = sum(action_counts.values())
+        print(f"\n  动作统计 (共{episode_length}步):")
+        print(f"    IDLE: {action_counts['idle']:4d} ({action_counts['idle']/episode_length*100:5.1f}%)")
+        print(f"    前进: {action_counts['forward']:4d} ({action_counts['forward']/episode_length*100:5.1f}%)")
+        print(f"    后退: {action_counts['back']:4d} ({action_counts['back']/episode_length*100:5.1f}%)")
+        print(f"    攻击: {action_counts['attack']:4d} ({action_counts['attack']/episode_length*100:5.1f}%)")
+        print(f"    跳跃: {action_counts['jump']:4d} ({action_counts['jump']/episode_length*100:5.1f}%)")
+        print(f"    镜头: {action_counts['camera_move']:4d} ({action_counts['camera_move']/episode_length*100:5.1f}%)")
+        
+        print(f"\n {status} | 步数:{episode_length:3d} | 奖励:{episode_reward:6.2f}")
     
     env.close()
     
