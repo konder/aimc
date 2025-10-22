@@ -59,7 +59,12 @@ def evaluate_policy(
     # 加载策略
     try:
         policy = PPO.load(model_path)
-        print(f"✓ 策略加载成功\n")
+        print(f"✓ 策略加载成功")
+        print(f"  策略类型: {type(policy)}")
+        print(f"  设备: {policy.device}")
+        print(f"  动作空间: {policy.action_space}")
+        print(f"  观察空间: {policy.observation_space}")
+        print()
     except Exception as e:
         print(f"✗ 策略加载失败: {e}")
         return None
@@ -90,6 +95,11 @@ def evaluate_policy(
         
         while not done and episode_length < max_steps:
             action, _ = policy.predict(obs, deterministic=deterministic)
+            
+            # 调试：打印前几步的动作
+            if episode_length < 5 or (episode_length < 50 and episode_length % 10 == 0):
+                print(f"\n  步骤{episode_length}: 动作={action}")
+            
             obs, reward, done, info = env.step(action)
             episode_reward += reward
             episode_length += 1

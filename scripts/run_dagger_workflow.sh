@@ -25,6 +25,7 @@ MAX_STEPS=1000
 BC_EPOCHS=50
 BC_LEARNING_RATE=0.0003
 BC_BATCH_SIZE=64
+DEVICE="mps"  # 训练设备: auto/cpu/cuda/mps (macOS默认mps)
 
 # DAgger配置
 DAGGER_ITERATIONS=3
@@ -151,6 +152,10 @@ while [[ $# -gt 0 ]]; do
             TRAINING_METHOD="$2"
             shift 2
             ;;
+        --device)
+            DEVICE="$2"
+            shift 2
+            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -169,6 +174,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --continue-from MODEL       从指定模型继续DAgger训练"
             echo "  --start-iteration N         从第N轮DAgger开始（与--continue-from配合）"
             echo "  --method METHOD             训练方法 (默认: dagger, 可选: ppo, hybrid)"
+            echo "  --device DEVICE             训练设备 (默认: mps, 可选: auto, cpu, cuda, mps)"
             echo "  -h, --help                  显示帮助信息"
             echo ""
             echo "目录结构:"
@@ -225,6 +231,7 @@ esac
 print_info "配置信息:"
 echo "  任务ID: $TASK_ID"
 echo "  训练方法: $TRAINING_METHOD"
+echo "  训练设备: $DEVICE"
 echo "  数据目录: $EXPERT_DIR"
 echo "  模型目录: $CHECKPOINTS_DIR"
 echo ""
@@ -345,6 +352,7 @@ if [[ -z "$SKIP_BC" ]]; then
     echo "  训练轮数: $BC_EPOCHS"
     echo "  学习率: $BC_LEARNING_RATE"
     echo "  批次大小: $BC_BATCH_SIZE"
+    echo "  训练设备: $DEVICE"
     echo ""
     
     python src/training/train_bc.py \
@@ -352,7 +360,8 @@ if [[ -z "$SKIP_BC" ]]; then
         --output "$BC_MODEL" \
         --epochs "$BC_EPOCHS" \
         --learning-rate "$BC_LEARNING_RATE" \
-        --batch-size "$BC_BATCH_SIZE"
+        --batch-size "$BC_BATCH_SIZE" \
+        --device "$DEVICE"
     
     if [ $? -eq 0 ]; then
         print_success "BC训练完成: $BC_MODEL"
@@ -507,7 +516,8 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
         --base-data "$BASE_DATA" \
         --new-data "$LABELS_FILE" \
         --output "$DAGGER_MODEL" \
-        --epochs "$DAGGER_EPOCHS"
+        --epochs "$DAGGER_EPOCHS" \
+        --device "$DEVICE"
     
     if [ $? -ne 0 ]; then
         print_error "DAgger训练失败"

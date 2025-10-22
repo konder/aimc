@@ -329,6 +329,13 @@ def main():
         help="训练轮数（默认: 30）"
     )
     
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="计算设备 (auto/cpu/cuda/mps，默认: auto)"
+    )
+    
     args = parser.parse_args()
     
     if args.auto:
