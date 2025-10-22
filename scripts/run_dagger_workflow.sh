@@ -34,13 +34,19 @@ DAGGER_EPOCHS=30
 # 评估配置
 EVAL_EPISODES=20
 
-# 数据路径
+# 录制配置
+NUM_EXPERT_EPISODES=10
+CAMERA_DELTA=1
+MAX_FRAMES=500
+APPEND_RECORDING=false  # 是否追加录制（继续已有数据）
+
+# 数据路径（基础路径，会根据 TASK_ID 自动创建子目录）
 BASE_DIR="data"
-EXPERT_DIR="${BASE_DIR}/expert_demos"
-POLICY_STATES_DIR="${BASE_DIR}/policy_states"
-EXPERT_LABELS_DIR="${BASE_DIR}/expert_labels"
-DAGGER_DATA_DIR="${BASE_DIR}/dagger"
-CHECKPOINTS_DIR="checkpoints"
+EXPERT_DIR="${BASE_DIR}/expert_demos/${TASK_ID}"
+POLICY_STATES_DIR="${BASE_DIR}/policy_states/${TASK_ID}"
+EXPERT_LABELS_DIR="${BASE_DIR}/expert_labels/${TASK_ID}"
+DAGGER_DATA_DIR="${BASE_DIR}/dagger/${TASK_ID}"
+CHECKPOINTS_DIR="checkpoints/${TASK_ID}"
 
 # 标注配置
 SMART_SAMPLING=true
@@ -105,6 +111,22 @@ while [[ $# -gt 0 ]]; do
             EVAL_EPISODES="$2"
             shift 2
             ;;
+        --num-episodes)
+            NUM_EXPERT_EPISODES="$2"
+            shift 2
+            ;;
+        --camera-delta)
+            CAMERA_DELTA="$2"
+            shift 2
+            ;;
+        --max-frames)
+            MAX_FRAMES="$2"
+            shift 2
+            ;;
+        --append-recording)
+            APPEND_RECORDING=true
+            shift
+            ;;
         --skip-recording)
             SKIP_RECORDING=true
             shift
@@ -122,6 +144,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --bc-epochs N               BC训练轮数 (默认: 50)"
             echo "  --collect-episodes N        每轮收集episode数 (默认: 20)"
             echo "  --eval-episodes N           评估episode数 (默认: 20)"
+            echo "  --num-episodes N            录制专家演示数量 (默认: 10)"
+            echo "  --camera-delta N            相机灵敏度 (默认: 1)"
+            echo "  --max-frames N              每个episode最大帧数 (默认: 500)"
+            echo "  --append-recording          追加录制（继续已有数据）"
             echo "  --skip-recording            跳过手动录制 (假设已有数据)"
             echo "  --skip-bc                   跳过BC训练 (假设已有BC模型)"
             echo "  -h, --help                  显示帮助信息"
@@ -157,46 +183,93 @@ print_success "目录结构已准备"
 # ============================================================================
 
 if [[ -z "$SKIP_RECORDING" ]]; then
-    print_header "阶段0: 录制专家演示"
+    print_header "阶段0: 录制专家演示 (任务: ${TASK_ID})"
     
-    print_info "准备录制专家演示数据..."
-    print_info "请在游戏中演示如何完成任务 (${TASK_ID})"
-    print_info "建议录制 10-15 个成功的episode"
-    echo ""
-    print_info "控制说明:"
-    echo "  WASD     - 移动"
-    echo "  IJKL     - 视角"
-    echo "  F        - 攻击"
-    echo "  Space    - 跳跃"
-    echo "  Q        - 重录当前回合"
-    echo "  ESC      - 退出录制"
-    echo ""
+    # 检查已有数据
+    EXISTING_EPISODES=$(find "$EXPERT_DIR" -type d -name "episode_*" 2>/dev/null | wc -l | tr -d ' ')
     
-    read -p "按Enter开始录制，或按Ctrl+C取消..." 
-    
-    python tools/record_manual_chopping.py \
-        --base-dir "$EXPERT_DIR" \
-        --max-episodes 15 \
-        --max-frames 1000 \
-        --task-id "$TASK_ID"
-    
-    if [ $? -eq 0 ]; then
-        print_success "专家演示录制完成"
+    if [ "$EXISTING_EPISODES" -gt 0 ]; then
+        print_info "已有数据: $EXISTING_EPISODES 个episode"
+        if [ "$APPEND_RECORDING" = true ]; then
+            print_info "追加模式: 继续录制更多episodes"
+            REMAINING=$((NUM_EXPERT_EPISODES - EXISTING_EPISODES))
+            if [ $REMAINING -le 0 ]; then
+                print_warning "已有 $EXISTING_EPISODES 个episodes，达到目标 $NUM_EXPERT_EPISODES"
+                print_info "如需继续录制，请使用 --num-episodes 指定更大的数量"
+            else
+                print_info "将录制 $REMAINING 个额外的episodes (目标: ${NUM_EXPERT_EPISODES})"
+            fi
+        else
+            print_warning "发现已有数据！"
+            print_warning "使用 --append-recording 继续录制，或 --skip-recording 跳过"
+            read -p "是否覆盖已有数据？(y/N): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                print_info "取消录制，使用已有数据"
+                SKIP_RECORDING=true
+            else
+                print_warning "将覆盖已有数据..."
+                rm -rf "${EXPERT_DIR}/episode_"*
+                EXISTING_EPISODES=0
+            fi
+        fi
     else
-        print_error "录制失败"
-        exit 1
+        print_info "未找到已有数据，将录制 $NUM_EXPERT_EPISODES 个episodes"
+    fi
+    
+    if [[ -z "$SKIP_RECORDING" ]]; then
+        echo ""
+        print_info "录制配置:"
+        echo "  任务ID: $TASK_ID"
+        echo "  目标episodes: $NUM_EXPERT_EPISODES"
+        echo "  已有episodes: $EXISTING_EPISODES"
+        echo "  每episode最大帧数: $MAX_FRAMES"
+        echo "  相机灵敏度: $CAMERA_DELTA"
+        echo "  数据保存路径: $EXPERT_DIR"
+        echo ""
+        print_info "控制说明:"
+        echo "  WASD     - 移动"
+        echo "  IJKL     - 视角"
+        echo "  F        - 攻击"
+        echo "  Space    - 跳跃"
+        echo "  Q        - 重录当前回合（不保存）"
+        echo "  ESC      - 退出录制"
+        echo ""
+        print_info "提示: 每次成功获得木头后，会自动保存为新的episode"
+        echo ""
+        
+        read -p "按Enter开始录制，或按Ctrl+C取消..." 
+        
+        python tools/record_manual_chopping.py \
+            --max-frames "$MAX_FRAMES" \
+            --camera-delta "$CAMERA_DELTA"
+        
+        if [ $? -eq 0 ]; then
+            print_success "专家演示录制完成"
+        else
+            print_error "录制失败或被用户中断"
+            # 不退出，允许用户使用已录制的数据继续
+        fi
     fi
 else
     print_info "跳过录制，使用已有数据: $EXPERT_DIR"
 fi
 
 # 检查是否有数据
-EPISODE_COUNT=$(find "$EXPERT_DIR" -type d -name "episode_*" | wc -l)
+EPISODE_COUNT=$(find "$EXPERT_DIR" -type d -name "episode_*" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$EPISODE_COUNT" -eq 0 ]; then
-    print_error "未找到专家演示数据！请先录制数据。"
+    print_error "未找到专家演示数据！"
+    print_error "数据路径: $EXPERT_DIR"
+    print_info "请先录制数据，或使用正确的 --task 参数"
     exit 1
 fi
+print_success "数据路径: $EXPERT_DIR"
 print_success "找到 $EPISODE_COUNT 个episode"
+
+# 警告数据量不足
+if [ "$EPISODE_COUNT" -lt 5 ]; then
+    print_warning "警告: 只有 $EPISODE_COUNT 个episodes，建议至少 5 个"
+    print_warning "BC训练效果可能较差，建议使用 --append-recording 继续录制"
+fi
 
 # ============================================================================
 # 阶段1: BC基线训练
