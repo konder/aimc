@@ -85,6 +85,7 @@ class StateLabeler:
             'g': [1, 0, 1, 12, 12, 3, 0, 0],  # 前进+跳跃+攻击
             
             # 特殊
+            'p': 'pass',  # 保持策略动作（不做修改）
             'n': None,  # 跳过此状态
             'z': 'undo',  # 撤销上一个标注
             'x': 'quit',  # 退出标注
@@ -283,11 +284,12 @@ class StateLabeler:
         print("组合动作:")
         print("  Q          - 前进+攻击")
         print("  E          - 向上看+攻击")
-        print("  R          - 前进+跳跃")
+        print("  R          - 前进+跳跃 ⭐")
         print("  T          - 后退+跳跃")
         print("  G          - 前进+跳跃+攻击")
         print("")
         print("特殊:")
+        print("  P          - 保持策略动作（认为当前策略是对的）⭐")
         print("  N          - 跳过此状态")
         print("  Z          - 撤销上一个标注")
         print("  X/ESC      - 完成标注")
@@ -327,7 +329,27 @@ class StateLabeler:
             elif key_char in self.action_mapping:
                 action = self.action_mapping[key_char]
                 
-                if action is not None:
+                # 特殊处理: 'pass' - 保持策略动作
+                if action == 'pass':
+                    # 使用策略的原始动作作为专家标注
+                    labeled_item = {
+                        'observation': state_info['state']['observation'],
+                        'expert_action': state_info['policy_action'],  # 保持策略动作
+                        'policy_action': state_info['policy_action'],
+                        'episode_idx': state_info['episode_idx'],
+                        'state_idx': state_info['state_idx'],
+                        'priority': state_info['priority']
+                    }
+                    
+                    self.labeled_data.append(labeled_item)
+                    self.undo_stack.append(labeled_item)
+                    
+                    # 显示保持的动作
+                    action_desc = self.decode_action(state_info['policy_action'])
+                    print(f"  ✓ [{current_idx+1}/{len(states_to_label)}] PASS (保持策略动作: {action_desc})")
+                    current_idx += 1
+                
+                elif action is not None:
                     # 保存标注
                     labeled_item = {
                         'observation': state_info['state']['observation'],
@@ -341,10 +363,15 @@ class StateLabeler:
                     self.labeled_data.append(labeled_item)
                     self.undo_stack.append(labeled_item)
                     
+                    # 显示我们标注的新动作
                     action_name = self._get_action_name(key_char)
-                    print(f"  ✓ [{current_idx+1}/{len(states_to_label)}] {action_name}")
+                    action_desc = self.decode_action(np.array(action))
+                    print(f"  ✓ [{current_idx+1}/{len(states_to_label)}] {action_name} -> {action_desc}")
+                    current_idx += 1
                 
-                current_idx += 1
+                else:
+                    # action is None (跳过)
+                    current_idx += 1
             
             else:
                 print(f"  ⚠️  未知按键: '{key_char}' (code: {key})")
@@ -356,9 +383,23 @@ class StateLabeler:
     def _get_action_name(self, key):
         """获取动作名称"""
         action_names = {
-            'w': '前进', 's': '后退', 'a': '左移', 'd': '右移',
-            'i': '上看', 'k': '下看', 'j': '左看', 'l': '右看',
-            'f': '攻击', ' ': '跳跃', 'q': '前进攻击', 'e': '上看攻击'
+            'w': '前进', 
+            's': '后退', 
+            'a': '左移', 
+            'd': '右移',
+            'i': '上看', 
+            'k': '下看', 
+            'j': '左看', 
+            'l': '右看',
+            'f': '攻击', 
+            ' ': '跳跃', 
+            'q': '前进+攻击', 
+            'e': '上看+攻击',
+            'r': '前进+跳跃',
+            't': '后退+跳跃',
+            'g': '前进+跳跃+攻击',
+            'p': 'PASS（保持策略）',
+            'n': '跳过',
         }
         return action_names.get(key, '未知')
 
