@@ -42,9 +42,11 @@
 |------|------|----------|
 | **DAgger 模仿学习** | | |
 | [DAGGER_QUICK_START.md](guides/DAGGER_QUICK_START.md) | **DAgger快速开始（推荐！）** | ⭐⭐⭐ 🆕 |
+| [DAGGER_LABELING_STRATEGY.md](guides/DAGGER_LABELING_STRATEGY.md) | **DAgger标注策略指南（必读！）** | ⭐⭐⭐ 🔥 |
 | [DAGGER_DETAILED_GUIDE.md](guides/DAGGER_DETAILED_GUIDE.md) | DAgger算法详细实现指南 | ⭐⭐⭐ 🆕 |
 | [DAGGER_VS_BC_COMPARISON.md](guides/DAGGER_VS_BC_COMPARISON.md) | DAgger vs BC 可视化对比 | ⭐⭐⭐ 🆕 |
 | [IMITATION_LEARNING_GUIDE.md](guides/IMITATION_LEARNING_GUIDE.md) | 模仿学习完整指南 | ⭐⭐⭐ 🆕 |
+| [LABEL_STATES_GUIDE.md](guides/LABEL_STATES_GUIDE.md) | 标注工具使用指南 | ⭐⭐ 🆕 |
 | **录制和验证** | | |
 | [RECORDING_CONTROLS.md](guides/RECORDING_CONTROLS.md) | 手动录制控制说明 | 🟢 新手 |
 | [TEST_RECORDING.md](guides/TEST_RECORDING.md) | 录制测试指南 | 🟢 新手 |
@@ -104,14 +106,17 @@
 
 ### 我是新手，从哪里开始？
 1. 📖 阅读 [`guides/DAGGER_QUICK_START.md`](guides/DAGGER_QUICK_START.md) ⭐ **最推荐！**
-2. 🎮 学习 [`guides/RECORDING_CONTROLS.md`](guides/RECORDING_CONTROLS.md)
-3. 🏃 尝试 [`guides/TEST_RECORDING.md`](guides/TEST_RECORDING.md)
+2. 🎓 学习 [`guides/DAGGER_LABELING_STRATEGY.md`](guides/DAGGER_LABELING_STRATEGY.md) 🔥 **必读！**
+3. 🎮 学习 [`guides/RECORDING_CONTROLS.md`](guides/RECORDING_CONTROLS.md)
+4. 🏃 尝试 [`guides/TEST_RECORDING.md`](guides/TEST_RECORDING.md)
 
 ### 我想了解DAgger
 1. 🎯 快速上手: [`guides/DAGGER_QUICK_START.md`](guides/DAGGER_QUICK_START.md) ⭐
-2. 📊 可视化对比: [`guides/DAGGER_VS_BC_COMPARISON.md`](guides/DAGGER_VS_BC_COMPARISON.md)
-3. 📚 详细理论: [`guides/DAGGER_DETAILED_GUIDE.md`](guides/DAGGER_DETAILED_GUIDE.md)
-4. 📋 实施计划: [`status/DAGGER_IMPLEMENTATION_PLAN.md`](status/DAGGER_IMPLEMENTATION_PLAN.md)
+2. 🎓 **标注策略**: [`guides/DAGGER_LABELING_STRATEGY.md`](guides/DAGGER_LABELING_STRATEGY.md) 🔥 **必读！**
+3. 📊 可视化对比: [`guides/DAGGER_VS_BC_COMPARISON.md`](guides/DAGGER_VS_BC_COMPARISON.md)
+4. 📚 详细理论: [`guides/DAGGER_DETAILED_GUIDE.md`](guides/DAGGER_DETAILED_GUIDE.md)
+5. 🛠️ 标注工具: [`guides/LABEL_STATES_GUIDE.md`](guides/LABEL_STATES_GUIDE.md)
+6. 📋 实施计划: [`status/DAGGER_IMPLEMENTATION_PLAN.md`](status/DAGGER_IMPLEMENTATION_PLAN.md)
 
 ### 我想了解当前项目进展
 1. 📊 查看 [`status/DAGGER_IMPLEMENTATION_PLAN.md`](status/DAGGER_IMPLEMENTATION_PLAN.md) ⭐ **最新状态**
@@ -132,7 +137,13 @@
 
 ## 📋 文档更新日志
 
-### 2025-10-21 (Latest)
+### 2025-10-22 (Latest)
+- 🔥 **新增DAgger标注策略指南**:
+  - 添加 `DAGGER_LABELING_STRATEGY.md` - 避免原地转圈的标注策略 🔥 **必读！**
+  - 详细解释"环视是短期行为，移动是主要策略"
+  - 包含4个具体场景示例和质量自检方法
+
+### 2025-10-21
 - ✅ **新增DAgger完整实现**:
   - 添加 `DAGGER_QUICK_START.md` - 快速开始指南 ⭐
   - 添加 `DAGGER_DETAILED_GUIDE.md` - 详细实现指南
