@@ -65,10 +65,12 @@ def evaluate_policy(
         return None
     
     # 创建环境
+    # fast_reset=False: 每个episode重新生成世界，确保多样性
     env = make_minedojo_env(
         task_id=task_id,
         use_camera_smoothing=False,
-        max_episode_steps=max_steps
+        max_episode_steps=max_steps,
+        fast_reset=False
     )
     
     # 统计信息
