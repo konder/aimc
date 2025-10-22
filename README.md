@@ -69,10 +69,10 @@ conda install -y pygame
 python test_pygame_keys.py
 
 # 3. 实时录制（鼠标控制）
-bash scripts/run_minedojo_x86.sh python tools/record_manual_chopping_pygame.py \
+bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping.py \
     --base-dir data/expert_demos/harvest_1_log \
     --max-frames 1000 \
-    --mouse-sensitivity 0.5 \
+    --mouse-sensitivity 0.2 \
     --fps 20
 ```
 
@@ -91,11 +91,10 @@ bash scripts/run_minedojo_x86.sh python tools/record_manual_chopping_pygame.py \
 我们已经完成了完整的**DAgger（Dataset Aggregation）模仿学习**实现！
 
 #### **核心工具已就绪**:
-- ✅ `tools/record_manual_chopping.py` - 手动录制工具（每帧等待模式）
-- ✅ `tools/record_manual_chopping_pygame.py` - **Pygame实时录制工具** ⭐ 推荐（无需macOS权限）
-- ✅ `tools/run_policy_collect_states.py` - 策略状态收集器
-- ✅ `tools/label_states.py` - 交互式标注工具
-- ✅ `tools/evaluate_policy.py` - 策略评估工具
+- ✅ `tools/dagger/record_manual_chopping.py` - **Pygame录制工具** ⭐ 鼠标+键盘（无需macOS权限）
+- ✅ `tools/dagger/run_policy_collect_states.py` - 策略状态收集器
+- ✅ `tools/dagger/label_states.py` - 交互式标注工具
+- ✅ `tools/dagger/evaluate_policy.py` - 策略评估工具
 - ✅ `src/training/train_bc.py` - 行为克隆训练
 - ✅ `src/training/train_dagger.py` - DAgger主循环
 
@@ -131,8 +130,14 @@ bash scripts/run_minedojo_x86.sh python tools/record_manual_chopping_pygame.py \
 
 ```
 aimc/
-├── tools/                        # 🆕 验证和辅助工具
-│   └── README.md                 # 工具使用说明
+├── tools/                        # 🆕 工具集
+│   ├── dagger/                   # DAgger训练工具
+│   │   ├── record_manual_chopping.py   # Pygame录制工具
+│   │   ├── evaluate_policy.py          # 策略评估
+│   │   ├── run_policy_collect_states.py # 状态收集
+│   │   ├── label_states.py             # 交互式标注
+│   │   └── README.md                   # DAgger工具说明
+│   └── (其他工具)
 ├── src/                          # 源代码
 │   ├── training/                 # 训练模块
 │   └── utils/                    # 工具模块

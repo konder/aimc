@@ -179,7 +179,7 @@ def main():
         "looking at tree",
         "facing a tree",
         "tree in front",
-        
+        设计
         # 动作描述  
         "breaking tree",
         "punching tree",

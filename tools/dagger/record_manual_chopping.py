@@ -53,6 +53,7 @@ class PygameController:
         pygame.mouse.set_visible(True)  # 显示鼠标
         self.mouse_captured = False  # 鼠标是否被捕获
         self.last_mouse_pos = None
+        self.mouse_initialized = False  # 新增：是否已初始化鼠标位置（避免首次移动被误读）
         
         # 控制标志
         self.should_quit = False
@@ -121,8 +122,12 @@ class PygameController:
         mouse_buttons = pygame.mouse.get_pressed()
         mouse_pos = pygame.mouse.get_pos()
         
-        # 计算鼠标移动
-        if self.last_mouse_pos is not None:
+        # 首次获取鼠标位置，不计算移动（避免启动时的鼠标移动被误读）
+        if not self.mouse_initialized:
+            self.last_mouse_pos = mouse_pos
+            self.mouse_initialized = True
+        elif self.last_mouse_pos is not None:
+            # 计算鼠标移动
             dx = mouse_pos[0] - self.last_mouse_pos[0]
             dy = mouse_pos[1] - self.last_mouse_pos[1]
             
@@ -139,8 +144,9 @@ class PygameController:
             pitch_delta = int(dy * self.mouse_sensitivity)
             pitch_delta = max(-12, min(12, pitch_delta))  # 限制范围
             action[3] = 12 + pitch_delta
-        
-        self.last_mouse_pos = mouse_pos
+            
+            # 更新鼠标位置
+            self.last_mouse_pos = mouse_pos
         
         # 鼠标左键攻击
         if mouse_buttons[0]:  # 左键
@@ -238,6 +244,11 @@ class PygameController:
         """重置重试标志"""
         self.should_retry = False
     
+    def reset_mouse_state(self):
+        """重置鼠标状态（每个episode开始时调用）"""
+        self.mouse_initialized = False
+        self.last_mouse_pos = None
+    
     def quit(self):
         """退出pygame"""
         pygame.quit()
@@ -315,6 +326,7 @@ def record_chopping_sequence(
             
             # 重置控制器标志
             controller.reset_retry_flag()
+            controller.reset_mouse_state()  # 重置鼠标状态，避免记录启动时的鼠标移动
             
             # 帧计数
             frame_count = 0
@@ -456,18 +468,16 @@ def record_chopping_sequence(
             print(f"   - metadata.txt")
             print(f"   - actions_log.txt")
             
-            # 询问是否继续
+            # 自动继续下一个episode
             print(f"\n{'='*80}")
-            print(f"录制完成！")
-            print(f"按Enter继续录制下一个episode，或按Ctrl+C退出...")
-            print(f"{'='*80}\n")
+            print(f"✅ Episode {episode_idx:03d} 录制完成！")
+            print(f"{'='*80}")
+            print(f"⏭️  准备录制下一个episode...")
+            print(f"💡 提示: 按ESC可随时退出录制\n")
             
-            try:
-                input()
-                episode_idx += 1
-            except KeyboardInterrupt:
-                print(f"\n\n⚠️  用户中断，停止录制")
-                break
+            # 等待2秒，让用户看到提示
+            time.sleep(2)
+            episode_idx += 1
     
     finally:
         env.close()

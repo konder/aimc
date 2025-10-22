@@ -37,8 +37,8 @@ EVAL_EPISODES=20
 
 # 录制配置
 NUM_EXPERT_EPISODES=10
-MOUSE_SENSITIVITY=0.2  # 鼠标灵敏度（已优化）
-MAX_FRAMES=500
+MOUSE_SENSITIVITY=0.15  # 鼠标灵敏度（已优化）
+MAX_FRAMES=6000
 SKIP_IDLE_FRAMES=true  # 跳过静止帧（不保存IDLE帧）
 APPEND_RECORDING=false  # 是否追加录制（继续已有数据）
 
@@ -172,7 +172,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --eval-episodes N           评估episode数 (默认: 20)"
             echo "  --num-episodes N            录制专家演示数量 (默认: 10)"
             echo "  --mouse-sensitivity N       鼠标灵敏度 (默认: 0.2)"
-            echo "  --max-frames N              每个episode最大帧数 (默认: 500)"
+            echo "  --max-frames N              每个episode最大帧数 (默认: 6000)"
             echo "  --no-skip-idle              保存所有帧（包括IDLE帧，默认跳过）"
             echo "  --append-recording          追加录制（继续已有数据）"
             echo "  --skip-recording            跳过手动录制 (假设已有数据)"
@@ -312,7 +312,7 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         mkdir -p "$EXPERT_DIR"
         
         # 构建录制命令
-        RECORD_CMD="bash scripts/run_minedojo_x86.sh python tools/record_manual_chopping.py \
+        RECORD_CMD="bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping.py \
             --base-dir \"$EXPERT_DIR\" \
             --max-frames $MAX_FRAMES \
             --mouse-sensitivity $MOUSE_SENSITIVITY \
@@ -403,7 +403,7 @@ if [[ -z "$CONTINUE_FROM" ]]; then
     
     print_info "评估BC策略 $BC_MODEL (${EVAL_EPISODES} episodes)..."
     
-    python tools/evaluate_policy.py \
+    python tools/dagger/evaluate_policy.py \
         --model "$BC_MODEL" \
         --episodes "$EVAL_EPISODES" \
         --task-id "$TASK_ID" \
@@ -464,7 +464,7 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     
     STATES_DIR="${POLICY_STATES_DIR}/iter_${iter}"
     
-    python tools/run_policy_collect_states.py \
+    python tools/dagger/run_policy_collect_states.py \
         --model "$CURRENT_MODEL" \
         --episodes "$COLLECT_EPISODES" \
         --output "$STATES_DIR" \
@@ -507,7 +507,7 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
         LABEL_ARGS="$LABEL_ARGS --smart-sampling --failure-window $FAILURE_WINDOW --random-sample-rate $RANDOM_SAMPLE_RATE"
     fi
     
-    python tools/label_states.py $LABEL_ARGS
+    python tools/dagger/label_states.py $LABEL_ARGS
     
     if [ $? -ne 0 ]; then
         print_error "标注失败"
@@ -544,7 +544,7 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     # 3.4 评估新策略
     print_info "[$iter] 步骤4: 评估迭代 $iter 策略..."
     
-    python tools/evaluate_policy.py \
+    python tools/dagger/evaluate_policy.py \
         --model "$DAGGER_MODEL" \
         --episodes "$EVAL_EPISODES" \
         --task-id "$TASK_ID" \
@@ -581,7 +581,7 @@ echo ""
 
 print_info "下一步建议:"
 echo "  1. 在更多episode上测试最终模型:"
-echo "     python tools/evaluate_policy.py --model $CURRENT_MODEL --episodes 50"
+echo "     python tools/dagger/evaluate_policy.py --model $CURRENT_MODEL --episodes 50"
 echo ""
 echo "  2. (可选) 继续DAgger迭代:"
 echo "     bash scripts/run_dagger_workflow.sh --skip-recording --skip-bc --iterations 2"
