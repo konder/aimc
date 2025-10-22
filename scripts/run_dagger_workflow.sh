@@ -25,7 +25,7 @@ MAX_STEPS=1000
 BC_EPOCHS=50
 BC_LEARNING_RATE=0.0003
 BC_BATCH_SIZE=64
-DEVICE="mps"  # 训练设备: auto/cpu/cuda/mps (macOS默认mps)
+DEVICE="cpu"  # 训练设备: auto/cpu/cuda/mps (CPU更稳定)
 
 # DAgger配置
 DAGGER_ITERATIONS=3
