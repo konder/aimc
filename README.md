@@ -115,7 +115,8 @@ bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping.py \
 
 ### 📚 **相关文档**
 - **🚀 快速上手**: [`docs/guides/DAGGER_QUICK_START.md`](docs/guides/DAGGER_QUICK_START.md) ⭐
-- **📊 算法对比**: [`docs/guides/DAGGER_VS_BC_COMPARISON.md`](docs/guides/DAGGER_VS_BC_COMPARISON.md)
+- **📘 脚本使用指南**: [`docs/guides/RUN_DAGGER_WORKFLOW_GUIDE.md`](docs/guides/RUN_DAGGER_WORKFLOW_GUIDE.md) ⭐ **新增**
+- **⚡ 命令速查**: [`docs/guides/DAGGER_WORKFLOW_QUICK_REF.md`](docs/guides/DAGGER_WORKFLOW_QUICK_REF.md) ⭐ **新增**
 - **📚 详细指南**: [`docs/guides/DAGGER_DETAILED_GUIDE.md`](docs/guides/DAGGER_DETAILED_GUIDE.md)
 - **📋 实施计划**: [`docs/status/DAGGER_IMPLEMENTATION_PLAN.md`](docs/status/DAGGER_IMPLEMENTATION_PLAN.md)
 
