@@ -216,6 +216,7 @@ def train_bc_with_ppo(
     
     # 创建PPO模型
     print("创建PPO模型...")
+    # 注意: normalize_images=False 因为MinedojoWrapper已经归一化到[0,1]
     model = PPO(
         "CnnPolicy",
         env,
@@ -230,7 +231,8 @@ def train_bc_with_ppo(
         vf_coef=0.5,
         max_grad_norm=0.5,
         device=device,
-        verbose=1
+        verbose=1,
+        policy_kwargs=dict(normalize_images=False)  # 图像已在环境中归一化
     )
     
     # 预训练策略网络（行为克隆）
