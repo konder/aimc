@@ -43,9 +43,12 @@ class ExpertDataset(Dataset):
     def __init__(self, observations, actions):
         """
         Args:
-            observations: numpy array of shape (N, C, H, W)
+            observations: numpy array of shape (N, C, H, W), uint8 [0, 255]
             actions: numpy array of shape (N, 8) - MineDojo MultiDiscrete
         """
+        # 归一化图像到[0, 1]
+        if observations.dtype == np.uint8:
+            observations = observations.astype(np.float32) / 255.0
         self.observations = torch.FloatTensor(observations)
         self.actions = torch.LongTensor(actions)
     
@@ -159,6 +162,12 @@ def load_expert_demonstrations(data_path):
     # 转换为numpy数组
     observations = np.array(observations)
     actions = np.array(actions)
+    
+    # 转置观察数据: (N, H, W, C) -> (N, C, H, W)
+    # 因为PyTorch CNN期望channel-first格式
+    if len(observations.shape) == 4 and observations.shape[-1] == 3:
+        print(f"  转置图像: (N, H, W, C) -> (N, C, H, W)")
+        observations = np.transpose(observations, (0, 3, 1, 2))
     
     print(f"\n总计:")
     print(f"  观察: {observations.shape}")
