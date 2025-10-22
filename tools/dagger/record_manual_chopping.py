@@ -13,7 +13,8 @@
 
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 添加项目根目录到Python路径 (tools/dagger/xxx.py -> tools/dagger -> tools -> project_root)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import minedojo
 import numpy as np
