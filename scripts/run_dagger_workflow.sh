@@ -294,7 +294,12 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         
         read -p "按Enter开始录制，或按Ctrl+C取消..." 
         
+        # 确保输出目录存在
+        mkdir -p "$EXPERT_DIR"
+        
+        # 直接录制到正确的任务目录
         python tools/record_manual_chopping.py \
+            --base-dir "$EXPERT_DIR" \
             --max-frames "$MAX_FRAMES" \
             --camera-delta "$CAMERA_DELTA"
         
