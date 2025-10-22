@@ -111,58 +111,58 @@ class StateLabeler:
     
     def decode_action(self, action):
         """
-        解读动作数组为人类可读的文本
+        解读动作数组为人类可读的文本（英文，避免OpenCV中文渲染问题）
         
         Args:
             action: numpy array [8] - MineDojo MultiDiscrete动作
             
         Returns:
-            str: 人类可读的动作描述
+            str: 人类可读的动作描述（英文）
         """
         parts = []
         
         # 维度0: 前后移动 (0=停止, 1=前进, 2=后退)
         if action[0] == 1:
-            parts.append("前进")
+            parts.append("Forward")
         elif action[0] == 2:
-            parts.append("后退")
+            parts.append("Back")
         
         # 维度1: 左右移动 (0=停止, 1=左移, 2=右移)
         if action[1] == 1:
-            parts.append("左移")
+            parts.append("Left")
         elif action[1] == 2:
-            parts.append("右移")
+            parts.append("Right")
         
         # 维度2: 跳跃
         if action[2] == 1:
-            parts.append("跳跃")
+            parts.append("Jump")
         
         # 维度3-4: 相机 (pitch, yaw)
         pitch = action[3]
         yaw = action[4]
         if pitch < 11:
-            parts.append("向上看")
+            parts.append("Look Up")
         elif pitch > 13:
-            parts.append("向下看")
+            parts.append("Look Down")
         
         if yaw < 11:
-            parts.append("左转")
+            parts.append("Turn Left")
         elif yaw > 13:
-            parts.append("右转")
+            parts.append("Turn Right")
         
         # 维度5: 功能动作
         functional = action[5]
         if functional == 3:
-            parts.append("攻击")
+            parts.append("Attack")
         elif functional == 1:
-            parts.append("使用")
+            parts.append("Use")
         elif functional == 6:
-            parts.append("放置")
+            parts.append("Place")
         elif functional == 7:
-            parts.append("破坏")
+            parts.append("Destroy")
         
         if not parts:
-            return "静止"
+            return "Idle"
         
         return " + ".join(parts)
     
