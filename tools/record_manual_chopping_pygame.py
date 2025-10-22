@@ -28,24 +28,31 @@ class PygameController:
     同时处理按键检测和画面显示
     """
     
-    def __init__(self, camera_delta=4, display_size=(800, 600)):
+    def __init__(self, camera_delta=4, display_size=(800, 600), mouse_sensitivity=0.5):
         """
         初始化pygame控制器
         
         Args:
-            camera_delta: 相机转动角度增量
+            camera_delta: 相机转动角度增量（键盘）
             display_size: pygame窗口大小
+            mouse_sensitivity: 鼠标灵敏度（0.1-2.0）
         """
         # 初始化pygame
         pygame.init()
         self.screen = pygame.display.set_mode(display_size)
-        pygame.display.set_caption("MineDojo Recording (Pygame) - Press Q to retry, ESC to exit")
+        pygame.display.set_caption("MineDojo Recording (Pygame+Mouse) - Press Q to retry, ESC to exit")
         self.clock = pygame.time.Clock()
         self.font_large = pygame.font.Font(None, 36)
         self.font_small = pygame.font.Font(None, 24)
         
         # 相机参数
         self.camera_delta = camera_delta
+        self.mouse_sensitivity = mouse_sensitivity
+        
+        # 鼠标控制
+        pygame.mouse.set_visible(True)  # 显示鼠标
+        self.mouse_captured = False  # 鼠标是否被捕获
+        self.last_mouse_pos = None
         
         # 控制标志
         self.should_quit = False
@@ -58,19 +65,18 @@ class PygameController:
         print("\n📌 录制方式:")
         print("  - pygame窗口显示游戏画面")
         print("  - 按住W键会持续前进，每帧都检测")
-        print("  - 支持多键同时按下（如W+F）")
+        print("  - 支持多键同时按下（如W+左键）")
         print("  - 录制以20 FPS速度进行")
         print("\n移动控制:")
         print("  W - 前进 | S - 后退 | A - 左移 | D - 右移 | Space - 跳跃")
-        print("\n相机控制:")
-        print("  I - 向上看 | K - 向下看 | J - 向左看 | L - 向右看")
-        print("\n动作:")
-        print("  F - 攻击/挖掘（砍树）⭐")
+        print("\n相机控制 (鼠标) ⭐:")
+        print("  鼠标移动 - 转动视角（上下左右）")
+        print("  鼠标左键 - 攻击/挖掘（砍树）")
         print("\n系统:")
         print("  Q - 重新录制当前episode")
         print("  ESC - 退出程序")
         print("\n" + "=" * 80)
-        print(f"相机灵敏度: {camera_delta} (~{camera_delta*15}度/次)")
+        print(f"鼠标灵敏度: {mouse_sensitivity:.2f}")
         print("=" * 80 + "\n")
     
     def process_events(self):
@@ -86,7 +92,7 @@ class PygameController:
     
     def get_action(self):
         """
-        根据当前按键状态生成MineDojo动作
+        根据当前按键和鼠标状态生成MineDojo动作
         
         Returns:
             action: np.array([8], dtype=np.int32)
@@ -111,20 +117,34 @@ class PygameController:
         if keys[pygame.K_SPACE]:
             action[2] = 1
         
-        # 相机
-        if keys[pygame.K_i]:
-            action[3] = 12 - self.camera_delta
-        elif keys[pygame.K_k]:
-            action[3] = 12 + self.camera_delta
+        # 鼠标控制相机
+        mouse_buttons = pygame.mouse.get_pressed()
+        mouse_pos = pygame.mouse.get_pos()
         
-        if keys[pygame.K_j]:
-            action[4] = 12 - self.camera_delta
-        elif keys[pygame.K_l]:
-            action[4] = 12 + self.camera_delta
+        # 计算鼠标移动
+        if self.last_mouse_pos is not None:
+            dx = mouse_pos[0] - self.last_mouse_pos[0]
+            dy = mouse_pos[1] - self.last_mouse_pos[1]
+            
+            # 将鼠标移动转换为相机动作
+            # dx: 正值=向右看，负值=向左看
+            # dy: 正值=向下看，负值=向上看
+            
+            # Yaw (左右) - dimension 4
+            yaw_delta = int(dx * self.mouse_sensitivity)
+            yaw_delta = max(-12, min(12, yaw_delta))  # 限制范围
+            action[4] = 12 + yaw_delta
+            
+            # Pitch (上下) - dimension 3
+            pitch_delta = int(dy * self.mouse_sensitivity)
+            pitch_delta = max(-12, min(12, pitch_delta))  # 限制范围
+            action[3] = 12 + pitch_delta
         
-        # 攻击
-        if keys[pygame.K_f]:
-            action[5] = 3
+        self.last_mouse_pos = mouse_pos
+        
+        # 鼠标左键攻击
+        if mouse_buttons[0]:  # 左键
+            action[5] = 3  # attack
         
         return action
     
@@ -227,6 +247,7 @@ def record_chopping_sequence(
     base_dir="data/expert_demos",
     max_frames=1000,
     camera_delta=4,
+    mouse_sensitivity=0.5,
     fast_reset=False,
     fps=20
 ):
@@ -258,7 +279,7 @@ def record_chopping_sequence(
     )
     
     # 初始化pygame控制器
-    controller = PygameController(camera_delta=camera_delta)
+    controller = PygameController(camera_delta=camera_delta, mouse_sensitivity=mouse_sensitivity)
     
     # 录制参数
     frame_delay = 1.0 / fps
@@ -440,7 +461,9 @@ def main():
     parser.add_argument("--max-frames", type=int, default=1000,
                         help="每个episode的最大帧数（默认: 1000）")
     parser.add_argument("--camera-delta", type=int, default=4,
-                        help="相机灵敏度，范围1-12（默认: 4）")
+                        help="相机灵敏度（键盘），范围1-12（默认: 4）")
+    parser.add_argument("--mouse-sensitivity", type=float, default=0.5,
+                        help="鼠标灵敏度，范围0.1-2.0（默认: 0.5）")
     parser.add_argument("--fast-reset", action="store_true",
                         help="快速重置（同一世界）")
     parser.add_argument("--no-fast-reset", dest="fast_reset", action="store_false",
@@ -460,14 +483,18 @@ def main():
         print(f"⚠️  警告: fps={args.fps} 超出范围，已调整为20")
         args.fps = 20
     
+    if args.mouse_sensitivity < 0.1 or args.mouse_sensitivity > 2.0:
+        print(f"⚠️  警告: mouse_sensitivity={args.mouse_sensitivity} 超出范围，已调整为0.5")
+        args.mouse_sensitivity = 0.5
+    
     print("\n" + "=" * 80)
-    print("🎬 MineDojo Pygame实时录制工具")
+    print("🎬 MineDojo Pygame实时录制工具 (鼠标+键盘)")
     print("=" * 80)
     print(f"\n✅ 无需macOS辅助功能权限！")
     print(f"\n配置:")
     print(f"  - 保存目录: {args.base_dir}")
     print(f"  - 最大帧数: {args.max_frames}")
-    print(f"  - 相机灵敏度: {args.camera_delta}")
+    print(f"  - 鼠标灵敏度: {args.mouse_sensitivity}")
     print(f"  - 录制帧率: {args.fps} FPS")
     print(f"  - 环境重置: {'同一世界' if args.fast_reset else '每次新世界'}")
     print("=" * 80)
@@ -476,6 +503,7 @@ def main():
         base_dir=args.base_dir,
         max_frames=args.max_frames,
         camera_delta=args.camera_delta,
+        mouse_sensitivity=args.mouse_sensitivity,
         fast_reset=args.fast_reset,
         fps=args.fps
     )

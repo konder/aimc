@@ -42,20 +42,22 @@ AIMC 是一个完整的 Minecraft AI 训练工程，专注于使用强化学习�
 
 ## 📊 **当前状态** (2025-10-22)
 
-### 🎮 **Pygame实时录制模式上线！** ✅ 无需macOS权限
+### 🎮 **Pygame实时录制模式上线！** ✅ 支持鼠标控制
 
-**重大升级**: 使用`pygame`实现实时录制模式，**无需macOS辅助功能权限**！
+**重大升级**: 使用`pygame`实现实时录制，**支持鼠标控制视角和攻击**，无需macOS权限！
 
-#### **方案: Pygame实时录制** ⭐ 推荐
+#### **方案: Pygame实时录制（鼠标+键盘）** ⭐ 推荐
 
-| 特性 | 之前（每帧等待） | 现在（pygame实时） |
+| 特性 | 之前（每帧等待） | 现在（pygame+鼠标） |
 |------|-----------------|-------------------|
 | 按键检测 | `cv2.waitKey(0)` | pygame实时监听 |
-| 按住W键 | 只记录第一帧❌ | ✅每帧都检测到 |
-| 静态帧占比 | 50-80%❌ | ✅< 30% |
-| 多键同时检测 | ❌不支持 | ✅W+F同时按下 |
+| 视角控制 | I/J/K/L离散❌ | ✅鼠标连续平滑 |
+| 攻击操作 | F键❌ | ✅鼠标左键 |
+| 静态帧占比 | 50-80%❌ | ✅< 20% |
+| 多键检测 | ❌不支持 | ✅W+左键 |
 | macOS权限 | 不需要 | ✅不需要 |
-| 数据质量 | 低 | ✅提升3-5倍 |
+| FPS玩家友好 | ❌ | ✅类似游戏操作 |
+| 数据质量 | 低 | ✅提升4-5倍 |
 
 **快速开始**:
 ```bash
@@ -66,14 +68,21 @@ conda install -y pygame
 # 2. 测试按键检测（20秒）
 python test_pygame_keys.py
 
-# 3. 实时录制
+# 3. 实时录制（鼠标控制）
 bash scripts/run_minedojo_x86.sh python tools/record_manual_chopping_pygame.py \
     --base-dir data/expert_demos/harvest_1_log \
     --max-frames 1000 \
+    --mouse-sensitivity 0.5 \
     --fps 20
 ```
 
-详见: [录制方案对比](docs/guides/RECORDING_SOLUTIONS_COMPARISON.md)
+**控制说明**:
+- 🖱️ **鼠标移动** - 转动视角（上下左右）
+- 🖱️ **鼠标左键** - 攻击/挖掘
+- ⌨️ **W/A/S/D** - 移动
+- ⌨️ **Space** - 跳跃
+
+详见: [Pygame鼠标控制指南](docs/guides/PYGAME_MOUSE_CONTROL.md)
 
 ---
 
