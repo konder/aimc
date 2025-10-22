@@ -507,9 +507,75 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                     f.write(f"  - observation shape: {frames[0].shape}\n")
                     f.write(f"  - action shape: {actions_list[0].shape}\n")
                 
+                # 4. 生成可读的动作日志
+                print(f"    [4/4] 生成动作日志...")
+                actions_log_path = os.path.join(episode_dir, "actions_log.txt")
+                with open(actions_log_path, 'w') as f:
+                    f.write(f"Episode {episode_idx} - Action Log\n")
+                    f.write(f"=" * 100 + "\n")
+                    f.write(f"Total Frames: {len(actions_array)}\n")
+                    f.write(f"IDLE Frames: {idle_count}/{len(actions_array)} ({idle_pct:.1f}%)\n")
+                    f.write(f"=" * 100 + "\n\n")
+                    f.write(f"{'Frame':>5} | {'Raw Action':<40} | Action Description\n")
+                    f.write("-" * 100 + "\n")
+                    
+                    for i, action in enumerate(actions_array):
+                        # 解析动作为可读描述
+                        action_parts = []
+                        
+                        # 维度0: forward/back (0=stop, 1=forward, 2=back)
+                        if action[0] == 1:
+                            action_parts.append("Forward")
+                        elif action[0] == 2:
+                            action_parts.append("Back")
+                        
+                        # 维度1: left/right (0=stop, 1=left, 2=right)
+                        if action[1] == 1:
+                            action_parts.append("Left")
+                        elif action[1] == 2:
+                            action_parts.append("Right")
+                        
+                        # 维度2: jump/sneak/sprint (0=none, 1=jump, ...)
+                        if action[2] == 1:
+                            action_parts.append("Jump")
+                        elif action[2] == 2:
+                            action_parts.append("Sneak")
+                        elif action[2] == 3:
+                            action_parts.append("Sprint")
+                        
+                        # 维度3-4: camera (12=center)
+                        pitch_delta = action[3] - 12
+                        yaw_delta = action[4] - 12
+                        
+                        if pitch_delta != 0 or yaw_delta != 0:
+                            camera_desc = f"Camera(pitch={pitch_delta:+d}, yaw={yaw_delta:+d})"
+                            action_parts.append(camera_desc)
+                        
+                        # 维度5: functional (0=none, 3=attack, ...)
+                        if action[5] == 3:
+                            action_parts.append("ATTACK")
+                        elif action[5] != 0:
+                            action_parts.append(f"Functional({action[5]})")
+                        
+                        # 维度6-7: craft/inventory
+                        if action[6] != 0:
+                            action_parts.append(f"Craft({action[6]})")
+                        if action[7] != 0:
+                            action_parts.append(f"Inventory({action[7]})")
+                        
+                        if not action_parts:
+                            action_desc = "IDLE"
+                        else:
+                            action_desc = " + ".join(action_parts)
+                        
+                        # 格式化输出
+                        action_str = str(action).replace('\n', '')
+                        f.write(f"{i:5d} | {action_str:<40} | {action_desc}\n")
+                
                 print(f"  ✓ episode_{episode_idx:03d} 已保存: {len(frames)} 帧 -> {episode_dir}")
-                print(f"    - {len(frames)} PNG图片")
+                print(f"    - {len(frames)} PNG图片（可视化）")
                 print(f"    - {len(actions_list)} NPY文件（BC训练）")
+                print(f"    - 1 actions_log.txt（动作日志）")
                 print(f"    - 静态帧: {idle_count}/{len(frames)} ({idle_pct:.1f}%)")
                 print(f"    - 攻击帧: {action_counts['attack']}/{len(frames)} ({action_counts['attack']/len(frames)*100:.1f}%)")
                 completed_episodes += 1
