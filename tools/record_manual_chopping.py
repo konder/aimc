@@ -70,8 +70,12 @@ class KeyboardController:
         }
         
         print("\n" + "=" * 80)
-        print("🎮 键盘控制说明")
+        print("🎮 键盘控制说明 (每帧等待输入模式)")
         print("=" * 80)
+        print("\n📌 录制方式:")
+        print("  - 每帧暂停，等待你按键")
+        print("  - 按下按键后，执行该动作并进入下一帧")
+        print("  - 适合精确控制每一帧的动作")
         print("\n移动控制:")
         print("  W - 前进")
         print("  S - 后退")
@@ -85,12 +89,16 @@ class KeyboardController:
         print("  L - 向右看")
         print("\n动作:")
         print("  F - 攻击/挖掘（砍树）⭐")
+        print("\n组合动作:")
+        print("  U - 前进+跳跃")
+        print("\n特殊:")
+        print("  . - IDLE（无动作帧，站立不动）")
         print("\n系统:")
-        print("  Q - 停止录制并保存")
-        print("  ESC - 紧急退出（不保存）")
+        print("  Q - 重新录制当前回合")
+        print("  ESC - 退出程序（不保存当前回合）")
         print("\n" + "=" * 80)
-        print("提示: 点击OpenCV窗口，然后使用键盘控制")
-        print("提示: 按住按键可以持续执行动作")
+        print("提示: 点击OpenCV窗口获得焦点后开始录制")
+        print("提示: 每帧会显示等待提示，按键后自动执行")
         print("=" * 80 + "\n")
     
     def update_action(self, key, press=True):
@@ -270,41 +278,67 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
             print(f"  控制: Q=重录当前回合 | ESC=退出程序 | 完成=自动保存\n")
             
             # 本回合主循环
+            print("  ⚠️  录制模式: 每帧等待单个按键输入")
+            print("  提示: 按下按键后自动执行一帧")
+            print("  .  = IDLE（无动作帧）")
+            print("  u  = 前进+跳跃")
+            print("  其他 = 单一动作（W/A/S/D/F/I/J/K/L/Space）\n")
+            
             while step_count < max_frames:
-                # 先处理键盘事件，更新controller.actions
-                keys_pressed = []
-                for _ in range(10):  # 检测多次以捕获更多按键
-                    key = cv2.waitKey(1) & 0xFF
-                    if key != 255:
-                        keys_pressed.append(key)
+                # 🔧 新策略: 等待用户输入单个按键
+                # 显示当前帧，等待用户输入
+                display_frame = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
+                display_frame = cv2.resize(display_frame, (1024, 640))
+                
+                # 添加提示信息
+                cv2.putText(display_frame, f"Frame {step_count}/{max_frames} - Waiting for key", 
+                           (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                cv2.putText(display_frame, ".=IDLE | u=FWD+JUMP | Q=Retry | ESC=Quit", 
+                           (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.imshow(window_name, display_frame)
+                
+                # 等待按键输入（无超时，一直等待）
+                key = cv2.waitKey(0) & 0xFF
                 
                 # 处理系统按键
-                if ord('q') in keys_pressed or ord('Q') in keys_pressed:
+                if key == ord('q') or key == ord('Q'):
                     print(f"\n🔄 重新录制 episode_{episode_idx:03d}（用户按下Q）")
                     print(f"   当前回合数据不保存，即将重置环境...")
-                    retry_current_episode = True  # 标记需要重新录制当前round
-                    frames = []  # 清空帧数据
-                    actions_list = []  # 清空动作数据
-                    break  # 跳出while循环，重新开始当前round
-                elif 27 in keys_pressed:  # ESC
+                    retry_current_episode = True
+                    frames = []
+                    actions_list = []
+                    break
+                elif key == 27:  # ESC
                     print(f"\n❌ 退出程序（用户按下ESC）")
                     print(f"   当前回合数据不保存")
-                    global_continue = False  # 停止所有录制
-                    frames = []  # 清空帧数据
-                    actions_list = []  # 清空动作数据
-                    break  # 跳出while循环并退出for循环
+                    global_continue = False
+                    frames = []
+                    actions_list = []
+                    break
                 
-                # 更新动作状态（每帧重置，只保留当前检测到的按键）
-                # 先重置所有动作
+                # 重置动作状态
                 for action_name in controller.actions:
                     controller.actions[action_name] = False
                 
-                # 然后设置当前检测到的按键
-                if len(keys_pressed) > 0:
-                    for key in keys_pressed:
+                # 处理特殊按键
+                if key == ord('.'):  # . = IDLE（无动作）
+                    print(f"  Frame {step_count}: IDLE")
+                    pass  # 所有动作保持False
+                elif key == ord('u') or key == ord('U'):  # u = 前进+跳跃
+                    controller.actions['forward'] = True
+                    controller.actions['jump'] = True
+                    print(f"  Frame {step_count}: Forward + Jump")
+                else:
+                    # 处理普通动作键
+                    if key in controller.key_map:
                         controller.update_action(key, press=True)
+                        action_desc = controller.key_map[key]
+                        print(f"  Frame {step_count}: {action_desc}")
+                    else:
+                        # 未知按键，视为IDLE
+                        print(f"  Frame {step_count}: Unknown key ({chr(key) if 32 <= key < 127 else key}), treating as IDLE")
                 
-                # 然后获取动作
+                # 获取动作
                 action = controller.get_action()
                 
                 # 执行动作
@@ -400,8 +434,56 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                     filepath = os.path.join(episode_dir, filename)
                     np.save(filepath, frame_data)
                 
-                # 3. 保存回合元数据
-                print(f"    [3/3] 保存元数据...")
+                # 3. 分析和保存回合统计
+                print(f"    [3/3] 分析动作分布并保存元数据...")
+                
+                # 统计静态帧和动作分布
+                actions_array = np.array(actions_list)
+                idle_count = 0
+                action_counts = {
+                    'forward': 0,
+                    'back': 0,
+                    'left': 0,
+                    'right': 0,
+                    'jump': 0,
+                    'attack': 0,
+                    'camera': 0
+                }
+                
+                for action in actions_array:
+                    # 检查是否为静态帧（所有动作都是默认值）
+                    is_idle = (action[0] == 0 and  # no forward/back
+                              action[1] == 0 and   # no left/right
+                              action[2] == 0 and   # no jump
+                              action[3] == 12 and  # camera center
+                              action[4] == 12 and  # camera center
+                              action[5] == 0)      # no attack
+                    
+                    if is_idle:
+                        idle_count += 1
+                    else:
+                        # 统计各类动作
+                        if action[0] == 1:
+                            action_counts['forward'] += 1
+                        elif action[0] == 2:
+                            action_counts['back'] += 1
+                        
+                        if action[1] == 1:
+                            action_counts['left'] += 1
+                        elif action[1] == 2:
+                            action_counts['right'] += 1
+                        
+                        if action[2] != 0:
+                            action_counts['jump'] += 1
+                        
+                        if action[5] == 3:
+                            action_counts['attack'] += 1
+                        
+                        if action[3] != 12 or action[4] != 12:
+                            action_counts['camera'] += 1
+                
+                idle_pct = (idle_count / len(actions_array)) * 100
+                
                 metadata_path = os.path.join(episode_dir, "metadata.txt")
                 with open(metadata_path, 'w') as f:
                     f.write(f"Round: {episode_idx}\n")
@@ -410,6 +492,15 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                     f.write(f"Total Reward: {total_reward:.3f}\n")
                     f.write(f"Task Completed: True\n")
                     f.write(f"Recording Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"\nAction Statistics:\n")
+                    f.write(f"  IDLE frames: {idle_count}/{len(actions_array)} ({idle_pct:.1f}%)\n")
+                    f.write(f"  Forward: {action_counts['forward']} frames\n")
+                    f.write(f"  Back: {action_counts['back']} frames\n")
+                    f.write(f"  Left: {action_counts['left']} frames\n")
+                    f.write(f"  Right: {action_counts['right']} frames\n")
+                    f.write(f"  Jump: {action_counts['jump']} frames\n")
+                    f.write(f"  Attack: {action_counts['attack']} frames\n")
+                    f.write(f"  Camera: {action_counts['camera']} frames\n")
                     f.write(f"\nData Format:\n")
                     f.write(f"  - frame_XXXXX.png: 可视化图片 (H, W, 3) RGB\n")
                     f.write(f"  - frame_XXXXX.npy: BC训练数据 {{observation, action}}\n")
@@ -419,6 +510,8 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
                 print(f"  ✓ episode_{episode_idx:03d} 已保存: {len(frames)} 帧 -> {episode_dir}")
                 print(f"    - {len(frames)} PNG图片")
                 print(f"    - {len(actions_list)} NPY文件（BC训练）")
+                print(f"    - 静态帧: {idle_count}/{len(frames)} ({idle_pct:.1f}%)")
+                print(f"    - 攻击帧: {action_counts['attack']}/{len(frames)} ({action_counts['attack']/len(frames)*100:.1f}%)")
                 completed_episodes += 1
             elif not task_completed:
                 print(f"\n  ⚠️  episode_{episode_idx:03d} 未完成 (done=False)，不保存")
