@@ -121,17 +121,17 @@ class StateLabeler:
         """
         parts = []
         
-        # 维度0: 前后移动
-        if action[0] == 0:
-            parts.append("后退")
-        elif action[0] == 2:
+        # 维度0: 前后移动 (0=停止, 1=前进, 2=后退)
+        if action[0] == 1:
             parts.append("前进")
+        elif action[0] == 2:
+            parts.append("后退")
         
-        # 维度1: 左右移动
-        if action[1] == 0:
-            parts.append("右移")
-        elif action[1] == 2:
+        # 维度1: 左右移动 (0=停止, 1=左移, 2=右移)
+        if action[1] == 1:
             parts.append("左移")
+        elif action[1] == 2:
+            parts.append("右移")
         
         # 维度2: 跳跃
         if action[2] == 1:
