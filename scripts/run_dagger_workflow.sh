@@ -46,7 +46,10 @@ EXPERT_DIR="${BASE_DIR}/expert_demos/${TASK_ID}"
 POLICY_STATES_DIR="${BASE_DIR}/policy_states/${TASK_ID}"
 EXPERT_LABELS_DIR="${BASE_DIR}/expert_labels/${TASK_ID}"
 DAGGER_DATA_DIR="${BASE_DIR}/dagger/${TASK_ID}"
-CHECKPOINTS_DIR="checkpoints/${TASK_ID}"
+
+# 模型路径（按训练方法和任务分类）
+TRAINING_METHOD="dagger"  # dagger, ppo, hybrid
+CHECKPOINTS_DIR="checkpoints/${TRAINING_METHOD}/${TASK_ID}"
 
 # 标注配置
 SMART_SAMPLING=true
@@ -144,6 +147,10 @@ while [[ $# -gt 0 ]]; do
             START_ITERATION="$2"
             shift 2
             ;;
+        --method)
+            TRAINING_METHOD="$2"
+            shift 2
+            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -161,7 +168,13 @@ while [[ $# -gt 0 ]]; do
             echo "  --skip-bc                   跳过BC训练 (假设已有BC模型)"
             echo "  --continue-from MODEL       从指定模型继续DAgger训练"
             echo "  --start-iteration N         从第N轮DAgger开始（与--continue-from配合）"
+            echo "  --method METHOD             训练方法 (默认: dagger, 可选: ppo, hybrid)"
             echo "  -h, --help                  显示帮助信息"
+            echo ""
+            echo "目录结构:"
+            echo "  checkpoints/dagger/TASK_ID/     DAgger训练模型"
+            echo "  checkpoints/ppo/TASK_ID/        PPO训练模型"
+            echo "  checkpoints/hybrid/TASK_ID/     混合训练模型"
             echo ""
             echo "标注优化（默认已启用）:"
             echo "  智能采样: 只标注失败前${FAILURE_WINDOW}步 + 成功episode的${RANDOM_SAMPLE_RATE}%"
@@ -169,7 +182,7 @@ while [[ $# -gt 0 ]]; do
             echo "  快捷操作: N(跳过), Z(撤销), X/ESC(完成)"
             echo ""
             echo "继续训练示例:"
-            echo "  bash $0 --task harvest_1_log --continue-from checkpoints/harvest_1_log/dagger_iter_1.zip --start-iteration 2 --iterations 5"
+            echo "  bash $0 --task harvest_1_log --method dagger --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_1.zip --start-iteration 2 --iterations 5"
             exit 0
             ;;
         *)
@@ -192,6 +205,29 @@ if [[ -z "$CONDA_DEFAULT_ENV" ]] || [[ "$CONDA_DEFAULT_ENV" != "minedojo"* ]]; t
     exit 1
 fi
 print_success "Conda环境: $CONDA_DEFAULT_ENV"
+
+# 更新模型路径（基于解析后的参数）
+CHECKPOINTS_DIR="checkpoints/${TRAINING_METHOD}/${TASK_ID}"
+
+# 验证训练方法
+case "$TRAINING_METHOD" in
+    dagger|ppo|hybrid)
+        print_success "训练方法: $TRAINING_METHOD"
+        ;;
+    *)
+        print_error "不支持的训练方法: $TRAINING_METHOD"
+        print_error "支持的方法: dagger, ppo, hybrid"
+        exit 1
+        ;;
+esac
+
+# 显示配置信息
+print_info "配置信息:"
+echo "  任务ID: $TASK_ID"
+echo "  训练方法: $TRAINING_METHOD"
+echo "  数据目录: $EXPERT_DIR"
+echo "  模型目录: $CHECKPOINTS_DIR"
+echo ""
 
 # 创建必要的目录
 mkdir -p "$EXPERT_DIR" "$POLICY_STATES_DIR" "$EXPERT_LABELS_DIR" "$DAGGER_DATA_DIR" "$CHECKPOINTS_DIR"

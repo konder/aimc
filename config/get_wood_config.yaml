@@ -58,7 +58,7 @@ camera:
 # ============================================================================
 checkpointing:
   save_freq: 10000           # 保存检查点的步数间隔
-  checkpoint_dir: "checkpoints/get_wood"
+  checkpoint_dir: "checkpoints/ppo/harvest_1_log"  # PPO训练模型保存路径
   
 logging:
   log_dir: "logs/training"
