@@ -1,0 +1,108 @@
+# MineDojo harvest_1_log (获得木头) 训练配置文件
+# 可以通过修改这个文件来调整训练参数
+
+# ============================================================================
+# 任务配置
+# ============================================================================
+task:
+  task_id: "harvest_1_log"  # 任务ID (harvest_1_log, harvest_1_log_forest, harvest_1_log_plains, harvest_1_log_taiga)
+  image_size: [160, 256]     # 图像尺寸 [height, width]
+
+# ============================================================================
+# 训练配置
+# ============================================================================
+training:
+  total_timesteps: 200000    # 总训练步数 (建议: test=10K, quick=50K, standard=200K, long=500K)
+  device: "auto"             # 设备: auto/cpu/cuda/mps
+  learning_rate: 0.0005      # 学习率
+  resume: true               # 自动恢复训练（从最新checkpoint继续）
+  
+  # PPO超参数
+  ppo:
+    n_steps: 2048            # 每次更新收集的步数
+    batch_size: 64           # 批次大小
+    n_epochs: 10             # 每次更新的epoch数
+    gamma: 0.99              # 折扣因子
+
+# ============================================================================
+# MineCLIP 配置
+# ============================================================================
+mineclip:
+  use_mineclip: false        # 是否启用MineCLIP密集奖励
+  model_path: "data/mineclip/attn.pth"  # MineCLIP模型权重路径
+  variant: "attn"            # MineCLIP变体 (attn 或 avg)
+  
+  # 奖励权重
+  sparse_weight: 10.0        # 稀疏奖励权重
+  mineclip_weight: 10.0      # MineCLIP奖励初始权重
+  
+  # 动态权重调整（课程学习）
+  use_dynamic_weight: true   # 启用动态权重调整
+  weight_decay_steps: 50000  # 权重从初始值衰减到最小值所需步数
+  min_weight: 0.1            # MineCLIP权重最小值
+  
+  # 视频模式参数
+  use_video_mode: true       # 启用16帧视频模式（推荐，符合MineCLIP官方设计）
+  num_frames: 16             # 视频帧数（默认16，符合MineCLIP官方）
+  compute_frequency: 4       # MineCLIP计算频率（每N步计算一次）
+
+# ============================================================================
+# 相机控制配置
+# ============================================================================
+camera:
+  use_smoothing: true        # 启用相机平滑，减少视觉抖动
+  max_camera_change: 12.0    # 相机最大角度变化（度/步，推荐8-15）
+
+# ============================================================================
+# 保存和日志配置
+# ============================================================================
+checkpointing:
+  save_freq: 10000           # 保存检查点的步数间隔
+  checkpoint_dir: "checkpoints/get_wood"
+  
+logging:
+  log_dir: "logs/training"
+  tensorboard_dir: "logs/tensorboard"
+  save_frames: false         # 保存每100步画面截图（用于分析MineCLIP）
+  frames_dir: "logs/frames"
+
+# ============================================================================
+# 预设配置场景
+# ============================================================================
+# 快速测试配置（用于验证代码，5-10分钟）
+presets:
+  test:
+    total_timesteps: 10000
+    save_freq: 5000
+  
+  # 快速训练配置（30-60分钟）
+  quick:
+    total_timesteps: 50000
+    save_freq: 10000
+  
+  # 标准训练配置（2-4小时，推荐）
+  standard:
+    total_timesteps: 200000
+    save_freq: 10000
+  
+  # 长时间训练配置（5-10小时）
+  long:
+    total_timesteps: 500000
+    save_freq: 20000
+
+# ============================================================================
+# 推荐配置示例
+# ============================================================================
+# 基础训练（不使用MineCLIP）:
+#   use_mineclip: false
+#   total_timesteps: 200000
+#
+# MineCLIP加速训练（推荐，3-5倍加速）:
+#   use_mineclip: true
+#   task_id: "harvest_1_log_forest"  # 森林生物群系树木更密集
+#   total_timesteps: 200000
+#
+# 快速测试:
+#   total_timesteps: 10000
+#   save_freq: 5000
+

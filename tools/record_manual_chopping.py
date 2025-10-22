@@ -487,7 +487,7 @@ def record_chopping_sequence(base_dir="data/expert_demos", max_frames=1000, came
     print(f"  (自动从 episode_{start_episode + completed_episodes:03d} 继续)")
     
     print(f"\n🔬 下一步: BC训练")
-    print(f"  python src/training/train_bc.py --data {base_dir} --output checkpoints/bc_baseline.zip")
+    print(f"  python src/training/train_bc.py --data {base_dir} --output checkpoints/bc_baseline.zip --epochs 50")
     print()
     
     return base_dir

@@ -52,8 +52,8 @@ class RealtimeLoggerCallback(BaseCallback):
         print("\n" + "=" * 130)
         print("🚀 开始训练...")
         print("=" * 130)
-        print(f"{'回合数':>8s} | {'步数':>10s} | {'总时间':>10s} | {'FPS':>8s} | "
-              f"{'总奖励':>10s} | {'MineCLIP':>10s} | {'MC权重':>8s} | {'权重比':>8s} | {'相似度':>8s} | {'损失':>10s}")
+        print(f"{'回合数':>6s} | {'步数':>6s} | {'总时间':>6s} | {'FPS':>6s} | "
+              f"{'总奖励':>6s} | {'CLIP奖励':>6s} | {'相似度':>6s} | {'损失':>6s}")
         print("-" * 130)
         
     def _on_step(self) -> bool:
@@ -78,6 +78,15 @@ class RealtimeLoggerCallback(BaseCallback):
                 self.current_reward = float(rewards[0])  # 取第一个环境
             else:
                 self.current_reward = float(rewards)
+        
+        # 检测回合结束，实时更新回合数
+        if 'dones' in self.locals:
+            dones = self.locals['dones']
+            if isinstance(dones, np.ndarray):
+                if dones[0]:  # 第一个环境的done信号
+                    self.current_episode += 1
+            elif dones:
+                self.current_episode += 1
         
         # 从info中提取MineCLIP详细信息（只记录当前步）
         if 'infos' in self.locals:
@@ -143,12 +152,13 @@ class RealtimeLoggerCallback(BaseCallback):
     
     def _on_rollout_end(self):
         """Rollout 结束时调用"""
-        # 收集 episode 信息
+        # 收集 episode 信息（仅用于统计，不再更新current_episode）
+        # current_episode已经在_on_step中实时更新
         if len(self.model.ep_info_buffer) > 0:
             for ep_info in self.model.ep_info_buffer:
                 if 'r' in ep_info:
                     self.episode_rewards.append(ep_info['r'])
-                    self.current_episode += 1  # 完成一个回合
+                    # 注意：不在这里增加current_episode，避免重复计数
                 if 'l' in ep_info:
                     self.episode_lengths.append(ep_info['l'])
     
@@ -198,7 +208,7 @@ class RealtimeLoggerCallback(BaseCallback):
         similarity_str = f"{mean_similarity:>8.4f}" if mean_similarity != 0.0 else "N/A".rjust(8)
         
         print(f"{self.current_episode:>8,} | {self.num_timesteps:>10,} | {time_str:>10s} | {fps:>8.1f} | "
-              f"{mean_reward:>10.4f} | {mineclip_str} | {weight_str} | {ratio_str} | {similarity_str} | {loss_str:>10s}")
+              f"{mean_reward:>10.4f} | {mineclip_str} | {similarity_str} | {loss_str:>10s}")
     
     def _on_training_end(self):
         """训练结束时调用"""

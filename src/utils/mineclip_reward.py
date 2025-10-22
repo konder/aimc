@@ -3,12 +3,14 @@
 """
 MineCLIP 官方奖励包装器
 使用已安装的 MineCLIP 模型计算密集奖励
+支持单帧和16帧视频模式
 """
 
 import os
 import gym
 import numpy as np
 import torch
+from collections import deque
 
 
 class MineCLIPRewardWrapper(gym.Wrapper):
@@ -29,13 +31,16 @@ class MineCLIPRewardWrapper(gym.Wrapper):
                  device="auto",
                  use_dynamic_weight=False,
                  weight_decay_steps=50000,
-                 min_weight=0.01):
+                 min_weight=0.01,
+                 use_video_mode=True,
+                 num_frames=16,
+                 compute_frequency=4):
         """
         初始化 MineCLIP 奖励包装器
         
         Args:
             env: 基础环境
-            task_prompt: 任务描述（英文），如 "chop down a tree and collect one wood log"
+            task_prompt: 任务描述（英文），如 "chopping a tree with hand"
             model_path: MineCLIP 模型权重路径（.pth 文件）
             variant: MineCLIP 变体 ("attn" 或 "avg")
             sparse_weight: 稀疏奖励权重
@@ -44,6 +49,9 @@ class MineCLIPRewardWrapper(gym.Wrapper):
             use_dynamic_weight: 是否使用动态权重调整（课程学习）
             weight_decay_steps: 权重衰减到最小值所需的步数
             min_weight: MineCLIP权重的最小值
+            use_video_mode: 是否使用16帧视频模式（推荐）
+            num_frames: 视频帧数（默认16，符合MineCLIP官方）
+            compute_frequency: 每N步计算一次MineCLIP（减少开销）
         """
         super().__init__(env)
         
@@ -59,6 +67,12 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         self.min_weight = min_weight
         self.step_count = 0
         
+        # 视频模式参数
+        self.use_video_mode = use_video_mode
+        self.num_frames = num_frames
+        self.compute_frequency = compute_frequency
+        self.frame_buffer = deque(maxlen=num_frames) if use_video_mode else None
+        
         # 检测设备
         if device == "auto":
             if torch.cuda.is_available():
@@ -73,6 +87,10 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         print(f"  MineCLIP 奖励包装器:")
         print(f"    任务描述: {task_prompt}")
         print(f"    模型变体: {variant}")
+        print(f"    运行模式: {'🎬 16帧视频模式' if use_video_mode else '🖼️  单帧模式'}")
+        if use_video_mode:
+            print(f"    视频帧数: {num_frames}帧")
+            print(f"    计算频率: 每{compute_frequency}步")
         print(f"    稀疏权重: {sparse_weight}")
         print(f"    MineCLIP权重: {mineclip_weight} (初始值)")
         if use_dynamic_weight:
@@ -311,14 +329,114 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         weight_range = self.initial_mineclip_weight - self.min_weight
         self.mineclip_weight = self.min_weight + weight_range * decay_factor
     
+    def _encode_video(self, frames):
+        """
+        编码16帧视频序列（MineCLIP官方方式）
+        
+        Args:
+            frames: List of [H, W, C] numpy arrays
+            
+        Returns:
+            video_features: 视频特征向量
+        """
+        if not self.mineclip_available:
+            return None
+        
+        try:
+            with torch.no_grad():
+                # MineCraft官方归一化参数
+                MC_MEAN = torch.tensor([0.3331, 0.3245, 0.3051], device=self.device).view(1, 1, 3, 1, 1)
+                MC_STD = torch.tensor([0.2439, 0.2493, 0.2873], device=self.device).view(1, 1, 3, 1, 1)
+                
+                # 预处理帧序列
+                processed_frames = []
+                for frame in frames:
+                    # 转换为tensor
+                    if isinstance(frame, np.ndarray):
+                        frame_tensor = torch.from_numpy(frame).float()
+                    else:
+                        frame_tensor = frame.float()
+                    
+                    # 确保是 [H, W, C] 格式
+                    if frame_tensor.dim() == 3 and frame_tensor.shape[0] == 3:
+                        frame_tensor = frame_tensor.permute(1, 2, 0)  # [C, H, W] -> [H, W, C]
+                    
+                    # 归一化到 [0, 1]
+                    if frame_tensor.max() > 1.0:
+                        frame_tensor = frame_tensor / 255.0
+                    
+                    # [H, W, C] -> [C, H, W]
+                    frame_tensor = frame_tensor.permute(2, 0, 1)
+                    
+                    processed_frames.append(frame_tensor)
+                
+                # 堆叠为 [T, C, H, W]
+                video_tensor = torch.stack(processed_frames).unsqueeze(0).to(self.device)  # [1, T, C, H, W]
+                
+                # MineCraft归一化
+                video_tensor = (video_tensor - MC_MEAN) / MC_STD
+                
+                # 使用MineCLIP的encode_video（完整官方流程）
+                video_features = self.model.encode_video(video_tensor)
+                
+                return video_features
+        
+        except Exception as e:
+            print(f"    ⚠️ 视频编码失败: {e}")
+            return None
+    
+    def _compute_video_similarity(self, frames):
+        """
+        计算16帧视频与任务的相似度
+        
+        Args:
+            frames: List of 16 frames
+            
+        Returns:
+            similarity: 相似度分数（0-1之间）
+        """
+        if not self.mineclip_available or len(frames) < self.num_frames:
+            return 0.0
+        
+        try:
+            # 编码视频
+            video_features = self._encode_video(frames)
+            if video_features is None:
+                return 0.0
+            
+            # 归一化
+            video_features = video_features / video_features.norm(dim=-1, keepdim=True)
+            
+            # 计算余弦相似度
+            similarity = (video_features @ self.task_features.T).item()
+            
+            # 转换为 [0, 1] 范围
+            similarity = (similarity + 1.0) / 2.0
+            
+            return float(similarity)
+        
+        except Exception as e:
+            print(f"    ⚠️ 视频相似度计算失败: {e}")
+            return 0.0
+    
     def reset(self, **kwargs):
         """重置环境"""
         # MineDojo 的 reset 不接受参数
         obs = self.env.reset()
         
+        # 清空帧缓冲
+        if self.use_video_mode and self.frame_buffer is not None:
+            self.frame_buffer.clear()
+            # 用初始帧填充缓冲区
+            for _ in range(self.num_frames):
+                self.frame_buffer.append(obs.copy())
+        
         if self.mineclip_available:
             # 计算初始相似度
-            self.previous_similarity = self._compute_similarity(obs)
+            if self.use_video_mode and len(self.frame_buffer) == self.num_frames:
+                self.previous_similarity = self._compute_video_similarity(list(self.frame_buffer))
+            else:
+                self.previous_similarity = self._compute_similarity(obs)
         
         return obs
     
@@ -327,9 +445,8 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         执行一步，返回增强的奖励
         
         MineCLIP 密集奖励机制：
-        1. 计算当前画面与任务的相似度（0-1）
-        2. 奖励 = 当前相似度 - 上一步相似度（进步量）
-        3. 每一步都有连续的反馈信号
+        - 单帧模式：计算当前画面与任务的相似度
+        - 16帧视频模式：累积16帧，每N步计算视频与任务的相似度
         
         Args:
             action: 动作
@@ -342,15 +459,37 @@ class MineCLIPRewardWrapper(gym.Wrapper):
         # 更新步数计数器
         self.step_count += 1
         
+        # 添加帧到缓冲区（视频模式）
+        if self.use_video_mode and self.frame_buffer is not None:
+            self.frame_buffer.append(obs.copy())
+        
         if self.mineclip_available:
             # 更新MineCLIP权重（如果启用动态调整）
             self._update_mineclip_weight()
             
             # 计算当前相似度
-            current_similarity = self._compute_similarity(obs)
+            current_similarity = 0.0
+            should_compute = False
             
-            # MineCLIP 密集奖励 = 进步量
-            mineclip_reward = current_similarity - self.previous_similarity
+            if self.use_video_mode:
+                # 16帧视频模式：每N步计算一次
+                if self.step_count % self.compute_frequency == 0 and len(self.frame_buffer) == self.num_frames:
+                    current_similarity = self._compute_video_similarity(list(self.frame_buffer))
+                    should_compute = True
+                else:
+                    # 非计算步，保持上一次的相似度
+                    current_similarity = self.previous_similarity
+            else:
+                # 单帧模式：每步都计算
+                current_similarity = self._compute_similarity(obs)
+                should_compute = True
+            
+            # MineCLIP 密集奖励 = 相似度进步量
+            if should_compute:
+                mineclip_reward = current_similarity - self.previous_similarity
+                self.previous_similarity = current_similarity
+            else:
+                mineclip_reward = 0.0
             
             # 组合奖励
             total_reward = (
@@ -358,15 +497,12 @@ class MineCLIPRewardWrapper(gym.Wrapper):
                 mineclip_reward * self.mineclip_weight
             )
             
-            # 更新上一步相似度
-            self.previous_similarity = current_similarity
-            
             # 记录详细信息
             info['sparse_reward'] = sparse_reward
             info['mineclip_reward'] = mineclip_reward
             info['mineclip_similarity'] = current_similarity
-            info['mineclip_weight'] = self.mineclip_weight  # 记录当前权重
-            info['sparse_weight'] = self.sparse_weight  # 记录稀疏奖励权重
+            info['mineclip_weight'] = self.mineclip_weight
+            info['sparse_weight'] = self.sparse_weight
             info['total_reward'] = total_reward
         else:
             # MineCLIP 不可用，只使用稀疏奖励

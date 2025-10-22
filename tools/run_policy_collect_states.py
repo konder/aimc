@@ -185,6 +185,7 @@ def collect_policy_states(
     stats_file = os.path.join(output_dir, "collection_stats.npy")
     np.save(stats_file, stats)
     print(f"✓ 统计信息已保存: {stats_file}\n")
+    print(f"下一步：\npython tools/label_states.py --states data/policy_states/iter_1/ --output data/expert_labels/iter_1.pkl --smart-sampling --failure-window 10")
     
     return stats
 

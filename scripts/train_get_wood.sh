@@ -79,51 +79,42 @@ else
 fi
 
 # 默认参数
-MODE="standard"
-TIMESTEPS=200000
-USE_MINECLIP=""
-DEVICE="auto"
+CONFIG_FILE="config/get_wood_config.yaml"  # 默认配置文件
+PRESET=""  # 预设配置（test/quick/standard/long）
 HEADLESS="true"  # 默认启用无头模式
-LEARNING_RATE="0.0005"  # 默认学习率
-SAVE_FRAMES=""  # 是否保存画面截图
-
-# MineCLIP 参数
-SPARSE_WEIGHT="10.0"
-MINECLIP_WEIGHT="10.0"
-WEIGHT_DECAY_STEPS="50000"
-MIN_WEIGHT="0.1"
-USE_DYNAMIC_WEIGHT="--use-dynamic-weight"
+OVERRIDES=()  # 命令行覆盖参数数组
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
     case $1 in
+        # 预设配置快捷方式
         test)
-            MODE="test"
-            TIMESTEPS=10000
+            PRESET="test"
             shift
             ;;
         quick)
-            MODE="quick"
-            TIMESTEPS=50000
+            PRESET="quick"
+            shift
+            ;;
+        standard)
+            PRESET="standard"
             shift
             ;;
         long)
-            MODE="long"
-            TIMESTEPS=500000
+            PRESET="long"
             shift
             ;;
-        --mineclip)
-            USE_MINECLIP="--use-mineclip"
-            shift
-            ;;
-        --device)
-            DEVICE="$2"
+        # 配置文件
+        --config)
+            CONFIG_FILE="$2"
             shift 2
             ;;
-        --timesteps)
-            TIMESTEPS="$2"
+        # 预设参数
+        --preset)
+            PRESET="$2"
             shift 2
             ;;
+        # 无头模式（在Shell层控制）
         --headless)
             HEADLESS="true"
             shift
@@ -132,68 +123,61 @@ while [[ $# -gt 0 ]]; do
             HEADLESS="false"
             shift
             ;;
-        --learning-rate)
-            LEARNING_RATE="$2"
+        # 覆盖参数（传递给Python脚本）
+        --override)
+            OVERRIDES+=("--override" "$2")
             shift 2
             ;;
-        --save-frames)
-            SAVE_FRAMES="--save-frames"
+        # 常用覆盖的快捷方式
+        --mineclip)
+            OVERRIDES+=("--override" "mineclip.use_mineclip=true")
             shift
             ;;
-        --sparse-weight)
-            SPARSE_WEIGHT="$2"
+        --task-id)
+            OVERRIDES+=("--override" "task.task_id=$2")
             shift 2
             ;;
-        --mineclip-weight)
-            MINECLIP_WEIGHT="$2"
-            shift 2
-            ;;
-        --weight-decay-steps)
-            WEIGHT_DECAY_STEPS="$2"
-            shift 2
-            ;;
-        --min-weight)
-            MIN_WEIGHT="$2"
-            shift 2
-            ;;
-        --no-dynamic-weight)
-            USE_DYNAMIC_WEIGHT=""
-            shift
-            ;;
+        # 帮助信息
         -h|--help)
-            echo "用法: $0 [模式] [选项]"
+            echo "用法: $0 [预设] [选项]"
             echo ""
-            echo "模式:"
+            echo "预设配置（推荐使用）:"
             echo "  test        快速测试 (10K步, 5-10分钟)"
             echo "  quick       快速训练 (50K步, 30-60分钟)"
-            echo "  standard    标准训练 (200K步, 2-4小时) [默认]"
+            echo "  standard    标准训练 (200K步, 2-4小时)"
             echo "  long        长时间训练 (500K步, 5-10小时)"
             echo ""
             echo "基本选项:"
-            echo "  --mineclip              使用MineCLIP加速（推荐，3-5倍加速）"
-            echo "  --device DEVICE         设备: auto/cpu/cuda/mps (默认: auto)"
-            echo "  --timesteps N           自定义总步数"
+            echo "  --config FILE           指定配置文件 (默认: config/get_wood_config.yaml)"
+            echo "  --preset PRESET         使用预设配置 (test/quick/standard/long)"
             echo "  --headless              启用无头模式，不显示游戏窗口 (默认)"
             echo "  --no-headless           禁用无头模式，显示游戏窗口（调试用）"
-            echo "  --learning-rate LR      学习率 (默认: 0.0005)"
-            echo "  --save-frames           保存每100步画面截图（用于分析MineCLIP）"
             echo ""
-            echo "MineCLIP高级选项（需要--mineclip）:"
-            echo "  --sparse-weight W       稀疏奖励权重 (默认: 10.0)"
-            echo "  --mineclip-weight W     MineCLIP初始权重 (默认: 10.0)"
-            echo "  --weight-decay-steps N  权重衰减步数 (默认: 50000)"
-            echo "  --min-weight W          MineCLIP最小权重 (默认: 0.1)"
-            echo "  --no-dynamic-weight     禁用权重衰减（固定权重）"
+            echo "覆盖参数（高级用法）:"
+            echo "  --override KEY=VALUE    覆盖配置文件中的参数（可多次使用）"
+            echo "                          格式: section.key=value"
+            echo "                          示例: --override mineclip.use_mineclip=true"
+            echo ""
+            echo "常用快捷方式:"
+            echo "  --mineclip              启用MineCLIP (等同于 --override mineclip.use_mineclip=true)"
+            echo "  --task-id TASK          设置任务ID (等同于 --override task.task_id=TASK)"
+            echo "                          可选: harvest_1_log, harvest_1_log_forest, harvest_1_log_plains"
             echo ""
             echo "其他:"
             echo "  -h, --help              显示帮助"
             echo ""
             echo "示例:"
-            echo "  $0                                    # 标准训练"
-            echo "  $0 --mineclip                         # 使用MineCLIP加速"
-            echo "  $0 test --mineclip --save-frames      # 测试+保存画面"
-            echo "  $0 --mineclip --mineclip-weight 40.0  # 提高MineCLIP权重"
-            echo "  $0 long --mineclip --learning-rate 0.001  # 长时间训练+高学习率"
+            echo "  $0                                    # 使用默认配置"
+            echo "  $0 test                               # 快速测试模式"
+            echo "  $0 standard --mineclip                # 标准训练+MineCLIP"
+            echo "  $0 --config my_config.yaml            # 使用自定义配置"
+            echo "  $0 quick --task-id harvest_1_log_forest --mineclip  # 森林快速训练"
+            echo "  $0 --preset long --override training.learning_rate=0.001  # 长训练+自定义学习率"
+            echo ""
+            echo "配置文件:"
+            echo "  所有训练参数现在通过YAML配置文件管理"
+            echo "  默认配置: config/get_wood_config.yaml"
+            echo "  可以通过 --override 覆盖任何配置项"
             exit 0
             ;;
         *)
@@ -212,21 +196,18 @@ fi
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}MineDojo 获得木头训练${NC}"
 echo -e "${BLUE}========================================${NC}"
-echo "任务:       harvest_1_log (获得1个原木)"
-echo "模式:       $MODE"
-echo "总步数:     $TIMESTEPS"
-# 显示 MineCLIP 状态
-if [[ -n "$USE_MINECLIP" ]]; then
-    echo -e "MineCLIP:   ${GREEN}启用${NC}"
-else
-    echo -e "MineCLIP:   ${YELLOW}禁用${NC}"
+echo "配置文件:   $CONFIG_FILE"
+if [[ -n "$PRESET" ]]; then
+    echo "预设模式:   $PRESET"
 fi
-echo "设备:       $DEVICE"
 # 显示无头模式状态
 if [[ "$HEADLESS" == "true" ]]; then
     echo -e "无头模式:   ${GREEN}启用${NC}"
 else
     echo -e "无头模式:   ${YELLOW}禁用（显示游戏窗口）${NC}"
+fi
+if [[ ${#OVERRIDES[@]} -gt 0 ]]; then
+    echo "参数覆盖:   ${#OVERRIDES[@]} 个"
 fi
 echo -e "${BLUE}========================================${NC}"
 echo ""
@@ -267,21 +248,22 @@ echo ""
 # ============================================================================
 echo -e "${YELLOW}[2/2] 开始训练...${NC}"
 echo ""
-python src/training/train_get_wood.py \
-    --total-timesteps "$TIMESTEPS" \
-    --device "$DEVICE" \
-    --learning-rate "$LEARNING_RATE" \
-    $USE_MINECLIP \
-    --sparse-weight "$SPARSE_WEIGHT" \
-    --mineclip-weight "$MINECLIP_WEIGHT" \
-    $USE_DYNAMIC_WEIGHT \
-    --weight-decay-steps "$WEIGHT_DECAY_STEPS" \
-    --min-weight "$MIN_WEIGHT" \
-    --save-freq 10000 \
-    --checkpoint-dir "checkpoints/get_wood" \
-    --tensorboard-dir "logs/tensorboard" \
-    --log-dir "logs/training" \
-    $SAVE_FRAMES
+
+# 构建Python命令
+PYTHON_CMD="python src/training/train_get_wood.py $CONFIG_FILE"
+
+# 添加预设配置
+if [[ -n "$PRESET" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --preset $PRESET"
+fi
+
+# 添加覆盖参数
+if [[ ${#OVERRIDES[@]} -gt 0 ]]; then
+    PYTHON_CMD="$PYTHON_CMD ${OVERRIDES[@]}"
+fi
+
+# 执行训练
+eval $PYTHON_CMD
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
@@ -294,7 +276,7 @@ echo ""
 echo -e "${YELLOW}模型保存在:${NC}"
 echo "  checkpoints/get_wood/"
 echo ""
-echo -e "${YELLOW}评估模型:${NC}"
-echo "  python scripts/evaluate_get_wood.py"
+echo -e "${YELLOW}下次训练:${NC}"
+echo "  $0 $([[ -n "$PRESET" ]] && echo "$PRESET" || echo "")"
 echo ""
 

@@ -201,6 +201,7 @@ def main():
         
         np.save(results_file, results)
         print(f"✓ 评估结果已保存: {results_file}\n")
+        print(f"下一步：\npython tools/run_policy_collect_states.py --model checkpoints/bc_baseline.zip --episodes 20 --output data/policy_states/iter_1/ --save-failures-only --task-id harvest_1_log")
 
 
 if __name__ == "__main__":
