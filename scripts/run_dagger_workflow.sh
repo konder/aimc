@@ -37,7 +37,7 @@ EVAL_EPISODES=20
 
 # 录制配置
 NUM_EXPERT_EPISODES=10
-MOUSE_SENSITIVITY=0.15  # 鼠标灵敏度（已优化）
+MOUSE_SENSITIVITY=0.18  # 鼠标灵敏度（已优化）
 MAX_FRAMES=6000
 SKIP_IDLE_FRAMES=true  # 跳过静止帧（不保存IDLE帧）
 APPEND_RECORDING=false  # 是否追加录制（继续已有数据）
@@ -171,7 +171,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --collect-episodes N        每轮收集episode数 (默认: 20)"
             echo "  --eval-episodes N           评估episode数 (默认: 20)"
             echo "  --num-episodes N            录制专家演示数量 (默认: 10)"
-            echo "  --mouse-sensitivity N       鼠标灵敏度 (默认: 0.2)"
+            echo "  --mouse-sensitivity N       鼠标灵敏度 (默认: 0.18)"
             echo "  --max-frames N              每个episode最大帧数 (默认: 6000)"
             echo "  --no-skip-idle              保存所有帧（包括IDLE帧，默认跳过）"
             echo "  --append-recording          追加录制（继续已有数据）"
