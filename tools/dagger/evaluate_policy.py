@@ -135,10 +135,10 @@ def evaluate_policy(
                     action_counts['camera_move'] += 1
             
             # 打印前20步的详细动作
-            if episode_length < 20:
+            if episode_length < 1000:
                 action_str = "IDLE" if is_idle else str(action)
-                print(f"\n  步骤{episode_length:3d}: {action_str}")
-            elif episode_length == 20:
+                print(f"  步骤{episode_length:3d}: {action_str}")
+            elif episode_length == 1000:
                 print(f"\n  ... (后续步骤省略，仅显示统计)")
             
             obs, reward, done, info = env.step(action)
