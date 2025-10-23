@@ -145,6 +145,13 @@ def evaluate_policy(
             episode_reward += reward
             episode_length += 1
             
+            # 调试：打印前10步的详细info
+            if episode_length <= 10:
+                print(f"    → Reward: {reward:.3f}, Done: {done}")
+                if 'location_stats' in info:
+                    loc = info['location_stats']
+                    print(f"       位置: X={loc.get('xpos', 0):.1f}, Y={loc.get('ypos', 0):.1f}, Z={loc.get('zpos', 0):.1f}")
+            
             if episode_length % 100 == 0:
                 print(".", end="", flush=True)
         
