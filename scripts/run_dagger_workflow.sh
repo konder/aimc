@@ -41,6 +41,7 @@ MOUSE_SENSITIVITY=0.18  # 鼠标灵敏度（已优化）
 MAX_FRAMES=6000
 SKIP_IDLE_FRAMES=true  # 跳过静止帧（不保存IDLE帧）
 APPEND_RECORDING=false  # 是否追加录制（继续已有数据）
+FULLSCREEN=false  # 是否全屏显示（推荐！防止鼠标移出窗口）
 
 # 数据路径（基础路径，会根据 TASK_ID 自动创建子目录）
 BASE_DIR="data"
@@ -133,6 +134,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_IDLE_FRAMES=false
             shift
             ;;
+        --fullscreen)
+            FULLSCREEN=true
+            shift
+            ;;
         --append-recording)
             APPEND_RECORDING=true
             shift
@@ -174,6 +179,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --mouse-sensitivity N       鼠标灵敏度 (默认: 0.18)"
             echo "  --max-frames N              每个episode最大帧数 (默认: 6000)"
             echo "  --no-skip-idle              保存所有帧（包括IDLE帧，默认跳过）"
+            echo "  --fullscreen                全屏显示（推荐！防止鼠标移出窗口）"
             echo "  --append-recording          追加录制（继续已有数据）"
             echo "  --skip-recording            跳过手动录制 (假设已有数据)"
             echo "  --skip-bc                   跳过BC训练 (假设已有BC模型)"
@@ -293,6 +299,7 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         echo "  每episode最大帧数: $MAX_FRAMES"
         echo "  鼠标灵敏度: $MOUSE_SENSITIVITY"
         echo "  跳过静止帧: $SKIP_IDLE_FRAMES"
+        echo "  全屏显示: $FULLSCREEN"
         echo "  数据保存路径: $EXPERT_DIR"
         echo ""
         print_info "控制说明 (Pygame + 鼠标):"
@@ -300,10 +307,12 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         echo "  🖱️  鼠标左键   - 攻击/挖掘"
         echo "  ⌨️  WASD      - 移动"
         echo "  ⌨️  Space     - 跳跃"
+        echo "  ⌨️  方向键 ↑↓←→ - 精确调整视角（1°增量）"
+        echo "  ⌨️  F11       - 切换全屏/窗口"
         echo "  ⌨️  Q         - 重录当前回合（不保存）"
         echo "  ⌨️  ESC       - 退出录制"
         echo ""
-        print_info "提示: Pygame窗口将显示游戏画面，保持窗口焦点"
+        print_info "提示: 全屏模式可防止鼠标移出窗口（推荐）"
         echo ""
         
         read -p "按Enter开始录制，或按Ctrl+C取消..." 
@@ -321,6 +330,11 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         # 根据SKIP_IDLE_FRAMES添加参数
         if [ "$SKIP_IDLE_FRAMES" = false ]; then
             RECORD_CMD="$RECORD_CMD --no-skip-idle-frames"
+        fi
+        
+        # 根据FULLSCREEN添加参数
+        if [ "$FULLSCREEN" = true ]; then
+            RECORD_CMD="$RECORD_CMD --fullscreen"
         fi
         
         # 执行录制

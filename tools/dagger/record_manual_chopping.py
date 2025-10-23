@@ -29,7 +29,7 @@ class PygameController:
     同时处理按键检测和画面显示
     """
     
-    def __init__(self, camera_delta=4, display_size=(800, 600), mouse_sensitivity=0.2):
+    def __init__(self, camera_delta=4, display_size=(800, 600), mouse_sensitivity=0.2, fullscreen=False):
         """
         初始化pygame控制器
         
@@ -37,10 +37,22 @@ class PygameController:
             camera_delta: 相机转动角度增量（键盘）
             display_size: pygame窗口大小
             mouse_sensitivity: 鼠标灵敏度（0.1-2.0）
+            fullscreen: 是否全屏显示（默认False）
         """
         # 初始化pygame
         pygame.init()
-        self.screen = pygame.display.set_mode(display_size)
+        
+        # 设置显示模式
+        self.fullscreen = fullscreen
+        if fullscreen:
+            # 全屏模式 - 使用当前屏幕分辨率
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.display_size = self.screen.get_size()
+        else:
+            # 窗口模式
+            self.screen = pygame.display.set_mode(display_size)
+            self.display_size = display_size
+        
         pygame.display.set_caption("MineDojo Recording (Pygame+Mouse) - Press Q to retry, ESC to exit")
         self.clock = pygame.time.Clock()
         self.font_large = pygame.font.Font(None, 36)
@@ -71,13 +83,23 @@ class PygameController:
         print("  - 录制以20 FPS速度进行")
         print("\n移动控制:")
         print("  W - 前进 | S - 后退 | A - 左移 | D - 右移 | Space - 跳跃")
-        print("\n相机控制 (鼠标) ⭐:")
-        print("  鼠标移动 - 转动视角（上下左右）")
+        print("\n相机控制:")
+        print("  鼠标移动 - 转动视角（快速、大角度）⭐")
+        print("  方向键 ↑↓←→ - 转动视角（精确、小角度，角度=1°）🎯")
+        print("\n攻击:")
         print("  鼠标左键 - 攻击/挖掘（砍树）")
         print("\n系统:")
         print("  Q - 重新录制当前episode")
         print("  ESC - 退出程序")
+        if fullscreen:
+            print("  F11 - 退出全屏")
+        else:
+            print("  F11 - 切换全屏")
         print("\n" + "=" * 80)
+        if fullscreen:
+            print(f"显示模式: 全屏 ({self.display_size[0]}x{self.display_size[1]}) ✅ 鼠标不会移出窗口")
+        else:
+            print(f"显示模式: 窗口 ({self.display_size[0]}x{self.display_size[1]})")
         print(f"鼠标灵敏度: {mouse_sensitivity:.2f}")
         print("=" * 80 + "\n")
     
@@ -91,6 +113,30 @@ class PygameController:
                     self.should_quit = True
                 elif event.key == pygame.K_q:
                     self.should_retry = True
+                elif event.key == pygame.K_F11:
+                    # F11切换全屏
+                    self.toggle_fullscreen()
+    
+    def toggle_fullscreen(self):
+        """切换全屏/窗口模式"""
+        self.fullscreen = not self.fullscreen
+        
+        if self.fullscreen:
+            # 切换到全屏
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.display_size = self.screen.get_size()
+            print(f"\n✅ 已切换到全屏模式 ({self.display_size[0]}x{self.display_size[1]})")
+            print("   鼠标不会移出窗口了！按F11退出全屏\n")
+        else:
+            # 切换到窗口模式
+            default_size = (800, 600)
+            self.screen = pygame.display.set_mode(default_size)
+            self.display_size = default_size
+            print(f"\n✅ 已切换到窗口模式 ({self.display_size[0]}x{self.display_size[1]})")
+            print("   按F11切换回全屏\n")
+        
+        # 重置鼠标状态（切换显示模式后）
+        self.reset_mouse_state()
     
     def get_action(self):
         """
@@ -119,39 +165,64 @@ class PygameController:
         if keys[pygame.K_SPACE]:
             action[2] = 1
         
-        # 鼠标控制相机
-        mouse_buttons = pygame.mouse.get_pressed()
-        mouse_pos = pygame.mouse.get_pos()
+        # === 方向键精确控制相机（小角度）===
+        arrow_key_delta = 1  # 方向键移动角度（更小，更精确）
+        arrow_key_used = False
         
-        # 首次获取鼠标位置，不计算移动（避免启动时的鼠标移动被误读）
-        if not self.mouse_initialized:
-            self.last_mouse_pos = mouse_pos
-            self.mouse_initialized = True
-        elif self.last_mouse_pos is not None:
-            # 计算鼠标移动
-            dx = mouse_pos[0] - self.last_mouse_pos[0]
-            dy = mouse_pos[1] - self.last_mouse_pos[1]
-            
-            # 将鼠标移动转换为相机动作
-            # dx: 正值=向右看，负值=向左看
-            # dy: 正值=向下看，负值=向上看
-            
-            # Yaw (左右) - dimension 4
-            yaw_delta = int(dx * self.mouse_sensitivity)
-            yaw_delta = max(-12, min(12, yaw_delta))  # 限制范围
-            action[4] = 12 + yaw_delta
-            
-            # Pitch (上下) - dimension 3
-            pitch_delta = int(dy * self.mouse_sensitivity)
-            pitch_delta = max(-12, min(12, pitch_delta))  # 限制范围
-            action[3] = 12 + pitch_delta
-            
-            # 更新鼠标位置
-            self.last_mouse_pos = mouse_pos
+        if keys[pygame.K_UP]:
+            action[3] = 12 - arrow_key_delta  # 向上看
+            arrow_key_used = True
+        elif keys[pygame.K_DOWN]:
+            action[3] = 12 + arrow_key_delta  # 向下看
+            arrow_key_used = True
         
-        # 鼠标左键攻击
-        if mouse_buttons[0]:  # 左键
-            action[5] = 3  # attack
+        if keys[pygame.K_LEFT]:
+            action[4] = 12 - arrow_key_delta  # 向左看
+            arrow_key_used = True
+        elif keys[pygame.K_RIGHT]:
+            action[4] = 12 + arrow_key_delta  # 向右看
+            arrow_key_used = True
+        
+        # === 鼠标控制相机（仅在方向键未使用时）===
+        # 优先级: 方向键 > 鼠标
+        if not arrow_key_used:
+            mouse_buttons = pygame.mouse.get_pressed()
+            mouse_pos = pygame.mouse.get_pos()
+            
+            # 首次获取鼠标位置，不计算移动（避免启动时的鼠标移动被误读）
+            if not self.mouse_initialized:
+                self.last_mouse_pos = mouse_pos
+                self.mouse_initialized = True
+            elif self.last_mouse_pos is not None:
+                # 计算鼠标移动
+                dx = mouse_pos[0] - self.last_mouse_pos[0]
+                dy = mouse_pos[1] - self.last_mouse_pos[1]
+                
+                # 将鼠标移动转换为相机动作
+                # dx: 正值=向右看，负值=向左看
+                # dy: 正值=向下看，负值=向上看
+                
+                # Yaw (左右) - dimension 4
+                yaw_delta = int(dx * self.mouse_sensitivity)
+                yaw_delta = max(-12, min(12, yaw_delta))  # 限制范围
+                action[4] = 12 + yaw_delta
+                
+                # Pitch (上下) - dimension 3
+                pitch_delta = int(dy * self.mouse_sensitivity)
+                pitch_delta = max(-12, min(12, pitch_delta))  # 限制范围
+                action[3] = 12 + pitch_delta
+                
+                # 更新鼠标位置
+                self.last_mouse_pos = mouse_pos
+            
+            # 鼠标左键攻击
+            if mouse_buttons[0]:  # 左键
+                action[5] = 3  # attack
+        else:
+            # 如果使用了方向键，仍然允许鼠标左键攻击
+            mouse_buttons = pygame.mouse.get_pressed()
+            if mouse_buttons[0]:
+                action[5] = 3  # attack
         
         return action
     
@@ -262,7 +333,8 @@ def record_chopping_sequence(
     mouse_sensitivity=0.2,
     fast_reset=False,
     fps=20,
-    skip_idle_frames=True
+    skip_idle_frames=True,
+    fullscreen=False
 ):
     """
     录制手动砍树序列（pygame实时模式）
@@ -270,11 +342,12 @@ def record_chopping_sequence(
     Args:
         base_dir: 保存目录
         max_frames: 每个episode的最大帧数
-        camera_delta: 相机灵敏度
+        camera_delta: 相机灵敏度（键盘）
         mouse_sensitivity: 鼠标灵敏度
         fast_reset: 是否快速重置
         fps: 录制帧率
         skip_idle_frames: 是否跳过静止帧（不保存IDLE帧）
+        fullscreen: 是否全屏显示（默认False）
     """
     # 检测已有episode
     os.makedirs(base_dir, exist_ok=True)
@@ -294,7 +367,11 @@ def record_chopping_sequence(
     )
     
     # 初始化pygame控制器
-    controller = PygameController(camera_delta=camera_delta, mouse_sensitivity=mouse_sensitivity)
+    controller = PygameController(
+        camera_delta=camera_delta, 
+        mouse_sensitivity=mouse_sensitivity,
+        fullscreen=fullscreen
+    )
     
     # 录制参数
     frame_delay = 1.0 / fps
@@ -506,7 +583,11 @@ def main():
                         help="完全重置（每次新世界）")
     parser.add_argument("--fps", type=int, default=20,
                         help="录制帧率（默认: 20 FPS）")
-    parser.set_defaults(fast_reset=False)
+    parser.add_argument("--fullscreen", action="store_true",
+                        help="全屏显示（解决鼠标移出窗口问题，推荐！）")
+    parser.add_argument("--no-fullscreen", dest="fullscreen", action="store_false",
+                        help="窗口模式（默认）")
+    parser.set_defaults(fast_reset=False, fullscreen=False)
     
     args = parser.parse_args()
     
@@ -530,10 +611,13 @@ def main():
     print(f"\n配置:")
     print(f"  - 保存目录: {args.base_dir}")
     print(f"  - 最大帧数: {args.max_frames}")
+    print(f"  - 显示模式: {'全屏 (推荐！)' if args.fullscreen else '窗口'}")
     print(f"  - 鼠标灵敏度: {args.mouse_sensitivity} (已优化)")
     print(f"  - 录制帧率: {args.fps} FPS")
     print(f"  - 跳过静止帧: {'是 (不保存IDLE帧)' if args.skip_idle_frames else '否 (保存所有帧)'}")
     print(f"  - 环境重置: {'同一世界' if args.fast_reset else '每次新世界'}")
+    if not args.fullscreen:
+        print(f"\n💡 提示: 鼠标容易移出窗口？试试 --fullscreen 参数")
     print("=" * 80)
     
     record_chopping_sequence(
@@ -543,7 +627,8 @@ def main():
         mouse_sensitivity=args.mouse_sensitivity,
         fast_reset=args.fast_reset,
         fps=args.fps,
-        skip_idle_frames=args.skip_idle_frames
+        skip_idle_frames=args.skip_idle_frames,
+        fullscreen=args.fullscreen
     )
 
 
