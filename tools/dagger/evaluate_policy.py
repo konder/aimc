@@ -135,10 +135,10 @@ def evaluate_policy(
                     action_counts['camera_move'] += 1
             
             # 打印前20步的详细动作
-            if episode_length < 1000:
+            if episode_length < 100:
                 action_str = "IDLE" if is_idle else str(action)
                 print(f"  步骤{episode_length:3d}: {action_str}")
-            elif episode_length == 1000:
+            elif episode_length == 100:
                 print(f"\n  ... (后续步骤省略，仅显示统计)")
             
             obs, reward, done, info = env.step(action)
@@ -148,9 +148,12 @@ def evaluate_policy(
             # 调试：打印前10步的详细info
             if episode_length <= 10:
                 print(f"    → Reward: {reward:.3f}, Done: {done}")
-                if 'location_stats' in info:
-                    loc = info['location_stats']
-                    print(f"       位置: X={loc.get('xpos', 0):.1f}, Y={loc.get('ypos', 0):.1f}, Z={loc.get('zpos', 0):.1f}")
+                # 打印位置和移动距离
+                if 'xpos' in info:
+                    pos = (info['xpos'], info['ypos'], info['zpos'])
+                    walk_cm = info.get('stat', {}).get('walk_one_cm', 0)
+                    print(f"       位置: X={pos[0]:.2f}, Y={pos[1]:.2f}, Z={pos[2]:.2f}")
+                    print(f"       行走距离: {walk_cm} cm")
             
             if episode_length % 100 == 0:
                 print(".", end="", flush=True)
