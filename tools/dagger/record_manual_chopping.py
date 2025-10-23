@@ -378,6 +378,12 @@ def record_chopping_sequence(
         fast_reset=fast_reset,
     )
     
+    # 添加任务特定wrapper（支持所有类型原木）
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from src.utils.task_wrappers import HarvestLogWrapper
+    env = HarvestLogWrapper(env, required_logs=1, verbose=True)
+    
     # 初始化pygame控制器
     controller = PygameController(
         camera_delta=camera_delta, 
