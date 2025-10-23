@@ -581,9 +581,17 @@ def record_chopping_sequence(
             episode_idx += 1
     
     finally:
-        env.close()
-        controller.quit()
-        print(f"\n✅ 环境已关闭，录制结束")
+        try:
+            env.close()
+        except Exception as e:
+            print(f"⚠️  环境关闭时出错: {e}")
+        
+        try:
+            controller.quit()
+        except Exception as e:
+            print(f"⚠️  控制器退出时出错: {e}")
+        
+        print(f"\n✅ 录制结束")
 
 
 def main():

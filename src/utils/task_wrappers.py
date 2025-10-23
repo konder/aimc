@@ -99,6 +99,12 @@ class HarvestLogWrapper(gym.Wrapper):
             total_logs = 0
             obtained_log_types = []
             
+            # 调试：打印所有包含"log"的物品
+            if self.verbose and self.last_log_count == 0:
+                log_items = {k: v for k, v in inventory.items() if 'log' in k.lower()}
+                if log_items:
+                    print(f"  [DEBUG] 库存中的原木物品: {log_items}")
+            
             # 遍历所有原木类型
             for log_type in self.log_types:
                 count = self._get_item_count(inventory, log_type)
