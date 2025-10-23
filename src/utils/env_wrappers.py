@@ -51,90 +51,6 @@ class TimeLimitWrapper(gym.Wrapper):
         return obs, reward, done, info
 
 
-class AllLogTypesWrapper(gym.Wrapper):
-    """
-    接受所有类型的原木作为harvest_log任务的成功条件
-    
-    MineDojo的harvest_1_log任务可能只识别特定类型的原木（如Oak Log）,
-    但Minecraft中有6种原木类型。这个wrapper确保所有原木都被计入。
-    
-    支持的原木类型:
-    - oak_log (橡木)
-    - birch_log (白桦木)
-    - spruce_log (云杉木)
-    - dark_oak_log (深色橡木) ← 用户报告的"黑色木头"
-    - jungle_log (丛林木)
-    - acacia_log (金合欢木)
-    """
-    
-    def __init__(self, env, required_logs=1):
-        """
-        Args:
-            env: 环境实例
-            required_logs: 需要的原木数量（默认1）
-        """
-        super().__init__(env)
-        self.required_logs = required_logs
-        
-        # 所有原木类型（Minecraft物品ID）
-        self.log_types = [
-            "oak_log",
-            "birch_log",
-            "spruce_log",
-            "dark_oak_log",  # 深色橡木（黑色）
-            "jungle_log",
-            "acacia_log"
-        ]
-        
-        # 跟踪上次的原木总数（用于检测新增）
-        self.last_log_count = 0
-        
-        print(f"  ✓ AllLogTypesWrapper已启用（支持所有6种原木类型）")
-    
-    def reset(self, **kwargs):
-        """重置环境并重置原木计数"""
-        self.last_log_count = 0
-        return self.env.reset(**kwargs)
-    
-    def step(self, action):
-        """执行一步并检查是否获得了任意类型的原木"""
-        obs, reward, done, info = self.env.step(action)
-        
-        # 检查库存中的所有原木类型
-        if 'inventory' in info:
-            inventory = info['inventory']
-            total_logs = 0
-            obtained_log_types = []
-            
-            for log_type in self.log_types:
-                # 尝试多种可能的物品ID格式
-                count = 0
-                for item_id in [log_type, f"minecraft:{log_type}"]:
-                    if item_id in inventory:
-                        count = inventory[item_id]
-                        break
-                
-                if count > 0:
-                    total_logs += count
-                    obtained_log_types.append(f"{log_type}({count})")
-            
-            # 如果获得了足够的原木，且任务还未完成
-            if total_logs >= self.required_logs and not done:
-                done = True
-                reward = 1.0  # 给予成功奖励
-                info['success'] = True
-                
-                # 只在新增原木时打印（避免重复打印）
-                if total_logs > self.last_log_count:
-                    log_info = ", ".join(obtained_log_types)
-                    print(f"\n✓ 获得原木！总数: {total_logs} | 类型: {log_info}")
-                    print(f"  任务成功！(需要{self.required_logs}个)\n")
-            
-            self.last_log_count = total_logs
-        
-        return obs, reward, done, info
-
-
 class MinedojoWrapper(gym.Wrapper):
     """
     MineDojo环境包装器，将复杂的观察空间简化为适合训练的格式
@@ -361,13 +277,9 @@ def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,
     
     # 应用包装器（顺序重要！）
     
-    # 1. harvest任务专用：支持所有类型的原木
-    if "harvest" in task_id and "log" in task_id:
-        # 提取目标数量（如harvest_8_log -> 8）
-        import re
-        match = re.search(r'harvest_(\d+)_log', task_id)
-        required_logs = int(match.group(1)) if match else 1
-        env = AllLogTypesWrapper(env, required_logs=required_logs)
+    # 1. 任务特定Wrapper（harvest_log, hunt, craft等）
+    from src.utils.task_wrappers import apply_task_wrapper
+    env = apply_task_wrapper(env, task_id, verbose=True)
     
     # 2. 简化观察空间
     env = MinedojoWrapper(env)
