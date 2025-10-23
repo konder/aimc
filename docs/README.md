@@ -78,6 +78,7 @@
 
 | 文档 | 说明 | 难度 |
 |------|------|------|
+| [DAGGER_CNN_ARCHITECTURE.md](technical/DAGGER_CNN_ARCHITECTURE.md) | DAgger的CNN架构详解 (NatureCNN) | 🟡 中级 🆕 |
 | [RGB_VS_GRAYSCALE_ANALYSIS.md](technical/RGB_VS_GRAYSCALE_ANALYSIS.md) | RGB vs 灰度图像训练分析 | 🟡 中级 🆕 |
 | [MINECLIP_REWARD_DESIGN_EXPLAINED.md](technical/MINECLIP_REWARD_DESIGN_EXPLAINED.md) | MineCLIP差值奖励设计详解 | 🔴 高级 |
 
@@ -148,6 +149,11 @@
   - Minecraft场景颜色重要性评估
   - harvest_1_log任务不建议灰度（预测损失15-25%）
   - MineCLIP兼容性分析
+- 🧠 **新增DAgger CNN架构详解**:
+  - 添加 `DAGGER_CNN_ARCHITECTURE.md` - 深入解析NatureCNN
+  - 3层卷积+1层全连接，14.7M参数
+  - 为什么CNN对Minecraft重要（空间不变性、层级特征）
+  - 与MLP/ResNet对比，优化建议
 
 ### 2025-10-21
 - ✅ **新增DAgger完整实现**:
