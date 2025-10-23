@@ -68,6 +68,10 @@ class PygameController:
         self.last_mouse_pos = None
         self.mouse_initialized = False  # 新增：是否已初始化鼠标位置（避免首次移动被误读）
         
+        # 启用鼠标锁定（限制鼠标在窗口内）
+        pygame.event.set_grab(True)  # 锁定鼠标在窗口内
+        print("🔒 鼠标已锁定在窗口内（按ESC或Q解除锁定）")
+        
         # 控制标志
         self.should_quit = False
         self.should_retry = False
@@ -81,6 +85,7 @@ class PygameController:
         print("  - 按住W键会持续前进，每帧都检测")
         print("  - 支持多键同时按下（如W+左键）")
         print("  - 录制以20 FPS速度进行")
+        print("  - 🔒 鼠标已锁定在窗口内（不会移出画面）")
         print("\n移动控制:")
         print("  W - 前进 | S - 后退 | A - 左移 | D - 右移 | Space - 跳跃")
         print("\n相机控制:")
@@ -90,17 +95,18 @@ class PygameController:
         print("  鼠标左键 - 攻击/挖掘（砍树）")
         print("\n系统:")
         print("  Q - 重新录制当前episode")
-        print("  ESC - 退出程序")
+        print("  ESC - 退出程序（会自动解除鼠标锁定）")
         if fullscreen:
             print("  F11 - 退出全屏")
         else:
             print("  F11 - 切换全屏")
         print("\n" + "=" * 80)
         if fullscreen:
-            print(f"显示模式: 全屏 ({self.display_size[0]}x{self.display_size[1]}) ✅ 鼠标不会移出窗口")
+            print(f"显示模式: 全屏 ({self.display_size[0]}x{self.display_size[1]})")
         else:
             print(f"显示模式: 窗口 ({self.display_size[0]}x{self.display_size[1]})")
         print(f"鼠标灵敏度: {mouse_sensitivity:.2f}")
+        print(f"鼠标锁定: ✅ 已启用（鼠标不会移出窗口）")
         print("=" * 80 + "\n")
     
     def process_events(self):
@@ -126,17 +132,20 @@ class PygameController:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
             self.display_size = self.screen.get_size()
             print(f"\n✅ 已切换到全屏模式 ({self.display_size[0]}x{self.display_size[1]})")
-            print("   鼠标不会移出窗口了！按F11退出全屏\n")
+            print("   按F11退出全屏\n")
         else:
             # 切换到窗口模式
             default_size = (800, 600)
             self.screen = pygame.display.set_mode(default_size)
             self.display_size = default_size
             print(f"\n✅ 已切换到窗口模式 ({self.display_size[0]}x{self.display_size[1]})")
-            print("   按F11切换回全屏\n")
+            print("   鼠标已锁定在窗口内，按F11切换回全屏\n")
         
         # 重置鼠标状态（切换显示模式后）
         self.reset_mouse_state()
+        
+        # 重新启用鼠标锁定（切换显示模式后需要重新设置）
+        pygame.event.set_grab(True)
     
     def get_action(self):
         """
@@ -323,7 +332,10 @@ class PygameController:
     
     def quit(self):
         """退出pygame"""
+        # 解除鼠标锁定
+        pygame.event.set_grab(False)
         pygame.quit()
+        print("🔓 鼠标锁定已解除")
 
 
 def record_chopping_sequence(
