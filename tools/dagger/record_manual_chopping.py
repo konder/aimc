@@ -92,6 +92,7 @@ class PygameController:
         print("  鼠标移动 - 转动视角（快速、大角度）⭐")
         print("  方向键 ↑↓←→ - 转动视角（精确、小角度，角度=1°）🎯")
         print("\n攻击:")
+        print("  F键 - 攻击/挖掘（砍树）⭐")
         print("  鼠标左键 - 攻击/挖掘（砍树）")
         print("\n系统:")
         print("  Q - 重新录制当前episode")
@@ -173,6 +174,10 @@ class PygameController:
         # 跳跃
         if keys[pygame.K_SPACE]:
             action[2] = 1
+        
+        # 攻击（F键）
+        if keys[pygame.K_f]:
+            action[5] = 3  # attack
         
         # === 方向键精确控制相机（小角度）===
         arrow_key_delta = 1  # 方向键移动角度（更小，更精确）
