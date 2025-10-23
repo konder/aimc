@@ -78,7 +78,8 @@
 
 | 文档 | 说明 | 难度 |
 |------|------|------|
-| [MINECLIP_REWARD_DESIGN_EXPLAINED.md](technical/MINECLIP_REWARD_DESIGN_EXPLAINED.md) | MineCLIP差值奖励设计详解 | 🔴 高级 🆕 |
+| [RGB_VS_GRAYSCALE_ANALYSIS.md](technical/RGB_VS_GRAYSCALE_ANALYSIS.md) | RGB vs 灰度图像训练分析 | 🟡 中级 🆕 |
+| [MINECLIP_REWARD_DESIGN_EXPLAINED.md](technical/MINECLIP_REWARD_DESIGN_EXPLAINED.md) | MineCLIP差值奖励设计详解 | 🔴 高级 |
 
 ---
 
@@ -142,6 +143,11 @@
   - 添加 `DAGGER_LABELING_STRATEGY.md` - 避免原地转圈的标注策略 🔥 **必读！**
   - 详细解释"环视是短期行为，移动是主要策略"
   - 包含4个具体场景示例和质量自检方法
+- 🎨 **新增RGB vs 灰度分析**:
+  - 添加 `RGB_VS_GRAYSCALE_ANALYSIS.md` - 输入表示对比分析
+  - Minecraft场景颜色重要性评估
+  - harvest_1_log任务不建议灰度（预测损失15-25%）
+  - MineCLIP兼容性分析
 
 ### 2025-10-21
 - ✅ **新增DAgger完整实现**:
