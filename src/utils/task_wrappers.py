@@ -99,20 +99,16 @@ class HarvestLogWrapper(gym.Wrapper):
             total_logs = 0
             obtained_log_types = []
             
-            # 调试：打印库存格式和所有包含"log"的物品
+            # 调试：打印所有包含"log"的物品
             if self.verbose and self.last_log_count == 0:
-                # 检查inventory的类型
                 if isinstance(inventory, dict):
                     log_items = {k: v for k, v in inventory.items() if 'log' in k.lower()}
                     if log_items:
                         print(f"  [DEBUG] 库存格式: dict, 原木物品: {log_items}")
                 elif isinstance(inventory, list):
-                    # inventory是列表，打印包含log的项
-                    log_items = [item for item in inventory if 'log' in str(item).lower()]
+                    log_items = [item for item in inventory if isinstance(item, dict) and 'log' in str(item.get('name', '')).lower()]
                     if log_items:
                         print(f"  [DEBUG] 库存格式: list, 原木物品: {log_items}")
-                else:
-                    print(f"  [DEBUG] 库存格式: {type(inventory)}, 内容: {inventory}")
             
             # 遍历所有原木类型
             for log_type in self.log_types:
@@ -144,7 +140,7 @@ class HarvestLogWrapper(gym.Wrapper):
         
         支持多种库存格式:
         1. 字典格式: {"oak_log": 5, "minecraft:stone": 10}
-        2. 列表格式: [{"type": "oak_log", "quantity": 5}, ...]
+        2. 列表格式: [{"name": "log", "variant": 0, "quantity": 1}, ...]
         
         支持多种物品ID格式:
         - "oak_log"
@@ -167,24 +163,17 @@ class HarvestLogWrapper(gym.Wrapper):
         
         # 处理列表格式
         elif isinstance(inventory, list):
+            # MineDojo实际使用 log/log2 + variant 格式
+            # 暂时返回所有log类型的总数（临时解决方案）
             total_count = 0
             for item in inventory:
                 if isinstance(item, dict):
-                    # 假设格式: {"type": "oak_log", "quantity": 5}
-                    item_type = item.get('type', '') or item.get('name', '') or item.get('item', '')
+                    item_name_in_inv = item.get('name', '') or item.get('type', '') or item.get('item', '')
                     quantity = item.get('quantity', 0) or item.get('count', 0) or 1
                     
-                    # 检查是否匹配目标物品
-                    for item_id in [item_name, f"minecraft:{item_name}"]:
-                        if item_type == item_id:
-                            total_count += quantity
-                            break
-                elif isinstance(item, str):
-                    # 假设格式: ["oak_log", "stone", ...]
-                    for item_id in [item_name, f"minecraft:{item_name}"]:
-                        if item == item_id:
-                            total_count += 1
-                            break
+                    # 检查是否是原木（log 或 log2）
+                    if 'log' in item_name_in_inv.lower():
+                        total_count += quantity
             return total_count
         
         return 0
