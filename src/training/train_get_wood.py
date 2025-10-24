@@ -75,12 +75,11 @@ def _detect_device(device_arg):
 
 
 def create_harvest_log_env(task_id="harvest_1_log", use_mineclip=False, 
-                          mineclip_model_path=None, mineclip_variant="attn", 
-                          image_size=(160, 256), sparse_weight=10.0, 
-                          mineclip_weight=10.0, use_dynamic_weight=True, 
-                          weight_decay_steps=50000, min_weight=0.1, device='auto',
-                          use_camera_smoothing=True, max_camera_change=12.0,
-                          use_video_mode=True, num_frames=16, compute_frequency=4):
+                         mineclip_model_path=None, mineclip_variant="attn", 
+                         image_size=(160, 256), sparse_weight=10.0, 
+                         mineclip_weight=10.0, use_dynamic_weight=True, 
+                         weight_decay_steps=50000, min_weight=0.1, device='auto',
+                         use_video_mode=True, num_frames=16, compute_frequency=4):
     """
     创建采集木头任务环境
     
@@ -96,8 +95,6 @@ def create_harvest_log_env(task_id="harvest_1_log", use_mineclip=False,
         weight_decay_steps: 权重衰减步数
         min_weight: MineCLIP权重最小值
         device: 运行设备 ('auto', 'cuda', 'mps', 'cpu')
-        use_camera_smoothing: 是否启用相机平滑（减少抖动）
-        max_camera_change: 相机最大角度变化（度/步）
         
     Returns:
         MineDojo环境
@@ -130,9 +127,7 @@ def create_harvest_log_env(task_id="harvest_1_log", use_mineclip=False,
         image_size=image_size,
         use_frame_stack=False,
         use_discrete_actions=False,
-        max_episode_steps=1000,  # 每回合最大1000步，防止无限运行
-        use_camera_smoothing=use_camera_smoothing,
-        max_camera_change=max_camera_change
+        max_episode_steps=1000  # 每回合最大1000步，防止无限运行
     )
     
     # 如果启用MineCLIP
@@ -194,9 +189,6 @@ def train(config):
     num_frames = config['mineclip']['num_frames']
     compute_frequency = config['mineclip']['compute_frequency']
     
-    use_camera_smoothing = config['camera']['use_smoothing']
-    max_camera_change = config['camera']['max_camera_change']
-    
     save_freq = config['checkpointing']['save_freq']
     checkpoint_dir = config['checkpointing']['checkpoint_dir']
     
@@ -235,9 +227,6 @@ def train(config):
             print(f"    计算频率: 每{compute_frequency}步")
     print(f"  学习率: {learning_rate}")
     print(f"  图像尺寸: {image_size}")
-    print(f"  相机平滑: {'启用' if use_camera_smoothing else '禁用'}")
-    if use_camera_smoothing:
-        print(f"    最大变化: {max_camera_change}°/步")
     print("=" * 70)
     print()
     
@@ -260,8 +249,6 @@ def train(config):
         weight_decay_steps=weight_decay_steps,
         min_weight=min_weight,
         device=device_arg,
-        use_camera_smoothing=use_camera_smoothing,
-        max_camera_change=max_camera_change,
         use_video_mode=use_video_mode,
         num_frames=num_frames,
         compute_frequency=compute_frequency

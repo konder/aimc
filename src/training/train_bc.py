@@ -225,7 +225,6 @@ def train_bc_with_ppo(
     def make_env():
         return make_minedojo_env(
             task_id=task_id,
-            use_camera_smoothing=False,
             max_episode_steps=1000
         )
     

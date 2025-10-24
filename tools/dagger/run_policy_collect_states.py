@@ -74,7 +74,6 @@ def collect_policy_states(
     print(f"✓ 创建环境...")
     env = make_minedojo_env(
         task_id=task_id,
-        use_camera_smoothing=False,  # 不需要相机平滑
         max_episode_steps=max_steps,
         fast_reset=False  # DAgger收集：每个episode独立环境
     )

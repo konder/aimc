@@ -8,7 +8,6 @@ MineDojo 环境包装器
 import gym
 import numpy as np
 from collections import deque
-from src.utils.camera_wrappers import CameraSmoothingWrapper
 
 
 class TimeLimitWrapper(gym.Wrapper):
@@ -177,64 +176,11 @@ class FrameStack(gym.Wrapper):
         return np.concatenate(list(self.frames), axis=0)
 
 
-class ActionWrapper(gym.Wrapper):
-    """
-    简化MineDojo的动作空间
-    MineDojo使用MultiDiscrete空间（8维数组），我们直接使用原始空间
-    或者提供一个简化的离散动作映射
-    """
-    
-    def __init__(self, env, use_discrete=False):
-        """
-        初始化动作包装器
-        
-        Args:
-            env: 环境实例
-            use_discrete: 是否使用简化的离散动作空间（暂不支持）
-        """
-        super().__init__(env)
-        self.use_discrete = use_discrete
-        
-        # MVP版本：直接使用原始的MultiDiscrete空间
-        # 未来可以添加离散化映射
-        if use_discrete:
-            # TODO: 实现离散动作映射
-            # 目前直接使用原始空间
-            print("警告: 离散动作空间映射尚未实现，使用原始MultiDiscrete空间")
-            self.use_discrete = False
-    
-    def step(self, action):
-        """
-        执行动作，捕获无效动作错误
-        
-        Args:
-            action: MultiDiscrete动作数组
-            
-        Returns:
-            tuple: (观察, 奖励, 完成标志, 信息)
-        """
-        try:
-            return self.env.step(action)
-        except ValueError as e:
-            # 捕获无效动作错误（如"Trying to place air"）
-            # 返回当前观察和0奖励，不结束episode
-            if "place air" in str(e) or "strict check" in str(e):
-                # 使用no-op动作重试
-                noop_action = self.env.action_space.no_op()
-                return self.env.step(noop_action)
-            else:
-                # 其他错误继续抛出
-                raise
-    
-    def reset(self, **kwargs):
-        """重置环境"""
-        # MineDojo 的 reset 不接受参数
-        return self.env.reset()
 
 
 def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,
                       frame_stack_n=4, use_discrete_actions=False, max_episode_steps=1000,
-                      use_camera_smoothing=True, max_camera_change=12.0, fast_reset=True):
+                      fast_reset=True):
     """
     创建并包装MineDojo环境
     
@@ -246,8 +192,6 @@ def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,
         use_discrete_actions: 是否使用离散动作空间（暂不支持，使用MultiDiscrete）
         max_episode_steps: 每回合最大步数（默认1000）
                           MineDojo的harvest任务默认没有超时，必须手动设置
-        use_camera_smoothing: 是否启用相机平滑（减少抖动，默认True）
-        max_camera_change: 相机最大角度变化（度/步，默认12.0）
         fast_reset: 是否快速重置（默认True）
                    True: 重用世界，reset快但环境相同
                    False: 重新生成世界，reset慢但环境多样
@@ -259,7 +203,6 @@ def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,
         - MineDojo使用MultiDiscrete(8)动作空间，直接由RL算法处理
         - 无头模式通过外部JAVA_OPTS环境变量控制（在Shell脚本中设置）
         - harvest任务不会在agent死亡时结束，必须用TimeLimit wrapper
-        - 相机平滑能显著减少视觉抖动，提升训练效率2-3倍
         - 评估时建议fast_reset=False，确保每个episode环境不同
     """
     import minedojo
@@ -287,18 +230,7 @@ def make_minedojo_env(task_id, image_size=(160, 256), use_frame_stack=False,
     # 3. 添加超时限制（关键！MineDojo harvest任务默认没有超时）
     env = TimeLimitWrapper(env, max_steps=max_episode_steps)
     
-    # 4. 处理动作空间
-    env = ActionWrapper(env, use_discrete=use_discrete_actions)
-    
-    # 5. 相机平滑（可选，减少视觉抖动）
-    if use_camera_smoothing:
-        env = CameraSmoothingWrapper(
-            env,
-            max_pitch_change=max_camera_change,
-            max_yaw_change=max_camera_change
-        )
-    
-    # 6. 可选：帧堆叠
+    # 4. 可选：帧堆叠
     if use_frame_stack:
         env = FrameStack(env, n_frames=frame_stack_n)
     

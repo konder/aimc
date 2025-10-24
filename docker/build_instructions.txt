@@ -1,0 +1,38 @@
+AIMC Docker 镜像构建说明
+=======================
+
+当前网络环境有限制，建议按以下步骤操作：
+
+步骤 1: 下载 Miniconda（在有网络的环境中）
+-------------------------------------------
+选择以下任一方式：
+
+a) 使用浏览器下载：
+   https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+   
+b) 或使用清华镜像：
+   https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh
+
+将下载的文件保存到: /Users/nanzhang/aimc/docker/
+
+步骤 2: 修改 Dockerfile
+-----------------------
+编辑 Dockerfile，找到第 30-32 行，修改为：
+
+# 原来：
+# RUN wget --no-check-certificate https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+
+# 改为：
+COPY Miniconda3-latest-Linux-x86_64.sh /tmp/miniconda.sh
+RUN bash /tmp/miniconda.sh -b -p /opt/conda && \
+
+步骤 3: 构建镜像
+----------------
+cd /Users/nanzhang/aimc/docker
+docker build --platform linux/amd64 -t aimc-minedojo:latest .
+
+步骤 4: 运行镜像
+----------------
+docker run -it --platform linux/amd64 -v /Users/nanzhang/aimc:/workspace aimc-minedojo:latest
+
+详细文档请查看: docker/README.md

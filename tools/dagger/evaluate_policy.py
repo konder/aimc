@@ -31,7 +31,8 @@ def evaluate_policy(
     num_episodes,
     task_id="harvest_1_log",
     max_steps=1000,
-    deterministic=True
+    deterministic=True,
+    device="auto"
 ):
     """
     评估策略
@@ -42,10 +43,21 @@ def evaluate_policy(
         task_id: MineDojo任务ID
         max_steps: 每个episode最大步数
         deterministic: 是否使用确定性策略
+        device: 运行设备 (auto/cpu/cuda/mps)
     
     Returns:
         dict: 评估结果统计
     """
+    
+    # 设备检测
+    import torch
+    if device == "auto":
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
     
     print(f"\n{'='*60}")
     print(f"策略评估")
@@ -54,11 +66,13 @@ def evaluate_policy(
     print(f"任务: {task_id}")
     print(f"Episode数: {num_episodes}")
     print(f"确定性: {deterministic}")
+    print(f"设备: {device}")
+    print(f"环境管理: 每个episode重新创建环境（避免内存泄漏）")
     print(f"{'='*60}\n")
     
     # 加载策略
     try:
-        policy = PPO.load(model_path)
+        policy = PPO.load(model_path, device=device)
         print(f"✓ 策略加载成功")
         print(f"  策略类型: {type(policy)}")
         print(f"  设备: {policy.device}")
@@ -69,15 +83,6 @@ def evaluate_policy(
         print(f"✗ 策略加载失败: {e}")
         return None
     
-    # 创建环境
-    # fast_reset=False: 每个episode重新生成世界，确保多样性
-    env = make_minedojo_env(
-        task_id=task_id,
-        use_camera_smoothing=False,
-        max_episode_steps=max_steps,
-        fast_reset=False
-    )
-    
     # 统计信息
     episode_rewards = []
     episode_lengths = []
@@ -86,12 +91,23 @@ def evaluate_policy(
     print(f"开始评估...\n")
     
     for ep in range(num_episodes):
+        print(f"\n{'='*60}")
+        print(f"Episode {ep+1}/{num_episodes}")
+        print(f"{'='*60}")
+        
+        # 每个回合创建新环境
+        print(f"  创建新环境...")
+        env = make_minedojo_env(
+            task_id=task_id,
+            max_episode_steps=max_steps,
+            fast_reset=False
+        )
+        
         obs = env.reset()
+        print(f"  ✓ 环境已创建并重置")
         done = False
         episode_reward = 0.0
         episode_length = 0
-        
-        print(f"Episode {ep+1}/{num_episodes} ", end="", flush=True)
         
         # 动作统计
         action_counts = {
@@ -134,26 +150,9 @@ def evaluate_policy(
                 if action[3] != 12 or action[4] != 12:
                     action_counts['camera_move'] += 1
             
-            # 打印前20步的详细动作
-            if episode_length < 100:
-                action_str = "IDLE" if is_idle else str(action)
-                print(f"  步骤{episode_length:3d}: {action_str}")
-            elif episode_length == 100:
-                print(f"\n  ... (后续步骤省略，仅显示统计)")
-            
             obs, reward, done, info = env.step(action)
             episode_reward += reward
             episode_length += 1
-            
-            # 调试：打印前10步的详细info
-            if episode_length <= 10:
-                print(f"    → Reward: {reward:.3f}, Done: {done}")
-                # 打印位置和移动距离
-                if 'xpos' in info:
-                    pos = (info['xpos'], info['ypos'], info['zpos'])
-                    walk_cm = info.get('stat', {}).get('walk_one_cm', 0)
-                    print(f"       位置: X={pos[0]:.2f}, Y={pos[1]:.2f}, Z={pos[2]:.2f}")
-                    print(f"       行走距离: {walk_cm} cm")
             
             if episode_length % 100 == 0:
                 print(".", end="", flush=True)
@@ -177,8 +176,11 @@ def evaluate_policy(
         print(f"    镜头: {action_counts['camera_move']:4d} ({action_counts['camera_move']/episode_length*100:5.1f}%)")
         
         print(f"\n {status} | 步数:{episode_length:3d} | 奖励:{episode_reward:6.2f}")
-    
-    env.close()
+        
+        # 关闭环境
+        print(f"  关闭环境...")
+        env.close()
+        print(f"  ✓ 环境已关闭")
     
     # 计算统计
     success_rate = np.mean(successes)
@@ -249,6 +251,14 @@ def main():
         help="使用随机策略而非确定性策略"
     )
     
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda", "mps"],
+        help="运行设备 (auto/cpu/cuda/mps，默认: auto)"
+    )
+    
     args = parser.parse_args()
     
     # 验证模型文件存在
@@ -262,7 +272,8 @@ def main():
         num_episodes=args.episodes,
         task_id=args.task_id,
         max_steps=args.max_steps,
-        deterministic=not args.stochastic
+        deterministic=not args.stochastic,
+        device=args.device
     )
     
     if results:
