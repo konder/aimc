@@ -64,7 +64,6 @@ SHELL ["/bin/bash", "-c"]
 RUN source /opt/conda/etc/profile.d/conda.sh && \
     conda activate minedojo-x86 && \
     pip install "pip<24.1" "setuptools<58" "wheel<0.38.0" && \
-    pip install "numpy==1.24.3" && \
     pip install minedojo && \
     pip install -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
