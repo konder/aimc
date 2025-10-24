@@ -20,6 +20,12 @@ RUN apt-get update && \
     git \
     build-essential \
     ca-certificates \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Miniconda
@@ -50,13 +56,18 @@ RUN conda create -n minedojo-x86 python=3.9 -y && \
     conda init bash && \
     echo "conda activate minedojo-x86" >> /root/.bashrc
 
+# 复制项目文件
+COPY requirements.txt /tmp/requirements.txt
+
 # 安装 Python 依赖
 SHELL ["/bin/bash", "-c"]
 RUN source /opt/conda/etc/profile.d/conda.sh && \
     conda activate minedojo-x86 && \
     pip install "pip<24.1" "setuptools<58" "wheel<0.38.0" && \
     pip install "numpy==1.24.3" && \
-    pip install minedojo
+    pip install minedojo && \
+    pip install -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
 
 # 设置工作目录
 WORKDIR /workspace

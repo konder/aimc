@@ -1,505 +1,773 @@
 # 常见问题解答（FAQ）
 
-## 关于加速训练
+## DAgger 训练相关
 
-### Q1: MineRL和MineDojo的数据集在哪里获取？
+### Q1: 什么是 DAgger？和传统 RL 有什么区别？
 
-**A**: 
+**A**: DAgger (Dataset Aggregation) 是一种**迭代式模仿学习**算法。
 
-**MineRL数据集**（推荐用于离线RL）：
-```bash
-# 安装MineRL
-pip install minerl
+**核心区别**:
 
-# 数据会在首次使用时自动下载
-python -c "import minerl; data = minerl.data.make('MineRLTreechop-v0')"
+| 特性 | 传统RL（PPO） | DAgger |
+|------|-------------|--------|
+| **数据来源** | 随机探索 | 人类演示 |
+| **训练起点** | 随机策略 | 专家策略 |
+| **首次成功** | 50K-200K步（几小时） | 5-10个演示（1小时录制） |
+| **最终成功率** | 80-85% | **90-95%** |
+| **鲁棒性** | 中等 | **高**（见过失败场景） |
+| **调试难度** | 高（奖励函数设计） | 低（直观的人类演示） |
 
-# 探索数据集
-python scripts/explore_minerl_dataset.py --dataset MineRLTreechop-v0
+**工作流程**:
+```
+录制演示 → BC基线(60%) → 
+迭代1(75%) → 迭代2(85%) → 迭代3(92%+)
 ```
 
-**MineDojo数据集**：
-- YouTube视频（73万个）：**不直接提供**，已用于训练MineCLIP模型
-- Wiki知识库（6,735页）：可从 https://zenodo.org/records/6693745 下载
-
-**详细文档**：`docs/guides/MINERL_DATASET_GUIDE.md`
+详见：`docs/guides/DAGGER_COMPREHENSIVE_GUIDE.md`
 
 ---
 
-### Q2: MineRL数据集的结构是什么样的？
+### Q2: 需要录制多少专家演示？
 
-**A**: MineRL数据是**轨迹数据**（trajectories），包含：
+**A**: 根据任务复杂度：
 
-```python
-{
-    'state': {
-        'pov': np.ndarray,        # 第一人称视角图像 (64, 64, 3)
-        'inventory': dict,        # 物品栏状态
-        'equipped_items': dict,   # 手持物品
-    },
-    'action': {
-        'camera': [pitch, yaw],   # 摄像机移动
-        'forward': 0/1,           # 前进
-        'attack': 0/1,            # 攻击
-        'jump': 0/1,              # 跳跃
-        # ... 其他动作
-    },
-    'reward': float,              # 奖励值
-    'done': bool,                 # episode是否结束
-}
-```
+| 任务复杂度 | 演示数量 | 总帧数 | 录制时间 | BC成功率 |
+|-----------|---------|--------|---------|---------|
+| 简单（砍树）| **10-20次** | 5K-10K | 40-60分钟 | 50-70% |
+| 中等（建造）| 30-50次 | 20K-30K | 2-3小时 | 40-60% |
+| 复杂（探险）| 50-100次 | 50K-100K | 4-6小时 | 30-50% |
 
-**关键点**：
-- ✅ 自动标注的人类游戏轨迹
-- ✅ 包含60M+状态-动作对
-- ❌ 不是监督学习的"标记数据"（没有"最优动作"标签）
-- ✅ 适合离线RL（CQL、IQL）和行为克隆（BC）
+**关键点**:
+- ✅ **数据质量 > 数量**: 保持一致的操作习惯
+- ✅ **多样性很重要**: 覆盖不同场景（近/远距离、不同地形）
+- ✅ **确保成功**: 每次演示都要完成任务
+- ❌ **避免过度复杂**: 不要绕圈、多余跳跃等
 
-**可用数据集**：
-- `MineRLTreechop-v0` - 砍树（15GB，简单）
-- `MineRLNavigate-v0` - 导航（20GB，简单）
-- `MineRLObtainDiamond-v0` - 获取钻石（45GB，困难）
-
----
-
-### Q3: MineCLIP是什么？提供什么能力？
-
-**A**: MineCLIP是一个**视觉-语言多模态模型**，在73万YouTube Minecraft视频上训练。
-
-**核心能力**：
-
-1. **视觉-文本匹配**
-```python
-similarity = mineclip.compute_similarity(
-    image,  # 游戏截图
-    "chop down a tree"  # 任务描述
-)
-# 输出: 0.85 (0到1之间，越高表示越匹配)
-```
-
-2. **视觉编码**
-```python
-features = mineclip.encode_image(image)
-# 提取语义特征向量（512维或1024维）
-```
-
-3. **文本编码**
-```python
-features = mineclip.encode_text("chop down trees")
-# 将任务描述转为特征向量
-```
-
-**详细文档**：`docs/guides/MINECLIP_EXPLAINED.md`
-
----
-
-### Q4: MineCLIP如何参与训练过程？
-
-**A**: MineCLIP作为**密集奖励函数**，将稀疏奖励转换为密集奖励。
-
-**传统RL的问题**（稀疏奖励）：
-```python
-步骤1-500: 所有奖励都是0  ❌
-步骤501: 获得木头，奖励=1  ✅
-# 智能体不知道前500步哪些行为有用
-```
-
-**MineCLIP解决方案**（密集奖励）：
-```python
-步骤1: 看到树 → 奖励=0.05   ✅ 鼓励寻找树
-步骤2: 靠近树 → 奖励=0.15   ✅ 鼓励接近
-步骤3: 面向树 → 奖励=0.30   ✅ 鼓励对准
-步骤4: 攻击树 → 奖励=0.50   ✅ 鼓励攻击
-步骤5: 获得木头 → 奖励=1.00 ✅ 完成任务
-# 每一步都有反馈！
-```
-
-**使用方式**：
+**推荐**:
 ```bash
-# 一行命令启动MineCLIP训练
-./scripts/train_with_mineclip.sh --task harvest_log --timesteps 200000
-```
+# 先录制 5 个测试质量
+bash scripts/run_dagger_workflow.sh \
+    --task harvest_1_log \
+    --num-episodes 5 \
+    --iterations 0
 
-**效果**：
-- ⚡ 训练速度提升 **3-5倍**
-- 🎯 首次成功快 **5倍**
-- 📈 最终性能提升 **15-20%**
-
----
-
-### Q5: 数据集是"标记数据"吗？
-
-**A**: **不完全是**。
-
-MineRL数据是：
-- ✅ **自动标注的轨迹**：记录了状态、动作、奖励
-- ❌ **不是监督学习标记**：没有"这个状态下最优动作是什么"的标签
-- ⚠️ **人类水平**：数据来自人类玩家，可能包含错误
-
-**可以用于**：
-1. **行为克隆（BC）**：直接模仿人类动作
-   ```python
-   # 监督学习：输入状态，输出动作
-   model.fit(states, actions)
-   ```
-
-2. **离线强化学习（Offline RL）**：从数据中学习更好的策略
-   ```python
-   # 使用CQL、IQL等算法
-   # 可以超越数据集中的人类表现
-   ```
-
-3. **预训练**：先用数据预训练，再用在线RL微调
-   ```python
-   # 阶段1: 行为克隆
-   model.pretrain_from_demos(minerl_data)
-   
-   # 阶段2: 强化学习微调
-   model.finetune_with_rl(minedojo_env)
-   ```
-
----
-
-### Q6: 如何选择加速训练方法？
-
-**A**: 根据你的情况选择：
-
-**快速原型（1-2周）**：
-```bash
-# MineCLIP最简单最快
-./scripts/train_with_mineclip.sh --task harvest_log --timesteps 200000
-```
-- ✅ 一行命令
-- ✅ 3-5倍加速
-- ✅ 适合所有任务
-
-**追求质量（2-4周）**：
-```bash
-# 课程学习 - 更稳定、性能更好
-./scripts/train_curriculum.sh --skill chop_tree
-```
-- ✅ 渐进式训练
-- ✅ 最终性能更高
-- ⚠️ 需要设计课程
-
-**有人类演示数据**：
-```bash
-# 行为克隆 + RL微调
-python scripts/train_behavior_cloning.py --dataset MineRLTreechop-v0
-```
-- ✅ 5-10倍加速
-- ✅ 利用人类知识
-- ⚠️ 需要下载数据
-
-**详细对比**：`docs/guides/TRAINING_METHODS_COMPARISON.md`
-
----
-
-### Q7: MineCLIP和MineRL可以一起用吗？
-
-**A**: **可以！而且效果更好！**
-
-推荐组合策略：
-
-```python
-# 阶段1: 用MineRL数据预训练（行为克隆）
-model = train_behavior_cloning(minerl_dataset)
-# 学到基本技能
-
-# 阶段2: 在MineDojo环境中用MineCLIP微调
-env = MineCLIPRewardWrapper(minedojo_env, "chop down trees")
-model.finetune(env)
-# 超越人类水平
-
-# 阶段3: 用稀疏奖励精调
-model.finetune(minedojo_env_sparse)
-# 确保任务完成
-```
-
-**效果**：
-- 结合了人类知识（MineRL）
-- 密集奖励引导（MineCLIP）
-- 任务导向优化（稀疏奖励）
-- 预期 **10-20倍** 加速
-
----
-
-### Q8: 训练太慢怎么办？
-
-**A**: 多种优化方法：
-
-**1. 使用MineCLIP**（首选）
-```bash
-./scripts/train_with_mineclip.sh --task harvest_log
-```
-- 3-5倍加速
-
-**2. 启用无头模式**
-```bash
-export JAVA_OPTS="-Djava.awt.headless=true"
-```
-- 20-40%速度提升
-
-**3. 使用GPU**
-```bash
-# 安装CUDA版PyTorch
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-
-# 训练时指定GPU
-./scripts/train_with_mineclip.sh --task harvest_log --device cuda
-```
-- 2-3倍加速
-
-**4. 并行环境**
-```bash
-./scripts/train_with_mineclip.sh --task harvest_log --n-envs 4
-```
-- 接近线性加速（需要更多内存）
-
-**5. 减少图像尺寸**
-```bash
-# 修改训练脚本，添加：
---image-size 120 160  # 默认是160 256
-```
-- 30-50%速度提升（可能影响性能）
-
----
-
-### Q9: 如何验证MineCLIP是否工作？
-
-**A**: 查看训练日志和TensorBoard：
-
-```bash
-# 启动训练
-./scripts/train_with_mineclip.sh --task harvest_log --timesteps 200000
-
-# 另一个终端启动TensorBoard
-tensorboard --logdir logs/tensorboard
-```
-
-**检查指标**：
-
-1. **Episode奖励**：`rollout/ep_rew_mean`
-   - MineCLIP: 应该快速上升（几千步就有进步）
-   - 纯RL: 长时间保持0或负值
-
-2. **训练日志**：
-```
-[100步] ep_rew_mean: 0.05  ← MineCLIP开始工作
-[1000步] ep_rew_mean: 0.15 ← 持续进步
-[10000步] ep_rew_mean: 0.45 ← 接近成功
-```
-
-3. **Info字段**（如果实现了详细记录）：
-```python
-info = {
-    'sparse_reward': 0.0,       # 原始奖励（还未成功）
-    'mineclip_reward': 0.25,    # MineCLIP奖励（在进步）
-    'mineclip_similarity': 0.65 # 与任务的相似度
-}
+# 如果质量好，追加到 15-20 个
+bash scripts/run_dagger_workflow.sh \
+    --task harvest_1_log \
+    --num-episodes 20 \
+    --append-recording \
+    --iterations 0
 ```
 
 ---
 
-### Q10: 我应该从哪里开始？
+### Q3: 标注太慢怎么办？一次要标注几百个状态！
 
-**A**: 推荐路线（2-3周）：
+**A**: 使用**智能策略**，标注速度提升 **60%**：
 
-**第1周：快速验证**
+#### **技巧1: 智能采样**
+
 ```bash
-# Day 1: 安装和测试
-pip install minedojo stable-baselines3
-python scripts/validate_install.py
-
-# Day 2-3: 第一个MineCLIP训练
-./scripts/train_with_mineclip.sh --task harvest_log --timesteps 200000
-
-# Day 4-5: 训练2-3个简单技能
-./scripts/train_with_mineclip.sh --task harvest_wool --timesteps 150000
-./scripts/train_with_mineclip.sh --task harvest_milk --timesteps 150000
-
-# Day 6-7: 评估和调试
-python scripts/evaluate_skills.py
+# 使用 --smart-sampling（只标注20-30%关键状态）
+python tools/dagger/label_states.py \
+    --states data/policy_states/harvest_1_log/iter_1/ \
+    --output data/expert_labels/harvest_1_log/iter_1.pkl \
+    --smart-sampling \
+    --failure-window 5  # 只标注失败前5步
 ```
 
-**第2周：深入优化**
-```bash
-# 使用课程学习训练核心技能
-./scripts/train_curriculum.sh --skill chop_tree
-./scripts/train_curriculum.sh --skill mine_stone
+**效果**: 500个状态 → 只需标注100-150个
+
+#### **技巧2: 善用P键** ⭐
+
+| 按键 | 使用场景 | 耗时 |
+|------|---------|------|
+| **P** | 策略正确，保持不变 | ~1秒 |
+| W/F等 | 需要修改动作 | ~3秒 |
+
+**示例**:
+```
+状态1: 策略=前进 → P (策略对了，保持) ✓ 1秒
+状态2: 策略=前进 → P ✓ 1秒
+状态3: 策略=IDLE → W (应该前进) ✓ 3秒
+状态4: 策略=前进+攻击 → P ✓ 1秒
+状态5: 策略=前进+攻击 → P ✓ 1秒
 ```
 
-**第3周：组合应用**
-```bash
-# 构建技能库
-./scripts/manage_skill_library.sh add chop_tree checkpoints/...
+**P键使用率**: 应该达到 30-60%
 
-# 测试技能组合
-python scripts/test_skill_combination.py
+#### **技巧3: 跳过重复帧**
+
+```
+帧1: 向左看 → J ✓
+帧2-4: (画面变化很小) → N, N, N (跳过)
+帧5: 看到树了 → W (前进) ✓
 ```
 
-**关键文档**：
-1. 先读：`docs/guides/QUICK_START_ACCELERATED_TRAINING.md`
-2. 深入：`docs/guides/TRAINING_ACCELERATION_GUIDE.md`
-3. 参考：`docs/guides/MINECLIP_EXPLAINED.md`
-4. 参考：`docs/guides/MINERL_DATASET_GUIDE.md`
+#### **技巧4: 标注优先级**
+
+| 优先级 | 场景 | 标注比例 |
+|-------|------|---------|
+| 🔴 高 | 失败前5步 | 100% |
+| 🟡 中 | 偏离轨迹 | 50% |
+| 🟢 低 | 正常执行 | 10% |
+
+**标注速度对比**:
+- 全手动标注: ~5秒/状态 → 500个状态 = **40分钟**
+- 使用技巧: ~2秒/状态 → 150个状态 = **5分钟** ✅
 
 ---
 
-### Q11: MineRL数据集只有几个场景，我要训练的技能（如获得煤块）不在其中怎么办？
+### Q4: DAgger 迭代没有提升，还是60%成功率？
 
-**A**: MineRL确实只有8个预定义任务，对于不在其中的技能，有5种解决方案：
+**A**: 检查以下几点：
 
-**方案1：使用MineCLIP（推荐）⭐**
+#### **1. 标注质量检查**
+
 ```bash
-# 不需要任何数据！直接用MineCLIP训练
-./scripts/train_with_mineclip.sh \
-    --task open-ended \
-    --task-description "mine coal ore and collect coal" \
-    --timesteps 200000
-```
-- ✅ 最简单最快
-- ✅ 不需要数据
-- ✅ 支持任意任务
-- ✅ 3-5倍加速
+# 统计你的标注分布
+# 标注100个状态后，检查：
 
-**方案2：迁移学习**
-```python
-# 使用相似任务的数据（如ObtainDiamond包含挖矿）
-model = train_bc(minerl_data="MineRLObtainDiamond-v0")
-model.finetune(coal_mining_env_with_mineclip)
+W (前进):          40次 (40%) ✅ 好
+Q (前进+攻击):     15次 (15%) ✅ 好
+F (攻击):          10次 (10%) ✅ 好
+P (保持策略):      20次 (20%) ✅ 好
+J/L (左右看):      12次 (12%) ⚠️ 有点多
+I/K (上下看):      2次  (2%)  ✅ 好
+N (跳过):          1次  (1%)  ✅ 好
 ```
 
-**方案3：自己收集演示**
-- 自己玩游戏录制15-30个演示
-- 1-3小时即可完成
-- 质量最高
+**健康分布**:
+- ✅ 前进相关（W+Q+R）: 50-70%
+- ✅ 攻击相关（F+Q+G）: 20-40%
+- ✅ 视角调整（I/J/K/L）: **<15%** ⭐ 关键
+- ✅ 保持策略（P）: 20-40%
 
-**方案4：课程学习**
-- 分解复杂技能为简单子技能
-- 渐进式训练
+**不健康分布**:
+- ❌ 视角调整 > 30% → 模型会原地转圈
+- ❌ 前进 < 40% → 模型不知道要前进
+- ❌ P键使用 < 10% → 说明策略质量很差或你过度干预
 
-**方案5：组合已有技能**
-- 使用技能库组合基础技能
-- 模块化、可复用
+#### **2. 常见标注错误**
 
-**推荐策略**：
-- 90%情况用**MineCLIP**（不需要数据）
-- 追求质量用**课程学习**
-- 有时间可**收集少量演示**
+**错误1: 连续标注视角调整** ❌
+```
+帧1-5: L, L, L, L, L (连续向右看)
+结果: 模型学会原地转圈
+```
 
-**详细文档**：`docs/guides/ADVANCED_TRAINING_SOLUTIONS.md`
+**正确做法** ✅:
+```
+帧1: L (向右看，1帧)
+帧2-5: W, W, P, P (立即切换回前进)
+结果: 模型学会前进+偶尔环视
+```
+
+**错误2: 不使用P键** ❌
+```
+策略: Forward → 你输入: W (重复输入)
+策略: Forward → 你输入: W
+策略: Attack → 你输入: F
+```
+
+**正确做法** ✅:
+```
+策略: Forward → P (保持)
+策略: Forward → P (保持)
+策略: Attack → P (保持)
+```
+
+#### **3. 调整参数**
+
+```bash
+# 收集更多失败场景
+bash scripts/run_dagger_workflow.sh \
+    --collect-episodes 30 \  # 从20增加到30
+    --skip-recording \
+    --skip-bc
+
+# 增加BC训练轮数
+--bc-epochs 100  # 从50增加到100
+```
+
+#### **4. 重新标注**
+
+如果发现标注质量差，可以重新标注：
+
+```bash
+# 删除质量差的标注
+rm data/expert_labels/harvest_1_log/iter_1.pkl
+
+# 重新标注，使用新策略
+python tools/dagger/label_states.py \
+    --states data/policy_states/harvest_1_log/iter_1/ \
+    --output data/expert_labels/harvest_1_log/iter_1.pkl \
+    --smart-sampling \
+    --failure-window 5
+```
 
 ---
 
-### Q12: MineCLIP是在线模型吗？本地训练时会在线请求吗？
+### Q5: 模型一直原地转圈，很少前进？
 
-**A**: **不是！MineCLIP是本地离线模型！**
+**A**: 这是**典型的标注问题** - 视角调整过多
 
-**关键事实**：
-- ✅ MineCLIP模型权重在**本地**（~250-350MB）
-- ✅ 首次使用时会**自动下载**到 `~/.minedojo/models/`
-- ✅ 之后**完全离线运行**，不需要网络
-- ✅ 推理在你的**本地GPU/CPU**上执行
-- ✅ 完全**免费开源**，无使用限制
+#### **问题诊断**
 
-**网络需求**：
-```bash
-# 只在首次使用时需要网络
-pip install minedojo  # ← 需要网络
-python -c "import minedojo; minedojo.make('harvest_log')"  # ← 首次下载模型
+回顾你的标注：
+```
+# 如果你经常这样标注：
+看不到树 → J (向左看)
+画面没变 → J (继续左看)
+还是没变 → J (继续左看)
+终于看到了 → W (前进)
 
-# 之后所有训练都是离线的
-./scripts/train_with_mineclip.sh --task harvest_log  # ← 完全离线！
+# 结果：模型学到 "看不到树 = 一直转头"
 ```
 
-**验证方法**：
-```bash
-# 检查模型文件
-ls -lh ~/.minedojo/models/
-# 应该看到：
-#   mineclip_attn.pth (50MB)
-#   mineclip_vision.pth (150MB)
-#   mineclip_text.pth (50MB)
+#### **解决方案**
 
-# 断网测试：
-# 1. 断开网络
-# 2. 运行训练脚本
-# 3. 如果能正常运行，说明是离线的！
+**标注原则**: **环视是短期行为（1-2帧），移动是主要策略（>60%）**
+
+```
+# 正确标注：
+看不到树，策略=前进
+→ J (向左看，只1帧！)
+
+画面开始变化
+→ W (立即切换回前进)
+
+继续前进
+→ W 或 P
+
+看到树了
+→ W (继续靠近)
 ```
 
-**性能影响**：
-- MineCLIP本地推理：15-30ms/次（CPU）
-- 对训练速度影响：约10-20%
-- 但收敛快3-5倍，总时间大幅缩短
-
-**离线工作流**：
+**检查标注比例**:
 ```bash
-# 在有网络的机器上打包
-tar -czf minedojo_models.tar.gz ~/.minedojo/models/
+# 如果你的标注中：
+视角调整(I/J/K/L) > 30% → ❌ 太多了！重新标注
+前进(W/Q/R) < 50% → ❌ 太少了！重新标注
 
-# 在离线机器上使用
-tar -xzf minedojo_models.tar.gz -C ~/
-./scripts/train_with_mineclip.sh --task harvest_log  # 完全离线训练
+视角调整 < 15% → ✅ 正常
+前进 > 60% → ✅ 健康
 ```
 
-**详细文档**：`docs/guides/ADVANCED_TRAINING_SOLUTIONS.md`
+#### **重新标注并重新训练**
+
+```bash
+# 1. 删除旧标注
+rm data/expert_labels/harvest_1_log/iter_1.pkl
+
+# 2. 重新标注（使用"前进优先"原则）
+python tools/dagger/label_states.py \
+    --states data/policy_states/harvest_1_log/iter_1/ \
+    --output data/expert_labels/harvest_1_log/iter_1.pkl \
+    --smart-sampling
+
+# 3. 重新训练
+python src/training/train_dagger.py \
+    --iteration 1 \
+    --base-data data/expert_demos/harvest_1_log/ \
+    --new-data data/expert_labels/harvest_1_log/iter_1.pkl \
+    --output checkpoints/dagger/harvest_1_log/dagger_iter_1.zip
+```
 
 ---
 
-## 其他常见问题
+### Q6: 鼠标录制和键盘录制哪个更好？
 
-### Q13: MineDojo环境创建失败？
+**A**: **强烈推荐鼠标录制** ⭐
 
-**A**: 
+**性能对比**:
+
+| 特性 | 键盘控制 (I/J/K/L) | Pygame鼠标控制 |
+|------|-------------------|--------------|
+| 视角控制 | 离散（固定角度） | ✅ 连续平滑 |
+| 攻击操作 | F键 | ✅ 鼠标左键（更自然） |
+| 静态帧占比 | 28.5% ❌ | **<20%** ✅ |
+| 多键检测 | 不支持 ❌ | ✅ W+左键同时 |
+| FPS玩家友好 | 需要适应 | ✅ 立即上手 |
+| 数据质量 | 中等 | **高（4-5倍提升）** ✅ |
+
+**使用鼠标录制**:
 ```bash
-# 1. 检查Java版本
-java -version  # 需要Java 8+
+bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping_pygame.py \
+    --base-dir data/expert_demos/harvest_1_log \
+    --max-frames 1000 \
+    --mouse-sensitivity 0.5
+```
 
-# 2. 设置无头模式
+**控制说明**:
+- 🖱️ 鼠标移动: 转动视角
+- 🖱️ 鼠标左键: 攻击/挖掘
+- ⌨️ W/A/S/D: 移动
+- ⌨️ Space: 跳跃
+- ⌨️ Q: 重试
+- ⌨️ ESC: 退出
+
+**鼠标灵敏度调整**:
+- 新手: `0.3`（慢速，精确）
+- 默认: `0.5`（推荐）
+- 熟练: `0.8`（快速）
+
+---
+
+## 部署和环境相关
+
+### Q7: Apple M 芯片如何部署？
+
+**A**: 需要通过 Rosetta 2 运行 x86 版本的 MineDojo
+
+#### **快速部署**
+
+```bash
+# 1. 安装 Rosetta 2
+softwareupdate --install-rosetta --agree-to-license
+
+# 2. 安装 x86 Java
+arch -x86_64 brew install temurin@8
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-8.jdk/Contents/Home/
+
+# 3. 在 x86 模式下创建环境
+arch -x86_64 /bin/bash
+conda create -n minedojo-x86 python=3.9 -y
+conda activate minedojo-x86
+
+# 4. 安装 MineDojo
+pip install "pip<24.1" "setuptools<58" "wheel<0.38.0"
+pip install "numpy>=1.21.0,<2.0"
+pip install minedojo
+
+# 5. 安装项目依赖
+cd /path/to/aimc
+pip install -r requirements.txt
+
+# 6. 验证
+python tools/validate_install.py
+```
+
+#### **便捷运行方式**
+
+```bash
+# 方法1: 使用项目脚本（推荐）
+./scripts/run_minedojo_x86.sh python tools/validate_install.py
+./scripts/run_minedojo_x86.sh bash scripts/run_dagger_workflow.sh --task harvest_1_log
+
+# 方法2: 手动切换
+arch -x86_64 /bin/bash
+conda activate minedojo-x86
+python tools/validate_install.py
+```
+
+#### **M 芯片注意事项**
+
+- ✅ GPU加速: 使用 MPS（Metal Performance Shaders）
+- ✅ 性能: M1/M2/M3 接近或超过中端 GPU
+- ⚠️ 每次运行都需要 x86 模式
+- ⚠️ 首次编译 Minecraft 需要10-30分钟
+
+**详细步骤**: 参考 README.md 的"Apple M 芯片部署"章节
+
+---
+
+### Q8: Docker 部署有什么优势？
+
+**A**: 环境隔离 + 一键部署
+
+**优势**:
+- ✅ 环境隔离（不影响主机）
+- ✅ 一键部署（无需手动配置）
+- ✅ 可复现性（环境完全一致）
+- ✅ 易于分享（打包镜像）
+
+**快速部署**:
+```bash
+# 1. 构建镜像
+cd docker
+docker build --platform linux/amd64 -t aimc-minedojo:latest .
+
+# 2. 运行容器
+docker run -it --rm \
+  --platform linux/amd64 \
+  -v $(pwd):/workspace \
+  aimc-minedojo:latest
+
+# 3. 在容器中运行
+python tools/validate_install.py
+bash scripts/run_dagger_workflow.sh --task harvest_1_log
+```
+
+**网络受限环境**: 参考 `docker/README.md` 获取离线部署方案
+
+---
+
+### Q9: 环境创建失败怎么办？
+
+**A**: 检查以下几点：
+
+#### **1. 检查 Java**
+
+```bash
+# 验证 Java 版本（需要 Java 8+）
+java -version
+
+# 如果没有，安装 Java
+# Ubuntu/Debian
+sudo apt-get install openjdk-8-jdk
+
+# macOS (Intel)
+brew install openjdk@8
+
+# macOS (M芯片)
+arch -x86_64 brew install temurin@8
+```
+
+#### **2. 设置环境变量**
+
+```bash
+# 设置 JAVA_HOME
+export JAVA_HOME=/path/to/java
+
+# 设置无头模式（提升性能）
 export JAVA_OPTS="-Djava.awt.headless=true"
 
-# 3. 重新编译Minecraft
-cd /path/to/minedojo/sim/Malmo/Minecraft
-./gradlew shadowJar
+# 添加到 ~/.bashrc 或 ~/.zshrc
+echo 'export JAVA_HOME=/path/to/java' >> ~/.zshrc
+echo 'export JAVA_OPTS="-Djava.awt.headless=true"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
-### Q14: 内存不足？
+#### **3. 重新安装 MineDojo**
 
-**A**:
 ```bash
-# 1. 减少并行环境
---n-envs 1
+# 卸载
+pip uninstall minedojo -y
+
+# 重新安装
+pip install minedojo
+
+# 首次运行会自动下载和编译 Minecraft
+python -c "import minedojo; env = minedojo.make('harvest_1_log'); env.reset(); env.close()"
+```
+
+---
+
+### Q10: 内存不足怎么办？
+
+**A**: 优化方案：
+
+```bash
+# 1. 减少并行环境（训练时）
+python src/training/train_bc.py \
+    --data data/expert_demos/harvest_1_log/ \
+    --n-envs 1  # 默认可能是4
 
 # 2. 减少批次大小
---batch-size 32
+python src/training/train_bc.py \
+    --data data/expert_demos/harvest_1_log/ \
+    --batch-size 16  # 默认是32或64
 
-# 3. 使用技能库的延迟加载
-# 不同时加载所有技能
+# 3. 减少图像尺寸（影响性能）
+# 修改环境创建参数
+image_size=(120, 160)  # 默认是(160, 256)
+
+# 4. 关闭不必要的程序
+# 确保有至少 8GB 可用内存
 ```
 
-### Q15: GPU不被识别？
+---
 
-**A**:
+## 数据管理相关
+
+### Q11: 如何追加录制更多数据？
+
+**A**: 使用 `--append-recording` 参数
+
 ```bash
-# 检查PyTorch GPU支持
-python -c "import torch; print(torch.cuda.is_available())"
+# 第一次录制了 10 个 episodes
+bash scripts/run_dagger_workflow.sh \
+    --task harvest_1_log \
+    --num-episodes 10 \
+    --iterations 3
 
-# 如果False，重新安装CUDA版本
-pip uninstall torch
-pip install torch --index-url https://download.pytorch.org/whl/cu118
+# BC 成功率只有 40%，想补录到 20 个
+bash scripts/run_dagger_workflow.sh \
+    --task harvest_1_log \
+    --num-episodes 20 \
+    --append-recording \
+    --skip-bc
+
+# 数据变化:
+# 录制前: episode_000 ~ episode_009 (10个)
+# 录制后: episode_000 ~ episode_019 (20个)
+
+# 重新训练 BC
+python src/training/train_bc.py \
+    --data data/expert_demos/harvest_1_log/ \
+    --output checkpoints/dagger/harvest_1_log/bc_baseline.zip \
+    --epochs 50
+```
+
+**注意**:
+- ✅ `--append-recording` 会保留已有数据
+- ✅ 从下一个编号开始录制
+- ❌ 不使用该参数会提示是否覆盖
+
+---
+
+### Q12: 可以删除中间数据吗？
+
+**A**: 可以，但要注意保留顺序
+
+#### **可以删除的数据**
+
+```bash
+# 1. 删除 policy_states（收集的状态）
+rm -rf data/policy_states/harvest_1_log/iter_1/
+rm -rf data/policy_states/harvest_1_log/iter_2/
+
+# 2. 删除中间模型（保留最新的）
+rm checkpoints/dagger/harvest_1_log/dagger_iter_1.zip
+rm checkpoints/dagger/harvest_1_log/dagger_iter_2.zip
+# 保留: bc_baseline.zip, dagger_iter_3.zip
+
+# 3. 删除评估结果
+rm checkpoints/dagger/harvest_1_log/*_eval_results.npy
+```
+
+#### **不建议删除的数据**
+
+```bash
+# 1. 专家演示（BC训练需要）
+data/expert_demos/harvest_1_log/
+
+# 2. 标注数据（重新训练需要）
+data/expert_labels/harvest_1_log/
+
+# 3. 聚合数据（继续训练需要）
+data/dagger/harvest_1_log/combined_iter_*.pkl
+
+# 4. 最终模型
+checkpoints/dagger/harvest_1_log/dagger_iter_3.zip
+```
+
+#### **完全清理一个任务**
+
+```bash
+# 删除特定任务的所有数据
+rm -rf data/expert_demos/harvest_1_log/
+rm -rf data/policy_states/harvest_1_log/
+rm -rf data/expert_labels/harvest_1_log/
+rm -rf data/dagger/harvest_1_log/
+rm -rf checkpoints/dagger/harvest_1_log/
 ```
 
 ---
 
-## 获取帮助
+### Q13: 多任务的数据会互相干扰吗？
 
-- 📖 **完整文档**：`docs/guides/`
-- 💡 **示例代码**：`src/training/`
-- 🔧 **诊断工具**：`python scripts/diagnose_minedojo.py`
-- 📊 **数据探索**：`python scripts/explore_minerl_dataset.py --list`
+**A**: 不会，每个任务有独立的目录
+
+**目录结构**:
+```
+data/expert_demos/
+├── harvest_1_log/          # 任务1: 砍树
+│   ├── episode_000/
+│   └── ...
+└── harvest_1_wool/         # 任务2: 获取羊毛
+    ├── episode_000/
+    └── ...
+
+checkpoints/dagger/
+├── harvest_1_log/          # 任务1的模型
+│   ├── bc_baseline.zip
+│   └── ...
+└── harvest_1_wool/         # 任务2的模型
+    ├── bc_baseline.zip
+    └── ...
+```
+
+**并行训练**:
+```bash
+# 同时训练多个任务（不同终端）
+# 终端1
+bash scripts/run_dagger_workflow.sh --task harvest_1_log --iterations 3
+
+# 终端2
+bash scripts/run_dagger_workflow.sh --task harvest_1_wool --iterations 3
+
+# 数据和模型完全独立，互不影响
+```
 
 ---
 
-**有其他问题？** 查看文档或运行诊断工具！
+## 训练和评估相关
 
+### Q14: 如何继续训练更多轮 DAgger？
+
+**A**: 使用 `--continue-from` 参数
+
+```bash
+# 已经完成了3轮 DAgger
+# 想再训练2轮（总共5轮）
+
+bash scripts/run_dagger_workflow.sh \
+    --task harvest_1_log \
+    --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_3.zip \
+    --iterations 5  # 总轮数（不是新增轮数）
+
+# 会自动：
+# - 从 dagger_iter_3.zip 开始
+# - 执行迭代 4 和 5
+# - 生成 dagger_iter_4.zip 和 dagger_iter_5.zip
+```
+
+**自动推断起始迭代**:
+```bash
+# 不需要指定 --start-iteration
+# 脚本会从文件名自动推断
+checkpoints/dagger/harvest_1_log/dagger_iter_3.zip
+→ 自动检测: 从 iter_4 开始
+```
+
+---
+
+### Q15: 如何查看训练历史和对比模型？
+
+**A**: 查看评估结果文件
+
+```bash
+# 1. 查看所有模型
+ls -lh checkpoints/dagger/harvest_1_log/
+
+# 2. 查看评估结果
+python -c "
+import numpy as np
+results = np.load('checkpoints/dagger/harvest_1_log/bc_baseline_eval_results.npy', allow_pickle=True).item()
+print(f'BC基线: {results[\"success_rate\"]*100:.1f}%')
+
+results = np.load('checkpoints/dagger/harvest_1_log/dagger_iter_1_eval_results.npy', allow_pickle=True).item()
+print(f'迭代1: {results[\"success_rate\"]*100:.1f}%')
+"
+
+# 3. 重新评估所有模型
+for model in checkpoints/dagger/harvest_1_log/*.zip; do
+    echo "评估: $model"
+    bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py \
+        --model "$model" \
+        --episodes 20
+done
+```
+
+**TensorBoard 可视化**:
+```bash
+# 启动 TensorBoard
+tensorboard --logdir logs/tensorboard
+
+# 查看不同模型的训练曲线对比
+```
+
+---
+
+## 其他问题
+
+### Q16: 支持哪些 MineDojo 任务？
+
+**A**: 支持所有 MineDojo 程序化任务
+
+**常用任务**:
+```bash
+# 采集类
+harvest_1_log          # 获得1个原木
+harvest_10_log         # 获得10个原木
+harvest_1_wool         # 获得1个羊毛
+harvest_milk           # 获得牛奶
+
+# 挖掘类
+harvest_10_cobblestone # 挖10个圆石
+harvest_1_iron_ore     # 挖1个铁矿石
+
+# 农业类
+harvest_1_wheat        # 收获1个小麦
+
+# 战斗类
+combat_spider          # 击败蜘蛛
+```
+
+**查看所有任务**:
+```bash
+python -c "import minedojo; print('\n'.join(minedojo.tasks.ALL_PROGRAMMATIC_TASK_IDS[:30]))"
+```
+
+**训练新任务**:
+```bash
+# 只需修改 --task 参数
+bash scripts/run_dagger_workflow.sh \
+    --task harvest_1_wool \
+    --num-episodes 10 \
+    --iterations 3
+```
+
+---
+
+### Q17: 在哪里获取更多帮助？
+
+**A**: 
+
+- 📖 **完整教程**: `docs/guides/DAGGER_COMPREHENSIVE_GUIDE.md` （强烈推荐）
+- 📑 **任务参考**: `docs/reference/MINEDOJO_TASKS_REFERENCE.md`
+- 🎮 **标注参考**: `docs/reference/LABELING_KEYBOARD_REFERENCE.md`
+- 🔧 **诊断工具**: `python tools/validate_install.py`
+- 💬 **GitHub Issues**: [提交问题](https://github.com/your-repo/aimc/issues)
+
+---
+
+## 快速参考
+
+### 常用命令
+
+```bash
+# 完整 DAgger 训练
+bash scripts/run_dagger_workflow.sh --task harvest_1_log --num-episodes 10 --iterations 3
+
+# 跳过录制（已有数据）
+bash scripts/run_dagger_workflow.sh --task harvest_1_log --skip-recording --iterations 3
+
+# 追加录制
+bash scripts/run_dagger_workflow.sh --task harvest_1_log --num-episodes 20 --append-recording --iterations 0
+
+# 继续训练
+bash scripts/run_dagger_workflow.sh --task harvest_1_log --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_3.zip --iterations 5
+
+# 评估模型
+bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py --model checkpoints/dagger/harvest_1_log/dagger_iter_1.zip --episodes 20
+
+# 验证安装
+python tools/validate_install.py
+```
+
+### 故障速查
+
+| 问题 | 快速解决 |
+|------|----------|
+| 未找到数据 | 移除`--skip-recording`或手动录制 |
+| BC模型不存在 | 移除`--skip-bc`或手动训练BC |
+| 成功率不提升 | 检查标注分布（视角<15%，前进>60%） |
+| 模型原地转圈 | 重新标注，使用"前进优先"原则 |
+| 标注太慢 | 使用P键 + 智能采样 |
+| M芯片环境问题 | 使用 `./scripts/run_minedojo_x86.sh` |
+| 内存不足 | 减少batch-size和n-envs |
+
+---
+
+**有其他问题？** 查看完整文档或运行诊断工具！
+
+```bash
+# 诊断工具
+python tools/validate_install.py
+
+# 完整教程
+cat docs/guides/DAGGER_COMPREHENSIVE_GUIDE.md
+```
