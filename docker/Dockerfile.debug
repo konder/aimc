@@ -1,12 +1,14 @@
-# AIMC MineDojo Docker 镜像
-# 基于 Ubuntu 20.04 + Miniconda + OpenJDK 8
+# AIMC MineDojo Docker 镜像 - 调试版本
+# 只构建到 Python 依赖安装，不包含 MineCLIP 和 MC 编译
+# 用于进入容器手动调试
 
 FROM ubuntu:20.04
 
 # 设置非交互模式
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 如果在企业网络环境中，需要配置代理或使用国内镜像源（可选）
+# [重要] 如果在企业网络环境中，需要配置代理或使用国内镜像源
+# 取消下面的注释来使用阿里云镜像源
 RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list && \
     sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list
 
@@ -25,17 +27,9 @@ RUN apt-get update && \
     libxext6 \
     libxrender-dev \
     libgomp1 \
-    xvfb \
-    xserver-xephyr \
-    vnc4server \
-    python-opengl \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Miniconda
-# 如果网络受限，请先手动下载 Miniconda3-latest-Linux-x86_64.sh 到 docker/ 目录
-# 然后取消下面 COPY 行的注释，并注释掉 wget 行
-# COPY Miniconda3-latest-Linux-x86_64.sh /tmp/miniconda.sh
 RUN wget --no-check-certificate https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
     bash /tmp/miniconda.sh -b -p /opt/conda && \
     rm /tmp/miniconda.sh
@@ -74,33 +68,45 @@ RUN source /opt/conda/etc/profile.d/conda.sh && \
     pip install -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
 
-# 安装 MineCLIP (从 GitHub) - 可选，如果网络问题可以在容器内手动安装
-RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate minedojo-x86 && \
-    pip install git+https://github.com/MineDojo/MineCLIP.git || echo "⚠️  MineCLIP 安装失败，可在容器内手动安装"
-
-# ==================== MC 编译步骤 ====================
-# 步骤 1: 克隆 MixinGradle hotfix（注意路径要与 patch 中的 Maven URL 一致）
-RUN mkdir -p /opt && \
-    cd /opt && \
-    git clone https://github.com/verityw/MixinGradle-dcfaf61.git hotfix
-
-# 步骤 2: 应用 MC 配置补丁（基于调试容器中的成功方案）
 COPY docker/mc_config.patch /tmp/mc_config.patch
-RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate minedojo-x86 && \
-    MC_PATH=/opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft && \
-    cd ${MC_PATH} && \
-    patch -p0 < /tmp/mc_config.patch && \
-    rm /tmp/mc_config.patch && \
-    ./gradlew shadowJar --no-daemon --stacktrace && \
-    mkdir -p ${MC_PATH}/run/gradle && \
-    if [ -d "$HOME/.gradle/caches" ]; then \
-        cp -r $HOME/.gradle/caches ${MC_PATH}/run/gradle/; \
-    fi
+
+RUN cd /opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft
+# ==================== 调试版本到此结束 ====================
+# 以下步骤可以在容器内手动执行测试
 
 # 设置工作目录
 WORKDIR /workspace
 
+# 复制调试脚本
+COPY docker/fix_mixingradle.sh /root/fix_mixingradle.sh
+COPY docker/patch_buildgradle.py /root/patch_buildgradle.py
+COPY docker/install_mineclip.sh /root/install_mineclip.sh
+COPY docker/verify_mc_build.sh /root/verify_mc_build.sh
+RUN chmod +x /root/*.sh
+
+# 打印提示信息
+RUN echo '========================================' && \
+    echo '🐛 AIMC 调试镜像构建完成' && \
+    echo '========================================' && \
+    echo '' && \
+    echo '✅ 已完成的步骤:' && \
+    echo '  - Ubuntu 20.04 基础环境' && \
+    echo '  - OpenJDK 8' && \
+    echo '  - Miniconda + Python 3.9' && \
+    echo '  - MineDojo 及依赖包' && \
+    echo '' && \
+    echo '⏳ 待手动执行的步骤:' && \
+    echo '  1. MineCLIP 安装: bash /root/install_mineclip.sh' && \
+    echo '  2. MixinGradle: cd /opt/hotfix && git clone https://github.com/verityw/MixinGradle-dcfaf61.git' && \
+    echo '  3. MC 编译诊断: bash /root/fix_mixingradle.sh' && \
+    echo '  4. MC 编译验证: bash /root/verify_mc_build.sh' && \
+    echo '' && \
+    echo '📍 MineDojo 路径:' && \
+    echo '  /opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft' && \
+    echo '' && \
+    echo '========================================' && \
+    echo ''
+
 # 默认激活 minedojo-x86 环境
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate minedojo-x86 && exec /bin/bash"]
+
