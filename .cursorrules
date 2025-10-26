@@ -2,15 +2,79 @@
 
 ## 1. 目录结构
 ```
-src/              # 源代码: agents/, models/, utils/, training/
+src/              # 源代码: agents/, models/, utils/, training/, web/
 scripts/          # 脚本: run_*.sh, diagnose_*.py (需chmod +x)
-docs/             # 文档: 大写下划线命名，如INSTALLATION_GUIDE.md
+docs/             # 文档: 按类别分类存放（见下方规则）
 logs/             # 日志: 按模块/类别分类
 config/           # 配置文件
-data/             # 数据: raw/, processed/
-checkpoints/      # 模型检查点
+data/             # 数据: tasks/, clip_tokenizer/, mineclip/
 tests/            # 测试: test_*.py
 ```
+
+### 1.1 docs/ 目录结构与放置规则
+```
+docs/
+├── design/           # 设计文档：架构设计、方案设计、策略设计
+│   └── UNIVERSAL_MINECLIP_STRATEGY.md
+├── guides/           # 使用指南：操作手册、配置指南、快速入门
+│   ├── DAGGER_COMPREHENSIVE_GUIDE.md
+│   ├── DAGGER_WORKFLOW_SKIP_GUIDE.md
+│   ├── WEB_COMPREHENSIVE_GUIDE.md
+│   └── CONFIG_YAML_SUPPORT.md
+├── reference/        # 参考文档：API参考、配置参数、命令速查
+│   ├── KEYBOARD_REFERENCE.md
+│   └── MINEDOJO_ACTION_REFERENCE.md
+├── technical/        # 技术文档：实现细节、算法原理、性能分析
+│   └── DAGGER_CNN_ARCHITECTURE.md
+├── summaries/        # 总结记录：重构总结、改进记录、版本变更
+│   ├── ARCHITECTURE_REFACTORING_SUMMARY.md
+│   └── WEB_IMPROVEMENTS_SUMMARY.md
+├── issues/           # 问题修复：bug修复记录、问题分析
+│   └── DATA_NORMALIZATION_FIX_SUMMARY.md
+└── status/           # 状态追踪：路线图、进度报告、功能状态
+    └── IMITATION_LEARNING_ROADMAP.md
+```
+
+**文档放置规则**：
+1. **design/** - 设计阶段文档（架构、方案、策略）
+   - 命名：`*_STRATEGY.md`, `*_DESIGN.md`, `*_ARCHITECTURE.md`
+   - 内容：系统设计、方案选型、架构规划
+
+2. **guides/** - 面向用户的操作指南
+   - 命名：`*_GUIDE.md`, `*_COMPREHENSIVE_GUIDE.md`
+   - 内容：使用教程、配置说明、快速开始
+
+3. **reference/** - 快速查询的参考文档
+   - 命名：`*_REFERENCE.md`
+   - 内容：API列表、参数说明、命令速查表
+
+4. **technical/** - 技术实现细节
+   - 命名：`*_ARCHITECTURE.md`, `*_IMPLEMENTATION.md`
+   - 内容：算法原理、代码实现、性能优化
+
+5. **summaries/** - 项目改进和变更总结
+   - 命名：`*_SUMMARY.md`, `*_REFACTORING_SUMMARY.md`
+   - 内容：重构记录、功能改进、版本变更
+
+6. **issues/** - 问题修复和分析
+   - 命名：`*_FIX.md`, `*_INVESTIGATION.md`
+   - 内容：bug修复、问题分析、解决方案
+
+7. **status/** - 项目状态追踪
+   - 命名：`*_ROADMAP.md`, `*_STATUS.md`
+   - 内容：路线图、进度报告、功能状态
+
+**文档命名规范**：
+- 使用大写下划线命名：`FEATURE_NAME_TYPE.md`
+- 类型后缀：`_GUIDE`, `_SUMMARY`, `_REFERENCE`, `_ARCHITECTURE`等
+- 综合性文档使用：`*_COMPREHENSIVE_GUIDE.md`
+
+**文档创建原则**：
+- 新增功能 → guides/（使用指南）+ summaries/（实现总结）
+- 架构变更 → design/（设计文档）+ summaries/（变更总结）
+- Bug修复 → issues/（修复记录）
+- 避免在docs根目录直接创建文档
+- 同类文档优先合并，避免重复
 
 ## 2. 命名规范
 - **Python文件/函数**: 小写下划线 `my_module.py`, `def train_model()`

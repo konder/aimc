@@ -208,7 +208,7 @@ bash scripts/run_dagger_workflow.sh \
 ```bash
 # 使用鼠标控制（类似 FPS 游戏）
 bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping_pygame.py \
-    --base-dir data/expert_demos/harvest_1_log \
+    --base-dir data/tasks/harvest_1_log/expert_demos \
     --max-frames 1000 \
     --mouse-sensitivity 0.5
 
@@ -240,8 +240,8 @@ python tools/dagger/record_manual_chopping.py \
 
 ```bash
 python src/training/train_bc.py \
-    --data data/expert_demos/harvest_1_log/ \
-    --output checkpoints/dagger/harvest_1_log/bc_baseline.zip \
+    --data data/tasks/harvest_1_log/expert_demos/ \
+    --output data/tasks/harvest_1_log/checkpoints/bc_baseline.zip \
     --epochs 50
 ```
 
@@ -249,7 +249,7 @@ python src/training/train_bc.py \
 
 ```bash
 bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py \
-    --model checkpoints/dagger/harvest_1_log/bc_baseline.zip \
+    --model data/tasks/harvest_1_log/checkpoints/bc_baseline.zip \
     --episodes 20
 ```
 
@@ -259,26 +259,26 @@ bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py \
 # 每轮DAgger迭代
 # 1. 收集失败状态
 python tools/dagger/run_policy_collect_states.py \
-    --model checkpoints/dagger/harvest_1_log/bc_baseline.zip \
+    --model data/tasks/harvest_1_log/checkpoints/bc_baseline.zip \
     --episodes 20 \
-    --output data/policy_states/harvest_1_log/iter_1/
+    --output data/tasks/harvest_1_log/policy_states/iter_1/
 
 # 2. 交互式标注（使用P键保持策略）
 python tools/dagger/label_states.py \
-    --states data/policy_states/harvest_1_log/iter_1/ \
-    --output data/expert_labels/harvest_1_log/iter_1.pkl \
+    --states data/tasks/harvest_1_log/policy_states/iter_1/ \
+    --output data/tasks/harvest_1_log/expert_labels/iter_1.pkl \
     --smart-sampling
 
 # 3. 聚合数据训练
 python src/training/train_dagger.py \
     --iteration 1 \
-    --base-data data/expert_demos/harvest_1_log/ \
-    --new-data data/expert_labels/harvest_1_log/iter_1.pkl \
-    --output checkpoints/dagger/harvest_1_log/dagger_iter_1.zip
+    --base-data data/tasks/harvest_1_log/expert_demos/ \
+    --new-data data/tasks/harvest_1_log/expert_labels/iter_1.pkl \
+    --output data/tasks/harvest_1_log/checkpoints/dagger_iter_1.zip
 
 # 4. 评估改进
 bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py \
-    --model checkpoints/dagger/harvest_1_log/dagger_iter_1.zip \
+    --model data/tasks/harvest_1_log/checkpoints/dagger_iter_1.zip \
     --episodes 20
 ```
 
@@ -314,9 +314,10 @@ data/
         ├── combined_iter_2.pkl
         └── combined_iter_3.pkl
 
-checkpoints/dagger/            # 模型检查点
-└── harvest_1_log/
-    ├── bc_baseline.zip
+data/tasks/                   # 所有任务数据
+└── harvest_1_log/             # 具体任务
+    ├── checkpoints/           # 模型检查点
+    │   ├── bc_baseline.zip
     ├── bc_baseline_eval_results.npy
     ├── dagger_iter_1.zip
     ├── dagger_iter_1_eval_results.npy
@@ -353,8 +354,8 @@ bash scripts/run_dagger_workflow.sh \
     --iterations 3
 
 # 数据自动保存到不同目录：
-# - data/expert_demos/harvest_1_log/
-# - data/expert_demos/harvest_1_wool/
+# - data/tasks/harvest_1_log/expert_demos/
+# - data/tasks/harvest_1_wool/expert_demos/
 ```
 
 #### 继续训练
@@ -363,7 +364,7 @@ bash scripts/run_dagger_workflow.sh \
 # 从已有模型继续更多轮 DAgger
 bash scripts/run_dagger_workflow.sh \
     --task harvest_1_log \
-    --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_3.zip \
+    --continue-from data/tasks/harvest_1_log/checkpoints/dagger_iter_3.zip \
     --iterations 5
 ```
 
@@ -371,13 +372,13 @@ bash scripts/run_dagger_workflow.sh \
 
 ```bash
 # 删除特定任务的数据
-rm -rf data/expert_demos/harvest_1_log/
-rm -rf checkpoints/dagger/harvest_1_log/
+rm -rf data/tasks/harvest_1_log/expert_demos/
+rm -rf data/tasks/harvest_1_log/checkpoints/
 
 # 删除所有DAgger中间数据（保留专家演示）
-rm -rf data/policy_states/*/
-rm -rf data/expert_labels/*/
-rm -rf data/dagger/*/
+rm -rf data/tasks/*/policy_states/
+rm -rf data/tasks/*/expert_labels/
+rm -rf data/tasks/*/dagger/
 ```
 
 ---
@@ -400,7 +401,7 @@ rm -rf data/dagger/*/
 ```bash
 bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping_pygame.py \
     --mouse-sensitivity 0.5 \
-    --base-dir data/expert_demos/harvest_1_log
+    --base-dir data/tasks/harvest_1_log/expert_demos
 ```
 
 **参数**:
@@ -433,8 +434,8 @@ python tools/dagger/record_manual_chopping.py \
 **使用**:
 ```bash
 python src/training/train_bc.py \
-    --data data/expert_demos/harvest_1_log/ \
-    --output checkpoints/dagger/harvest_1_log/bc_baseline.zip \
+    --data data/tasks/harvest_1_log/expert_demos/ \
+    --output data/tasks/harvest_1_log/checkpoints/bc_baseline.zip \
     --epochs 50 \
     --learning-rate 3e-4 \
     --batch-size 64
@@ -455,9 +456,9 @@ python src/training/train_bc.py \
 ```bash
 python src/training/train_dagger.py \
     --iteration 1 \
-    --base-data data/expert_demos/harvest_1_log/ \
-    --new-data data/expert_labels/harvest_1_log/iter_1.pkl \
-    --output checkpoints/dagger/harvest_1_log/dagger_iter_1.zip \
+    --base-data data/tasks/harvest_1_log/expert_demos/ \
+    --new-data data/tasks/harvest_1_log/expert_labels/iter_1.pkl \
+    --output data/tasks/harvest_1_log/checkpoints/dagger_iter_1.zip \
     --epochs 30
 ```
 
@@ -482,8 +483,8 @@ python src/training/train_dagger.py \
 **使用**:
 ```bash
 python tools/dagger/label_states.py \
-    --states data/policy_states/harvest_1_log/iter_1/ \
-    --output data/expert_labels/harvest_1_log/iter_1.pkl \
+    --states data/tasks/harvest_1_log/policy_states/iter_1/ \
+    --output data/tasks/harvest_1_log/expert_labels/iter_1.pkl \
     --smart-sampling \
     --failure-window 10
 ```
@@ -509,7 +510,7 @@ python tools/dagger/label_states.py \
 **使用**:
 ```bash
 bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py \
-    --model checkpoints/dagger/harvest_1_log/dagger_iter_1.zip \
+    --model data/tasks/harvest_1_log/checkpoints/dagger_iter_1.zip \
     --episodes 20 \
     --task harvest_1_log
 ```
@@ -529,9 +530,61 @@ bash scripts/run_minedojo_x86.sh python tools/dagger/evaluate_policy.py \
 
 ### 5. 自动化工作流脚本
 
-#### run_dagger_workflow.sh
+#### run_recording_and_baseline.sh
 
-**功能**: 一键完成完整 DAgger 训练流程
+**功能**: 录制专家演示 + 训练BC基线 + 评估
+
+**使用场景**: 新任务初始化
+
+**基础用法**:
+```bash
+# 录制并训练BC基线
+bash scripts/run_recording_and_baseline.sh \
+    --task harvest_1_log \
+    --num-episodes 10 \
+    --bc-epochs 50
+
+# 跳过录制（已有数据）
+bash scripts/run_recording_and_baseline.sh \
+    --task harvest_1_log \
+    --skip-recording
+
+# 查看所有参数
+bash scripts/run_recording_and_baseline.sh --help
+```
+
+#### run_dagger_iteration.sh
+
+**功能**: DAgger 迭代训练（收集 → 标注 → 训练 → 评估）
+
+**使用场景**: 在BC基线基础上进行迭代优化
+
+**基础用法**:
+```bash
+# 执行1轮DAgger迭代
+bash scripts/run_dagger_iteration.sh \
+    --task harvest_1_log \
+    --iterations 1 \
+    --collect-episodes 20
+
+# 继续迭代（自动检测最新模型）
+bash scripts/run_dagger_iteration.sh \
+    --task harvest_1_log \
+    --iterations 1
+
+# 从指定模型继续
+bash scripts/run_dagger_iteration.sh \
+    --task harvest_1_log \
+    --continue-from data/tasks/harvest_1_log/dagger_model/dagger_iter_2.zip \
+    --start-iteration 3
+
+# 查看所有参数
+bash scripts/run_dagger_iteration.sh --help
+```
+
+#### run_dagger_workflow.sh（完整流程）
+
+**功能**: 一键完成完整 DAgger 训练流程（录制 + BC + DAgger迭代）
 
 **基础用法**:
 ```bash
@@ -557,7 +610,7 @@ bash scripts/run_dagger_workflow.sh \
 # 继续训练
 bash scripts/run_dagger_workflow.sh \
     --task harvest_1_log \
-    --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_3.zip \
+    --continue-from data/tasks/harvest_1_log/checkpoints/dagger_iter_3.zip \
     --iterations 5
 ```
 
@@ -601,7 +654,7 @@ tensorboard --logdir logs/tensorboard
 tail -f logs/training/training_*.log
 
 # 查看检查点
-ls -lh checkpoints/dagger/harvest_1_log/
+ls -lh data/tasks/harvest_1_log/checkpoints/
 ```
 
 ---

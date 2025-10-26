@@ -79,6 +79,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && \
     conda activate minedojo-x86 && \
     pip install git+https://github.com/MineDojo/MineCLIP.git || echo "⚠️  MineCLIP 安装失败，可在容器内手动安装"
 
+ENV MC_PATH=/opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft
 # ==================== MC 编译步骤 ====================
 # 步骤 1: 克隆 MixinGradle hotfix（注意路径要与 patch 中的 Maven URL 一致）
 RUN mkdir -p /opt && \
@@ -87,13 +88,13 @@ RUN mkdir -p /opt && \
 
 # 步骤 2: 应用 MC 配置补丁（基于调试容器中的成功方案）
 COPY docker/mc_config.patch /tmp/mc_config.patch
-RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate minedojo-x86 && \
-    MC_PATH=/opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft && \
-    cd ${MC_PATH} && \
+
+RUN cd $MC_PATH && \
     patch -p0 < /tmp/mc_config.patch && \
     rm /tmp/mc_config.patch && \
-    ./gradlew shadowJar --no-daemon --stacktrace && \
+    ./gradlew shadowJar
+
+RUN cd $MC_PATH && \
     mkdir -p ${MC_PATH}/run/gradle && \
     if [ -d "$HOME/.gradle/caches" ]; then \
         cp -r $HOME/.gradle/caches ${MC_PATH}/run/gradle/; \

@@ -77,13 +77,6 @@ RUN cd /opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Mal
 # 设置工作目录
 WORKDIR /workspace
 
-# 复制调试脚本
-COPY docker/fix_mixingradle.sh /root/fix_mixingradle.sh
-COPY docker/patch_buildgradle.py /root/patch_buildgradle.py
-COPY docker/install_mineclip.sh /root/install_mineclip.sh
-COPY docker/verify_mc_build.sh /root/verify_mc_build.sh
-RUN chmod +x /root/*.sh
-
 # 打印提示信息
 RUN echo '========================================' && \
     echo '🐛 AIMC 调试镜像构建完成' && \
