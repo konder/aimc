@@ -91,7 +91,7 @@ log2 + variant:1 → Dark Oak Log (深色橡木/黑色橡木)
 
 ## ✅ 修复方案
 
-### 文件: `src/utils/task_wrappers.py`
+### 文件: `src/envs/task_wrappers.py`
 
 #### 修改1: 更新 `self.log_types` 定义
 
@@ -341,15 +341,15 @@ bash scripts/run_dagger_workflow.sh --task harvest_8_log --num-episodes 1
    ```
 
 2. **应用修改1: 更新 `self.log_types`**
-   - 文件: `src/utils/task_wrappers.py`
+   - 文件: `src/envs/task_wrappers.py`
    - 行数: 第63-72行
 
 3. **应用修改2: 重写 `_get_item_count`**
-   - 文件: `src/utils/task_wrappers.py`
+   - 文件: `src/envs/task_wrappers.py`
    - 行数: 第141-152行
 
 4. **应用修改3: 更新调试输出（可选）**
-   - 文件: `src/utils/task_wrappers.py`
+   - 文件: `src/envs/task_wrappers.py`
    - 行数: 第103-106行
 
 5. **运行测试**
@@ -362,7 +362,7 @@ bash scripts/run_dagger_workflow.sh --task harvest_8_log --num-episodes 1
 
 6. **提交修复**
    ```bash
-   git add src/utils/task_wrappers.py
+   git add src/envs/task_wrappers.py
    git commit -m "[fix] 修复inventory列表格式，支持所有6种原木类型
    
    问题:

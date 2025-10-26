@@ -77,7 +77,7 @@ aimc/
 
 ### 环境包装器
 
-`src/utils/env_wrappers.py` 提供了三个包装器：
+`src/envs/env_wrappers.py` 提供了三个包装器：
 
 #### 1. MinedojoWrapper
 将 MineDojo 的复杂观察空间简化为 RGB 图像：

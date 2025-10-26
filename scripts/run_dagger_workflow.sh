@@ -43,21 +43,31 @@ SKIP_IDLE_FRAMES=true  # 跳过静止帧（不保存IDLE帧）
 APPEND_RECORDING=false  # 是否追加录制（继续已有数据）
 FULLSCREEN=false  # 是否全屏显示（推荐！防止鼠标移出窗口）
 
-# 数据路径（基础路径，会根据 TASK_ID 自动创建子目录）
-BASE_DIR="data"
-EXPERT_DIR="${BASE_DIR}/expert_demos/${TASK_ID}"
-POLICY_STATES_DIR="${BASE_DIR}/policy_states/${TASK_ID}"
-EXPERT_LABELS_DIR="${BASE_DIR}/expert_labels/${TASK_ID}"
-DAGGER_DATA_DIR="${BASE_DIR}/dagger/${TASK_ID}"
+# 数据路径（新结构：data/tasks/task_id/）
+TASK_ROOT="data/tasks/${TASK_ID}"
+EXPERT_DIR="${TASK_ROOT}/expert_demos"
+POLICY_STATES_DIR="${TASK_ROOT}/policy_states"
+EXPERT_LABELS_DIR="${TASK_ROOT}/expert_labels"
+DAGGER_DATA_DIR="${TASK_ROOT}/dagger"
 
-# 模型路径（按训练方法和任务分类）
-TRAINING_METHOD="dagger"  # dagger, ppo, hybrid
-CHECKPOINTS_DIR="checkpoints/${TRAINING_METHOD}/${TASK_ID}"
+# 模型路径（新结构：分离BC基线和DAgger迭代）
+BASELINE_MODEL_DIR="${TASK_ROOT}/baseline_model"   # BC基线模型
+DAGGER_MODEL_DIR="${TASK_ROOT}/dagger_model"       # DAgger迭代模型
 
 # 标注配置
 SMART_SAMPLING=true
 FAILURE_WINDOW=10
 RANDOM_SAMPLE_RATE=0.1  # 成功episode的随机采样率（10%）
+
+# 流程控制（通过参数设置）
+SKIP_RECORDING=false      # 跳过录制
+SKIP_BC=false             # 跳过BC训练
+SKIP_BC_EVAL=false        # 跳过BC基线评估
+SKIP_ITER_EVAL=false      # 跳过每次迭代后的自动评估
+CONTINUE_FROM=""          # 从指定模型继续
+START_ITERATION=1         # 起始迭代次数
+CLEAN_RESTART=false       # 清理所有训练数据，完全重新开始
+CLEAN_DAGGER_ONLY=false   # 仅清理DAgger数据，保留BC基线
 
 # ============================================================================
 # 颜色输出
@@ -150,6 +160,14 @@ while [[ $# -gt 0 ]]; do
             SKIP_BC=true
             shift
             ;;
+        --skip-bc-eval)
+            SKIP_BC_EVAL=true
+            shift
+            ;;
+        --skip-iter-eval)
+            SKIP_ITER_EVAL=true
+            shift
+            ;;
         --continue-from)
             CONTINUE_FROM="$2"
             shift 2
@@ -158,12 +176,24 @@ while [[ $# -gt 0 ]]; do
             START_ITERATION="$2"
             shift 2
             ;;
+        --clean-restart)
+            CLEAN_RESTART=true
+            shift
+            ;;
+        --clean-dagger-only)
+            CLEAN_DAGGER_ONLY=true
+            shift
+            ;;
         --method)
             TRAINING_METHOD="$2"
             shift 2
             ;;
         --device)
             DEVICE="$2"
+            shift 2
+            ;;
+        --failure-window)
+            FAILURE_WINDOW="$2"
             shift 2
             ;;
         -h|--help)
@@ -183,10 +213,15 @@ while [[ $# -gt 0 ]]; do
             echo "  --append-recording          追加录制（继续已有数据）"
             echo "  --skip-recording            跳过手动录制 (假设已有数据)"
             echo "  --skip-bc                   跳过BC训练 (假设已有BC模型)"
+            echo "  --skip-bc-eval              跳过BC基线评估（直接进入DAgger）"
+            echo "  --skip-iter-eval            跳过每次DAgger迭代后的自动评估"
             echo "  --continue-from MODEL       从指定模型继续DAgger训练"
             echo "  --start-iteration N         从第N轮DAgger开始（与--continue-from配合）"
+            echo "  --clean-restart             清理DAgger数据，从BC基线重新开始（保留专家演示和BC基线）"
+            echo "  --clean-dagger-only         同 --clean-restart（兼容旧参数）"
             echo "  --method METHOD             训练方法 (默认: dagger, 可选: ppo, hybrid)"
             echo "  --device DEVICE             训练设备 (默认: mps, 可选: auto, cpu, cuda, mps)"
+            echo "  --failure-window N          失败前N步需要标注 (默认: 10)"
             echo "  -h, --help                  显示帮助信息"
             echo ""
             echo "目录结构:"
@@ -196,11 +231,18 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "标注优化（默认已启用）:"
             echo "  智能采样: 只标注失败前${FAILURE_WINDOW}步 + 成功episode的${RANDOM_SAMPLE_RATE}%"
-            echo "  组合键: Q(前进+攻击), R(前进+跳跃), G(前进+跳跃+攻击)"
-            echo "  快捷操作: N(跳过), Z(撤销), X/ESC(完成)"
+            echo "  组合键: Q(前进+跳跃), E(前进+攻击), R(前进+跳跃+攻击)"
+            echo "  快捷操作: X(保持策略), C(跳过), Z(撤销), ESC(完成)"
             echo ""
-            echo "继续训练示例:"
-            echo "  bash $0 --task harvest_1_log --method dagger --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_1.zip --start-iteration 2 --iterations 5"
+            echo "示例:"
+            echo "  # 跳过录制和BC训练（使用已有模型）"
+            echo "  bash $0 --skip-recording --skip-bc --iterations 3"
+            echo ""
+            echo "  # 跳过所有前置步骤，直接进入DAgger迭代"
+            echo "  bash $0 --skip-recording --skip-bc --skip-bc-eval --iterations 3"
+            echo ""
+            echo "  # 继续已有的DAgger训练"
+            echo "  bash $0 --continue-from checkpoints/dagger/harvest_1_log/dagger_iter_1.zip --start-iteration 2 --iterations 5"
             exit 0
             ;;
         *)
@@ -245,12 +287,61 @@ echo "  任务ID: $TASK_ID"
 echo "  训练方法: $TRAINING_METHOD"
 echo "  训练设备: $DEVICE"
 echo "  数据目录: $EXPERT_DIR"
-echo "  模型目录: $CHECKPOINTS_DIR"
+echo "  BC基线目录: $BASELINE_MODEL_DIR"
+echo "  DAgger模型目录: $DAGGER_MODEL_DIR"
 echo ""
 
 # 创建必要的目录
-mkdir -p "$EXPERT_DIR" "$POLICY_STATES_DIR" "$EXPERT_LABELS_DIR" "$DAGGER_DATA_DIR" "$CHECKPOINTS_DIR"
+mkdir -p "$EXPERT_DIR" "$POLICY_STATES_DIR" "$EXPERT_LABELS_DIR" "$DAGGER_DATA_DIR" "$BASELINE_MODEL_DIR" "$DAGGER_MODEL_DIR"
 print_success "目录结构已准备"
+
+# ============================================================================
+# 数据清理（如果指定）
+# ============================================================================
+
+if [ "$CLEAN_RESTART" = true ] || [ "$CLEAN_DAGGER_ONLY" = true ]; then
+    print_header "数据清理: 清理DAgger数据"
+    print_warning "将删除DAgger相关数据，从BC基线重新开始"
+    print_info "专家演示和BC基线将被保留（数据珍贵）"
+    
+    # 清理策略收集的状态
+    if [ -d "$POLICY_STATES_DIR" ] && [ "$(ls -A $POLICY_STATES_DIR 2>/dev/null)" ]; then
+        print_info "清理: $POLICY_STATES_DIR"
+        rm -rf "${POLICY_STATES_DIR:?}/"*
+        print_success "已清理策略状态"
+    fi
+    
+    # 清理专家标注
+    if [ -d "$EXPERT_LABELS_DIR" ] && [ "$(ls -A $EXPERT_LABELS_DIR 2>/dev/null)" ]; then
+        print_info "清理: $EXPERT_LABELS_DIR"
+        rm -rf "${EXPERT_LABELS_DIR:?}/"*
+        print_success "已清理专家标注"
+    fi
+    
+    # 清理聚合数据
+    if [ -d "$DAGGER_DATA_DIR" ] && [ "$(ls -A $DAGGER_DATA_DIR 2>/dev/null)" ]; then
+        print_info "清理: $DAGGER_DATA_DIR"
+        rm -rf "${DAGGER_DATA_DIR:?}/"*
+        print_success "已清理聚合数据"
+    fi
+    
+    # 清理DAgger迭代模型
+    if [ -d "$DAGGER_MODEL_DIR" ] && [ "$(ls -A $DAGGER_MODEL_DIR 2>/dev/null)" ]; then
+        print_info "清理: $DAGGER_MODEL_DIR"
+        rm -rf "${DAGGER_MODEL_DIR:?}/"*
+        print_success "已清理DAgger模型"
+    fi
+    
+    # 跳过录制和BC训练，从BC基线开始DAgger
+    SKIP_RECORDING=true
+    SKIP_BC=true
+    CONTINUE_FROM=""
+    START_ITERATION=1
+    
+    print_success "✓ DAgger数据已清理，将从BC基线重新开始第1轮迭代"
+    print_info "注意: 专家演示和BC基线已保留"
+    echo ""
+fi
 
 # ============================================================================
 # 阶段0: 手动录制专家演示 (可选)
@@ -321,7 +412,7 @@ if [[ -z "$SKIP_RECORDING" ]]; then
         mkdir -p "$EXPERT_DIR"
         
         # 构建录制命令
-        RECORD_CMD="bash scripts/run_minedojo_x86.sh python tools/dagger/record_manual_chopping.py \
+        RECORD_CMD="bash scripts/run_minedojo_x86.sh python src/training/dagger/record_manual_chopping.py \
             --base-dir \"$EXPERT_DIR\" \
             --max-frames $MAX_FRAMES \
             --mouse-sensitivity $MOUSE_SENSITIVITY \
@@ -372,7 +463,7 @@ fi
 # 阶段1: BC基线训练
 # ============================================================================
 
-BC_MODEL="${CHECKPOINTS_DIR}/bc_baseline.zip"
+BC_MODEL="${BASELINE_MODEL_DIR}/bc_baseline.zip"
 
 if [[ -z "$SKIP_BC" ]]; then
     print_header "阶段1: BC基线训练"
@@ -385,7 +476,7 @@ if [[ -z "$SKIP_BC" ]]; then
     echo "  训练设备: $DEVICE"
     echo ""
     
-    python src/training/train_bc.py \
+    python src/training/bc/train_bc.py \
         --data "$EXPERT_DIR" \
         --output "$BC_MODEL" \
         --epochs "$BC_EPOCHS" \
@@ -411,13 +502,13 @@ fi
 # 阶段2: 评估BC基线
 # ============================================================================
 
-if [[ -z "$CONTINUE_FROM" ]]; then
-    # 仅在从头开始时评估BC基线
+if [[ -z "$CONTINUE_FROM" ]] && [[ -z "$SKIP_BC_EVAL" ]]; then
+    # 仅在从头开始且未跳过评估时评估BC基线
     print_header "阶段2: 评估BC基线"
     
     print_info "评估BC策略 $BC_MODEL (${EVAL_EPISODES} episodes)..."
     
-    python tools/dagger/evaluate_policy.py \
+    python src/training/dagger/evaluate_policy.py \
         --model "$BC_MODEL" \
         --episodes "$EVAL_EPISODES" \
         --task-id "$TASK_ID" \
@@ -425,8 +516,12 @@ if [[ -z "$CONTINUE_FROM" ]]; then
     
     BC_SUCCESS_RATE=$(grep "成功率:" /tmp/bc_eval.txt | awk '{print $2}')
     print_success "BC基线成功率: $BC_SUCCESS_RATE"
+elif [[ -n "$SKIP_BC_EVAL" ]]; then
+    print_info "跳过BC基线评估，直接进入DAgger迭代"
+    BC_SUCCESS_RATE="(未评估)"
 else
     print_info "继续训练模式: 跳过BC基线评估"
+    BC_SUCCESS_RATE="(未评估)"
 fi
 
 # ============================================================================
@@ -478,7 +573,7 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     
     STATES_DIR="${POLICY_STATES_DIR}/iter_${iter}"
     
-    python tools/dagger/run_policy_collect_states.py \
+    python src/training/dagger/run_policy_collect_states.py \
         --model "$CURRENT_MODEL" \
         --episodes "$COLLECT_EPISODES" \
         --output "$STATES_DIR" \
@@ -502,14 +597,14 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     echo "  - 预计节省 80%+ 标注时间"
     echo ""
     print_info "标注控制:"
-    echo "  基础动作: W/A/S/D (移动), I/J/K/L (视角), F (攻击), Space (跳跃)"
-    echo "  组合动作: Q (前进+攻击), R (前进+跳跃), G (前进+跳跃+攻击)"
-    echo "  快捷操作: N (跳过), Z (撤销), X/ESC (完成)"
+    echo "  基础动作: WASD (移动), 方向键↑↓←→ (视角), F (攻击), Space (跳跃)"
+    echo "  组合动作: Q (前进+跳跃), E (前进+攻击), R (前进+跳跃+攻击)"
+    echo "  快捷操作: X (保持策略), C (跳过), Z (撤销), ESC (完成)"
     echo ""
     print_info "标注策略:"
     echo "  - 专注失败前的关键步骤"
     echo "  - 标注'应该做什么'而非'不应该做什么'"
-    echo "  - 不确定的状态直接按 N 跳过"
+    echo "  - 策略正确时按 X 保持，不确定时按 C 跳过"
     echo ""
     
     read -p "按Enter开始标注..." 
@@ -521,7 +616,7 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
         LABEL_ARGS="$LABEL_ARGS --smart-sampling --failure-window $FAILURE_WINDOW --random-sample-rate $RANDOM_SAMPLE_RATE"
     fi
     
-    python tools/dagger/label_states.py $LABEL_ARGS
+    python src/training/dagger/label_states.py $LABEL_ARGS
     
     if [ $? -ne 0 ]; then
         print_error "标注失败"
@@ -532,7 +627,8 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     # 3.3 聚合数据并训练
     print_info "[$iter] 步骤3: 聚合数据并训练DAgger模型..."
     
-    DAGGER_MODEL="${CHECKPOINTS_DIR}/dagger_iter_${iter}.zip"
+    DAGGER_MODEL="${DAGGER_MODEL_DIR}/dagger_iter_${iter}.zip"
+    COMBINED_FILE="${DAGGER_DATA_DIR}/combined_iter_${iter}.pkl"
     
     # 确定基础数据
     if [ $iter -eq 1 ]; then
@@ -541,11 +637,15 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
         BASE_DATA="${DAGGER_DATA_DIR}/combined_iter_$((iter-1)).pkl"
     fi
     
-    python src/training/train_dagger.py \
+    # 训练前先聚合数据
+    print_info "  聚合数据: $BASE_DATA + $LABELS_FILE -> $COMBINED_FILE"
+    
+    python src/training/dagger/train_dagger.py \
         --iteration "$iter" \
         --base-data "$BASE_DATA" \
         --new-data "$LABELS_FILE" \
         --output "$DAGGER_MODEL" \
+        --combined-output "$COMBINED_FILE" \
         --epochs "$DAGGER_EPOCHS" \
         --device "$DEVICE"
     
@@ -555,17 +655,21 @@ for iter in $(seq $START_ITER $DAGGER_ITERATIONS); do
     fi
     print_success "DAgger训练完成: $DAGGER_MODEL"
     
-    # 3.4 评估新策略
-    print_info "[$iter] 步骤4: 评估迭代 $iter 策略..."
-    
-    python tools/dagger/evaluate_policy.py \
-        --model "$DAGGER_MODEL" \
-        --episodes "$EVAL_EPISODES" \
-        --task-id "$TASK_ID" \
-        --max-steps "$MAX_STEPS" > "/tmp/dagger_iter_${iter}_eval.txt"
-    
-    ITER_SUCCESS_RATE=$(grep "成功率:" "/tmp/dagger_iter_${iter}_eval.txt" | awk '{print $2}')
-    print_success "迭代 $iter 成功率: $ITER_SUCCESS_RATE"
+    # 3.4 评估新策略（可选）
+    if [ "$SKIP_ITER_EVAL" = false ]; then
+        print_info "[$iter] 步骤4: 评估迭代 $iter 策略..."
+        
+        python src/training/dagger/evaluate_policy.py \
+            --model "$DAGGER_MODEL" \
+            --episodes "$EVAL_EPISODES" \
+            --task-id "$TASK_ID" \
+            --max-steps "$MAX_STEPS" | tee "/tmp/dagger_iter_${iter}_eval.txt"
+        
+        ITER_SUCCESS_RATE=$(grep "成功率:" "/tmp/dagger_iter_${iter}_eval.txt" | awk '{print $2}')
+        print_success "迭代 $iter 成功率: $ITER_SUCCESS_RATE"
+    else
+        print_warning "[$iter] 跳过迭代后的自动评估（--skip-iter-eval）"
+    fi
     
     # 更新当前模型
     CURRENT_MODEL="$DAGGER_MODEL"
@@ -595,13 +699,10 @@ echo ""
 
 print_info "下一步建议:"
 echo "  1. 在更多episode上测试最终模型:"
-echo "     python tools/dagger/evaluate_policy.py --model $CURRENT_MODEL --episodes 50"
+echo "     python src/training/dagger/evaluate_policy.py --model $CURRENT_MODEL --episodes 50"
 echo ""
 echo "  2. (可选) 继续DAgger迭代:"
 echo "     bash scripts/run_dagger_workflow.sh --skip-recording --skip-bc --iterations 2"
-echo ""
-echo "  3. (可选) PPO精调:"
-echo "     python src/training/train_get_wood.py --resume --checkpoint $CURRENT_MODEL"
 echo ""
 
 print_success "DAgger工作流执行完成！"

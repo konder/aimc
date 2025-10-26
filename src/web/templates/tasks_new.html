@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务管理 - 训练控制台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .action-bar {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .tasks-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .task-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .task-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+        }
+
+        .task-title {
+            font-size: 1.5em;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .task-id {
+            font-size: 0.9em;
+            color: #666;
+            font-family: 'Monaco', monospace;
+            background: #f3f4f6;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .task-description {
+            color: #666;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        .task-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .stat-item {
+            background: #f3f4f6;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 1.3em;
+            color: #111827;
+            font-weight: 600;
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn-small {
+            flex: 1;
+            padding: 8px 16px;
+            font-size: 0.9em;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            overflow-y: auto;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            margin: 20px;
+        }
+
+        .close-btn {
+            float: right;
+            font-size: 2em;
+            cursor: pointer;
+            color: #6b7280;
+            line-height: 1;
+        }
+
+        .close-btn:hover {
+            color: #ef4444;
+        }
+
+        /* Form Styles */
+        .form-section {
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-label {
+            display: block;
+            color: #374151;
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 0.95em;
+        }
+
+        .form-help {
+            display: block;
+            color: #6b7280;
+            font-size: 0.85em;
+            margin-top: 4px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 0.95em;
+            transition: border-color 0.3s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        /* Accordion Styles */
+        .accordion {
+            margin: 20px 0;
+        }
+
+        .accordion-item {
+            background: #f9fafb;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            border: 2px solid #e5e7eb;
+            transition: all 0.3s;
+        }
+
+        .accordion-item.active {
+            border-color: #667eea;
+        }
+
+        .accordion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            cursor: pointer;
+            background: white;
+            transition: background 0.3s;
+        }
+
+        .accordion-header:hover {
+            background: #f9fafb;
+        }
+
+        .accordion-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            color: #111827;
+            font-size: 1.05em;
+        }
+
+        .accordion-icon {
+            font-size: 1.3em;
+        }
+
+        .accordion-description {
+            font-size: 0.85em;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        .accordion-toggle {
+            font-size: 1.5em;
+            color: #6b7280;
+            transition: transform 0.3s;
+        }
+
+        .accordion-item.active .accordion-toggle {
+            transform: rotate(180deg);
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .accordion-item.active .accordion-content {
+            max-height: 1000px;
+        }
+
+        .accordion-body {
+            padding: 20px;
+            background: white;
+        }
+
+        /* Badge Styles */
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        /* Empty State */
+        .empty-state {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 60px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .empty-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .empty-title {
+            font-size: 1.5em;
+            color: #374151;
+            margin-bottom: 10px;
+        }
+
+        .empty-text {
+            color: #6b7280;
+            margin-bottom: 30px;
+        }
+
+        /* Checkbox Style */
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🎯 任务管理</h1>
+            <p class="subtitle">管理你的 DAgger 训练任务</p>
+        </header>
+
+        <!-- Action Bar -->
+        <div class="action-bar">
+            <div>
+                <span style="color: #666;">共 <strong id="task-count">0</strong> 个任务</span>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal()">
+                ➕ 创建新任务
+            </button>
+        </div>
+
+        <!-- Tasks Grid -->
+        <div class="tasks-grid" id="tasks-grid">
+            <!-- Tasks will be loaded here -->
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="empty-state" style="display: none;">
+            <div class="empty-icon">📦</div>
+            <div class="empty-title">还没有任务</div>
+            <div class="empty-text">创建你的第一个训练任务开始吧！</div>
+            <button class="btn btn-success" onclick="openCreateModal()">
+                ➕ 创建新任务
+            </button>
+        </div>
+    </div>
+
+    <!-- Create Task Modal -->
+    <div class="modal" id="create-modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeCreateModal()">&times;</span>
+            <h2 style="margin-bottom: 10px;">创建新任务</h2>
+            <p style="color: #6b7280; margin-bottom: 25px;">配置你的训练任务参数</p>
+            
+            <form id="create-form">
+                <!-- 基本信息 -->
+                <div class="form-section">
+                    <h3 style="color: #111827; margin-bottom: 15px;">📋 基本信息</h3>
+                    
+                    <div class="form-group">
+                        <label class="form-label">任务ID *</label>
+                        <input type="text" class="form-input" id="task_id" placeholder="例如: harvest_1_log" required>
+                        <small class="form-help">仅支持字母、数字、下划线</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">任务名称</label>
+                        <input type="text" class="form-input" id="name" placeholder="例如: 收集橡木原木">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">任务描述</label>
+                        <input type="text" class="form-input" id="description" placeholder="描述这个任务的目标...">
+                    </div>
+                </div>
+
+                <!-- 配置分组 (Accordion) -->
+                <div class="accordion" id="config-accordion">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+
+                <button type="submit" class="btn" style="width: 100%; margin-top: 20px; padding: 14px;">
+                    🚀 创建任务
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let configTemplate = null;
+
+        // 加载配置模板
+        async function loadConfigTemplate() {
+            if (configTemplate) return configTemplate;
+            
+            try {
+                const response = await fetch('/api/config_template');
+                configTemplate = await response.json();
+                return configTemplate;
+            } catch (error) {
+                console.error('加载配置模板失败:', error);
+                return null;
+            }
+        }
+
+        // 渲染配置分组
+        async function renderConfigAccordion() {
+            const template = await loadConfigTemplate();
+            if (!template) return;
+
+            const accordion = document.getElementById('config-accordion');
+            accordion.innerHTML = '';
+
+            template.categories.forEach((category, index) => {
+                const item = document.createElement('div');
+                item.className = 'accordion-item';
+                if (index === 0) item.classList.add('active'); // 默认展开第一个
+
+                const fields = category.fields.map(fieldId => {
+                    const field = template.fields[fieldId];
+                    if (!field) return '';
+
+                    return renderField(fieldId, field, template.default_config[fieldId]);
+                }).join('');
+
+                item.innerHTML = `
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <div>
+                            <div class="accordion-title">
+                                <span class="accordion-icon">${category.icon}</span>
+                                <span>${category.name}</span>
+                            </div>
+                            <div class="accordion-description">${category.description}</div>
+                        </div>
+                        <span class="accordion-toggle">▼</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-body">
+                            ${fields}
+                        </div>
+                    </div>
+                `;
+
+                accordion.appendChild(item);
+            });
+        }
+
+        // 渲染单个字段
+        function renderField(fieldId, field, defaultValue) {
+            let input = '';
+
+            switch (field.type) {
+                case 'text':
+                    input = `<input type="text" class="form-input" id="${fieldId}" 
+                                    placeholder="${field.label}" value="${defaultValue || ''}" 
+                                    ${field.required ? 'required' : ''}>`;
+                    break;
+
+                case 'number':
+                    const min = field.min !== undefined ? `min="${field.min}"` : '';
+                    const max = field.max !== undefined ? `max="${field.max}"` : '';
+                    const step = field.step !== undefined ? `step="${field.step}"` : '';
+                    input = `<input type="number" class="form-input" id="${fieldId}" 
+                                    value="${defaultValue}" ${min} ${max} ${step}>`;
+                    break;
+
+                case 'select':
+                    const options = field.options.map(opt => 
+                        `<option value="${opt}" ${opt === defaultValue ? 'selected' : ''}>${opt}</option>`
+                    ).join('');
+                    input = `<select class="form-input" id="${fieldId}">${options}</select>`;
+                    break;
+
+                case 'checkbox':
+                    const checked = defaultValue ? 'checked' : '';
+                    input = `
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="${fieldId}" ${checked}>
+                            <label for="${fieldId}">${field.label}</label>
+                        </div>
+                    `;
+                    return `
+                        <div class="form-group">
+                            ${input}
+                            ${field.description ? `<small class="form-help">${field.description}</small>` : ''}
+                        </div>
+                    `;
+
+                default:
+                    input = `<input type="text" class="form-input" id="${fieldId}" value="${defaultValue || ''}">`;
+            }
+
+            return `
+                <div class="form-group">
+                    <label class="form-label">${field.label}</label>
+                    ${input}
+                    ${field.description ? `<small class="form-help">${field.description}</small>` : ''}
+                </div>
+            `;
+        }
+
+        // 切换折叠面板
+        function toggleAccordion(header) {
+            const item = header.parentElement;
+            const wasActive = item.classList.contains('active');
+            
+            // 可选：关闭其他面板（单选模式）
+            // document.querySelectorAll('.accordion-item').forEach(i => i.classList.remove('active'));
+            
+            // 切换当前面板
+            if (wasActive) {
+                item.classList.remove('active');
+            } else {
+                item.classList.add('active');
+            }
+        }
+
+        // 打开创建模态框
+        async function openCreateModal() {
+            await renderConfigAccordion();
+            document.getElementById('create-modal').classList.add('active');
+        }
+
+        // 关闭创建模态框
+        function closeCreateModal() {
+            document.getElementById('create-modal').classList.remove('active');
+            document.getElementById('create-form').reset();
+        }
+
+        // 收集表单数据
+        function collectFormData() {
+            const form = document.getElementById('create-form');
+            const formData = {};
+
+            // 收集所有输入字段
+            form.querySelectorAll('input, select').forEach(input => {
+                if (input.type === 'checkbox') {
+                    formData[input.id] = input.checked;
+                } else if (input.type === 'number') {
+                    formData[input.id] = parseFloat(input.value) || 0;
+                } else {
+                    formData[input.id] = input.value;
+                }
+            });
+
+            return formData;
+        }
+
+        // 提交创建表单
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('create-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const taskData = collectFormData();
+                
+                try {
+                    const response = await fetch('/api/tasks', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(taskData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        alert('✅ 任务创建成功！');
+                        closeCreateModal();
+                        loadTasks();
+                        document.getElementById('create-form').reset();
+                    } else {
+                        alert('❌ 创建失败: ' + data.error);
+                    }
+                } catch (error) {
+                    alert('❌ 创建失败: ' + error.message);
+                }
+            });
+        });
+
+        // 加载任务列表
+        async function loadTasks() {
+            try {
+                const response = await fetch('/api/tasks');
+                const tasks = await response.json();
+                
+                const grid = document.getElementById('tasks-grid');
+                const emptyState = document.getElementById('empty-state');
+                const taskCount = document.getElementById('task-count');
+                
+                const taskList = Object.values(tasks);
+                taskCount.textContent = taskList.length;
+                
+                if (taskList.length === 0) {
+                    grid.style.display = 'none';
+                    emptyState.style.display = 'block';
+                    return;
+                }
+                
+                grid.style.display = 'grid';
+                emptyState.style.display = 'none';
+                
+                grid.innerHTML = taskList.map(task => `
+                    <div class="task-card" onclick="openTask('${task.task_id}')">
+                        <div class="task-header">
+                            <div>
+                                <div class="task-title">${task.name || task.task_id}</div>
+                                <div class="task-id">${task.task_id}</div>
+                            </div>
+                            ${task.stats.has_bc_baseline ? '<span class="badge badge-success">已训练</span>' : '<span class="badge badge-warning">未训练</span>'}
+                        </div>
+                        
+                        ${task.description ? `<div class="task-description">${task.description}</div>` : ''}
+                        
+                        <div class="task-stats">
+                            <div class="stat-item">
+                                <div class="stat-label">专家演示</div>
+                                <div class="stat-value">${task.stats.num_expert_demos || 0}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">DAgger轮次</div>
+                                <div class="stat-value">${task.stats.latest_iteration || 0}</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: #6b7280;">
+                                <span>📱 ${task.device || 'auto'}</span>
+                                <span>📊 ${task.max_steps || 1000} 步</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+            } catch (error) {
+                console.error('加载任务失败:', error);
+            }
+        }
+
+        // 打开任务详情
+        function openTask(taskId) {
+            window.location.href = `/tasks/${taskId}`;
+        }
+
+        // 关闭模态框（按ESC键）
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeCreateModal();
+            }
+        });
+
+        // 页面加载时加载任务列表
+        loadTasks();
+    </script>
+</body>
+</html>
+

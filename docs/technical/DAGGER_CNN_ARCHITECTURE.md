@@ -10,7 +10,7 @@
 
 ### **代码位置**
 
-`src/training/train_bc.py` (第238行):
+`src/training/bc/train_bc.py` (第238行):
 ```python
 model = PPO(
     "CnnPolicy",  # ← 这里指定使用CNN策略
@@ -179,7 +179,7 @@ NatureCNN(
 
 ### **行为克隆阶段 (BC)**
 
-`src/training/train_bc.py` (第303-305行):
+`src/training/bc/train_bc.py` (第303-305行):
 ```python
 # 使用CNN提取特征
 features = policy_net.extract_features(batch_obs)  # NatureCNN前向传播

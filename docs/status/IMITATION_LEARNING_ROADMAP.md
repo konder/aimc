@@ -132,7 +132,7 @@ data/expert_demos/chop_wood/
 **目标**: 实现基础的行为克隆训练
 
 #### 任务清单
-- [ ] 创建`src/training/train_bc.py`
+- [ ] 创建`src/training/bc/train_bc.py`
   - [ ] 实现ExpertDataset类
   - [ ] 实现BC训练循环
   - [ ] 支持MultiDiscrete动作空间
@@ -201,7 +201,7 @@ python src/training/train_get_wood.py \
   --learning-rate 3e-4
 
 # 实验2: BC预训练 + PPO微调
-python src/training/train_bc.py --epochs 50
+python src/training/bc/train_bc.py --epochs 50
 python src/training/train_get_wood.py \
   --pretrain-model checkpoints/bc_chop_wood.zip \
   --total-steps 50000 \

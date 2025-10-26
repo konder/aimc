@@ -55,7 +55,7 @@ elif task_id == "harvest_8_log":
 # ... 很多if-else
 
 # ✅ 好：自动选择Wrapper
-from src.utils.task_wrappers import apply_task_wrapper
+from src.envs import apply_task_wrapper
 env = apply_task_wrapper(env, task_id)  # 自动识别任务类型
 ```
 
@@ -111,12 +111,12 @@ log_types = [
 **使用方法**:
 ```python
 # 方法1: 手动应用
-from src.utils.task_wrappers import HarvestLogWrapper
+from src.envs import HarvestLogWrapper
 env = minedojo.make(task_id="harvest_8_log")
 env = HarvestLogWrapper(env, required_logs=8)
 
 # 方法2: 自动应用（推荐）
-from src.utils.task_wrappers import apply_task_wrapper
+from src.envs import apply_task_wrapper
 env = minedojo.make(task_id="harvest_8_log")
 env = apply_task_wrapper(env, "harvest_8_log")  # 自动识别需要8个
 ```
@@ -176,7 +176,7 @@ env = apply_task_wrapper(env, "harvest_8_log")  # 自动识别需要8个
 
 ### **步骤1: 定义Wrapper类**
 
-在 `src/utils/task_wrappers.py` 中添加：
+在 `src/envs/task_wrappers.py` 中添加：
 
 ```python
 class NavigateWrapper(gym.Wrapper):
@@ -273,7 +273,7 @@ def get_task_wrapper(task_id, verbose=True):
 
 ```python
 # 测试新的Wrapper
-from src.utils.task_wrappers import apply_task_wrapper
+from src.envs import apply_task_wrapper
 import minedojo
 
 env = minedojo.make(task_id="navigate_to_origin")
@@ -421,7 +421,7 @@ done = (total_logs >= self.required_logs)  # 可能覆盖原任务的done
 
 import pytest
 import minedojo
-from src.utils.task_wrappers import HarvestLogWrapper
+from src.envs import HarvestLogWrapper
 
 def test_harvest_log_wrapper_oak():
     """测试HarvestLogWrapper识别Oak Log"""
@@ -456,7 +456,7 @@ def test_harvest_log_wrapper_multiple():
 ```bash
 # 手动测试
 bash scripts/run_minedojo_x86.sh python << 'EOF'
-from src.utils.env_wrappers import make_minedojo_env
+from src.envs import make_minedojo_env
 
 # 创建环境（会自动应用HarvestLogWrapper）
 env = make_minedojo_env(task_id="harvest_1_log")
