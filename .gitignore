@@ -40,7 +40,6 @@ env/
 # Training outputs
 logs/
 checkpoints/
-models/
 outputs/
 runs/
 wandb/
