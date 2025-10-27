@@ -389,11 +389,19 @@ def main():
     # 输出参数
     parser.add_argument("--output-dir", type=str,
                        default="data/tasks/harvest_1_log/vpt_bc_model",
-                       help="模型保存目录")
+                       help="最终模型保存目录（best_model.pth, final_model.pth, config等）")
+    parser.add_argument("--checkpoint-dir", type=str, default=None,
+                       help="Checkpoint保存目录（如不指定，则使用output-dir）。可指向大容量磁盘")
     parser.add_argument("--save-freq", type=int, default=5,
-                       help="保存checkpoint频率")
+                       help="保存checkpoint频率（设为0则不保存checkpoint，只保存best/final）")
+    parser.add_argument("--keep-checkpoints", type=int, default=3,
+                       help="保留的checkpoint数量（防止磁盘占用过大）")
     
     args = parser.parse_args()
+    
+    # 如果未指定checkpoint-dir，则使用output-dir
+    if args.checkpoint_dir is None:
+        args.checkpoint_dir = args.output_dir
     
     print("=" * 70)
     print("🚀 VPT BC训练")
@@ -401,12 +409,18 @@ def main():
     
     # 创建输出目录
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
     
     # 保存配置
     config_path = os.path.join(args.output_dir, "train_config.yaml")
     with open(config_path, 'w') as f:
         yaml.dump(vars(args), f, default_flow_style=False)
-    print(f"配置保存: {config_path}\n")
+    print(f"配置保存: {config_path}")
+    print(f"模型输出目录: {args.output_dir}")
+    print(f"Checkpoint目录: {args.checkpoint_dir}")
+    if args.checkpoint_dir != args.output_dir:
+        print(f"  ℹ️  Checkpoint使用独立目录（大容量磁盘）")
+    print()
     
     # 加载数据
     print("📂 加载专家数据...")
@@ -524,10 +538,26 @@ def main():
             trainer.save_checkpoint(best_path, epoch, val_metrics)
             print(f"  ✓ 新的最佳模型！")
         
-        # 定期保存checkpoint
-        if epoch % args.save_freq == 0:
-            ckpt_path = os.path.join(args.output_dir, f"checkpoint_epoch_{epoch}.pth")
+        # 定期保存checkpoint（只保留最新的N个）
+        if args.save_freq > 0 and epoch % args.save_freq == 0:
+            ckpt_path = os.path.join(args.checkpoint_dir, f"checkpoint_epoch_{epoch}.pth")
             trainer.save_checkpoint(ckpt_path, epoch, val_metrics)
+            
+            # 清理旧的checkpoint，只保留最新的N个
+            checkpoint_files = sorted([
+                f for f in os.listdir(args.checkpoint_dir) 
+                if f.startswith('checkpoint_epoch_') and f.endswith('.pth')
+            ], key=lambda x: int(x.split('_')[-1].split('.')[0]))
+            
+            # 删除旧的checkpoint（保留最新N个）
+            if len(checkpoint_files) > args.keep_checkpoints:
+                for old_ckpt in checkpoint_files[:-args.keep_checkpoints]:
+                    old_path = os.path.join(args.checkpoint_dir, old_ckpt)
+                    try:
+                        os.remove(old_path)
+                        print(f"  🗑️  删除旧checkpoint: {old_ckpt}")
+                    except Exception as e:
+                        print(f"  ⚠️  删除失败: {e}")
     
     # 保存最终模型
     final_path = os.path.join(args.output_dir, "final_model.pth")

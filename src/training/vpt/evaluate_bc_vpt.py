@@ -180,7 +180,35 @@ def evaluate_policy(
         )
         
         try:
-            obs = env.reset()
+            # 重试reset（MineDojo环境启动可能失败）
+            max_reset_retries = 3
+            obs = None
+            for retry in range(max_reset_retries):
+                try:
+                    obs = env.reset()
+                    break
+                except (EOFError, RuntimeError, Exception) as e:
+                    if retry < max_reset_retries - 1:
+                        print(f"\n  ⚠️  Episode {episode+1} reset失败（重试 {retry+1}/{max_reset_retries}）: {e}")
+                        import time
+                        time.sleep(2)  # 等待2秒后重试
+                        # 关闭并重新创建环境
+                        try:
+                            env.close()
+                        except:
+                            pass
+                        env = make_minedojo_env(
+                            task_id=task_id,
+                            image_size=image_size,
+                            max_episode_steps=max_steps
+                        )
+                    else:
+                        print(f"\n  ✗ Episode {episode+1} reset失败（已重试{max_reset_retries}次），跳过")
+                        raise
+            
+            if obs is None:
+                continue
+            
             episode_reward = 0
             episode_steps = 0
             done = False

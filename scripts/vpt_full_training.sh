@@ -53,12 +53,18 @@ OUTPUT_DIR="data/tasks/${TASK_ID}/vpt_bc_model"
 VPT_WEIGHTS="data/pretrained/vpt/rl-from-early-game-2x.weights"
 LOG_DIR="logs/vpt_training"
 
+# Checkpoint保存配置（可选：指向大容量磁盘）
+# 如果不设置，checkpoint会保存到OUTPUT_DIR
+# 示例：CHECKPOINT_DIR="/mnt/large_disk/vpt_checkpoints"
+CHECKPOINT_DIR=""  # 留空则使用OUTPUT_DIR
+KEEP_CHECKPOINTS=3  # 保留最新的N个checkpoint
+
 # 完整训练参数
 EPOCHS=100
 BATCH_SIZE=32
 LEARNING_RATE=1e-4
 DEVICE="mps"  # 或 cuda, cpu
-SAVE_FREQ=5
+SAVE_FREQ=5  # 设为0则不保存checkpoint，只保存best/final
 
 # ============================================================================
 # 环境检查
@@ -111,13 +117,23 @@ print_header "训练配置"
 echo "任务: $TASK_ID"
 echo "专家数据: $EXPERT_DIR ($EPISODE_COUNT episodes)"
 echo "输出目录: $OUTPUT_DIR"
+if [ -n "$CHECKPOINT_DIR" ]; then
+  echo "Checkpoint目录: $CHECKPOINT_DIR (独立大容量磁盘)"
+else
+  echo "Checkpoint目录: $OUTPUT_DIR (默认)"
+fi
 echo ""
 echo "训练参数:"
 echo "  Epochs: $EPOCHS"
 echo "  Batch Size: $BATCH_SIZE"
 echo "  Learning Rate: $LEARNING_RATE"
 echo "  Device: $DEVICE"
-echo "  Save Frequency: 每 $SAVE_FREQ epochs"
+if [ "$SAVE_FREQ" -eq 0 ]; then
+  echo "  Checkpoint: 禁用（只保存best/final）"
+else
+  echo "  Checkpoint频率: 每 $SAVE_FREQ epochs"
+  echo "  保留Checkpoint数: $KEEP_CHECKPOINTS 个"
+fi
 echo ""
 
 # 估算训练时间
@@ -164,17 +180,27 @@ echo ""
 
 START_TIME=$(date +%s)
 
-bash scripts/run_minedojo_x86.sh python src/training/vpt/train_bc_vpt.py \
-  --expert-dir "$EXPERT_DIR" \
-  --output-dir "$OUTPUT_DIR" \
-  --vpt-weights "$VPT_WEIGHTS" \
+# 构建训练命令
+TRAIN_CMD="bash scripts/run_minedojo_x86.sh python src/training/vpt/train_bc_vpt.py \
+  --expert-dir \"$EXPERT_DIR\" \
+  --output-dir \"$OUTPUT_DIR\" \
+  --vpt-weights \"$VPT_WEIGHTS\" \
   --freeze-vpt \
   --epochs $EPOCHS \
   --batch-size $BATCH_SIZE \
   --learning-rate $LEARNING_RATE \
   --device $DEVICE \
   --save-freq $SAVE_FREQ \
-  2>&1 | tee "$LOG_FILE"
+  --keep-checkpoints $KEEP_CHECKPOINTS"
+
+# 如果指定了checkpoint目录，添加参数
+if [ -n "$CHECKPOINT_DIR" ]; then
+  TRAIN_CMD="$TRAIN_CMD --checkpoint-dir \"$CHECKPOINT_DIR\""
+  print_info "Checkpoint保存目录: $CHECKPOINT_DIR"
+fi
+
+# 执行训练
+eval "$TRAIN_CMD" 2>&1 | tee "$LOG_FILE"
 
 TRAIN_EXIT_CODE=$?
 END_TIME=$(date +%s)

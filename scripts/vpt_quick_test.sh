@@ -175,6 +175,7 @@ bash scripts/run_minedojo_x86.sh python src/training/vpt/train_bc_vpt.py \
   --learning-rate $LEARNING_RATE \
   --device $DEVICE \
   --save-freq 1 \
+  --keep-checkpoints 2 \
   2>&1 | tee "$LOG_FILE"
 
 if [ $? -ne 0 ]; then
