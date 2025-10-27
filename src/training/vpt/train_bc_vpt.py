@@ -462,17 +462,18 @@ def main():
         trainable_params = 0
         
         for name, param in model.named_parameters():
-            # 冻结VPT的视觉特征提取器
-            if 'vpt_policy.img_process' in name or 'vpt_policy.img_preprocess' in name:
+            # 策略：冻结所有vpt_policy参数，只训练action_heads
+            if 'vpt_policy' in name:
                 param.requires_grad = False
                 frozen_params += param.numel()
             else:
+                # action_heads保持可训练
                 trainable_params += param.numel()
         
         print(f"  冻结参数: {frozen_params:,} ({frozen_params/(frozen_params+trainable_params)*100:.1f}%)")
         print(f"  可训练参数: {trainable_params:,} ({trainable_params/(frozen_params+trainable_params)*100:.1f}%)")
-        print(f"  策略: 保留VPT的视觉特征提取能力，只微调任务适配层")
-        print(f"  优势: 防止灾难性遗忘，保留VPT预训练的跳跃、移动等通用技能")
+        print(f"  策略: 冻结整个VPT模型，只训练MineDojo action heads")
+        print(f"  优势: 完全保留VPT预训练知识（跳跃、移动、战斗等），只学习动作映射")
     
     # 创建训练器
     print("\n🎓 创建BC训练器...")
