@@ -347,7 +347,9 @@ class BCTrainer:
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'metrics': metrics
+            'metrics': metrics,
+            'vpt_weights_path': getattr(self, 'vpt_weights_path', None),
+            'freeze_vpt': getattr(self, 'freeze_vpt', False)
         }
         th.save(checkpoint, path)
         print(f"✓ Checkpoint保存: {path}")
@@ -369,6 +371,8 @@ def main():
                        help="VPT weights文件")
     parser.add_argument("--no-pretrain", action="store_true",
                        help="不使用VPT预训练")
+    parser.add_argument("--freeze-vpt", action="store_true",
+                       help="冻结VPT视觉特征提取器（推荐，防止灾难性遗忘）")
     
     # 训练参数
     parser.add_argument("--epochs", type=int, default=20,
@@ -376,7 +380,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32,
                        help="批次大小")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
-                       help="学习率")
+                       help="学习率（冻结VPT时建议用1e-4，全参数微调时建议用1e-5）")
     parser.add_argument("--device", type=str, default="auto",
                        help="训练设备")
     parser.add_argument("--num-workers", type=int, default=0,
@@ -451,6 +455,25 @@ def main():
     print("\n🔄 创建MineDojo适配器...")
     model = MinedojoActionAdapter(vpt_policy)
     
+    # 参数冻结策略（防止灾难性遗忘）
+    if not args.no_pretrain and args.freeze_vpt:
+        print("\n❄️  冻结VPT参数...")
+        frozen_params = 0
+        trainable_params = 0
+        
+        for name, param in model.named_parameters():
+            # 冻结VPT的视觉特征提取器
+            if 'vpt_policy.img_process' in name or 'vpt_policy.img_preprocess' in name:
+                param.requires_grad = False
+                frozen_params += param.numel()
+            else:
+                trainable_params += param.numel()
+        
+        print(f"  冻结参数: {frozen_params:,} ({frozen_params/(frozen_params+trainable_params)*100:.1f}%)")
+        print(f"  可训练参数: {trainable_params:,} ({trainable_params/(frozen_params+trainable_params)*100:.1f}%)")
+        print(f"  策略: 保留VPT的视觉特征提取能力，只微调任务适配层")
+        print(f"  优势: 防止灾难性遗忘，保留VPT预训练的跳跃、移动等通用技能")
+    
     # 创建训练器
     print("\n🎓 创建BC训练器...")
     trainer = BCTrainer(
@@ -458,6 +481,10 @@ def main():
         learning_rate=args.learning_rate,
         device=args.device
     )
+    
+    # 保存训练配置到trainer（用于checkpoint）
+    trainer.vpt_weights_path = args.vpt_weights if not args.no_pretrain else None
+    trainer.freeze_vpt = args.freeze_vpt
     
     # 训练
     print("\n" + "=" * 70)

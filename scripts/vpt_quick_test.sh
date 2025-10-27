@@ -169,6 +169,7 @@ bash scripts/run_minedojo_x86.sh python src/training/vpt/train_bc_vpt.py \
   --expert-dir "$EXPERT_DIR" \
   --output-dir "$OUTPUT_DIR" \
   --vpt-weights "$VPT_WEIGHTS" \
+  --freeze-vpt \
   --epochs $EPOCHS \
   --batch-size $BATCH_SIZE \
   --learning-rate $LEARNING_RATE \
