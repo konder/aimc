@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 # 添加项目路径
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '../..')
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
 sys.path.insert(0, PROJECT_ROOT)
 
 # 添加external路径（用于minerl依赖）
@@ -96,12 +96,12 @@ class MinedojoActionAdapter(nn.Module):
 
 
 class ExpertDataset(Dataset):
-    """专家数据集"""
+    """专家数据集（从Web录制系统的数据格式加载）"""
     
     def __init__(self, expert_dir: str, target_size=(128, 128)):
         """
         Args:
-            expert_dir: 专家演示目录
+            expert_dir: 专家演示目录（包含episode_000, episode_001等）
             target_size: 目标图像尺寸 (H, W)，VPT使用128x128
         """
         import cv2
@@ -109,41 +109,74 @@ class ExpertDataset(Dataset):
         self.target_size = target_size
         self.cv2 = cv2
         
-        # 查找所有episode
-        self.episodes = []
-        for episode_dir in sorted(os.listdir(expert_dir)):
-            episode_path = os.path.join(expert_dir, episode_dir)
-            if os.path.isdir(episode_path):
-                obs_path = os.path.join(episode_path, 'observations.npy')
-                actions_path = os.path.join(episode_path, 'actions.npy')
-                if os.path.exists(obs_path) and os.path.exists(actions_path):
-                    self.episodes.append(episode_path)
+        # 查找所有episode目录
+        episode_dirs = []
+        for item in sorted(os.listdir(expert_dir)):
+            item_path = os.path.join(expert_dir, item)
+            if os.path.isdir(item_path) and item.startswith('episode_'):
+                episode_dirs.append(item_path)
+        
+        print(f"找到 {len(episode_dirs)} 个episode目录")
         
         # 预加载所有数据
-        print(f"加载 {len(self.episodes)} 个episodes...")
         self.all_obs = []
         self.all_actions = []
         
-        for ep_path in tqdm(self.episodes, desc="Loading data"):
-            obs = np.load(os.path.join(ep_path, 'observations.npy'))  # (T, H, W, C)
-            actions = np.load(os.path.join(ep_path, 'actions.npy'))  # (T, action_dim)
+        for ep_path in tqdm(episode_dirs, desc="Loading data"):
+            # 查找所有frame文件
+            frame_files = sorted([f for f in os.listdir(ep_path) 
+                                if f.startswith('frame_') and f.endswith('.npy')])
             
-            # 跳过最后一帧（没有对应的action）
-            for t in range(len(obs) - 1):
-                self.all_obs.append(obs[t])
-                self.all_actions.append(actions[t])
+            if len(frame_files) == 0:
+                continue
+            
+            # 加载每个frame
+            for frame_file in frame_files:
+                frame_path = os.path.join(ep_path, frame_file)
+                try:
+                    # 加载.npy文件（包含observation和action）
+                    data = np.load(frame_path, allow_pickle=True).item()
+                    
+                    # 提取观察和动作
+                    obs = data['observation']  # RGB图像 (H, W, C)
+                    action = data['action']    # MineDojo动作 (8,)
+                    
+                    self.all_obs.append(obs)
+                    self.all_actions.append(action)
+                    
+                except Exception as e:
+                    print(f"警告: 加载 {frame_path} 失败: {e}")
+                    continue
         
-        print(f"总样本数: {len(self.all_obs)}")
-        print(f"原始shape: {self.all_obs[0].shape}")
-        print(f"目标shape: {target_size}")
-        print(f"动作shape: {self.all_actions[0].shape}")
+        if len(self.all_obs) == 0:
+            raise ValueError(f"未找到任何有效的训练数据！请检查目录: {expert_dir}")
+        
+        print(f"✓ 加载完成")
+        print(f"  总样本数: {len(self.all_obs)}")
+        print(f"  原始图像shape: {self.all_obs[0].shape}")
+        print(f"  目标图像shape: {target_size}")
+        print(f"  动作shape: {self.all_actions[0].shape}")
+        print(f"  动作维度: {len(self.all_actions[0])}")
     
     def __len__(self):
         return len(self.all_obs)
     
     def __getitem__(self, idx):
-        obs = self.all_obs[idx]  # (H, W, C), uint8
+        obs = self.all_obs[idx]  # 可能是 (C, H, W) 或 (H, W, C)
         action = self.all_actions[idx]  # (action_dim,)
+        
+        # 检查并转换为HWC格式
+        if obs.shape[0] == 3 or obs.shape[0] == 1:  # 很可能是CHW格式
+            if len(obs.shape) == 3 and obs.shape[0] < obs.shape[1] and obs.shape[0] < obs.shape[2]:
+                # (C, H, W) -> (H, W, C)
+                obs = np.transpose(obs, (1, 2, 0))
+        
+        # 确保是uint8类型
+        if obs.dtype != np.uint8:
+            if obs.max() <= 1.0:
+                obs = (obs * 255).astype(np.uint8)
+            else:
+                obs = obs.astype(np.uint8)
         
         # Resize图像到VPT期望的尺寸
         if obs.shape[:2] != self.target_size:
