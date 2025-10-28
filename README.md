@@ -68,109 +68,78 @@ AIMC 是一个完整的 Minecraft AI 训练工程，专注于使用**模仿学�
 
 ---
 
-## 🚀 部署指南
+## 🚀 快速部署
 
-### 方法1: 标准部署（Linux / Intel Mac）
+> **⚠️ 国内环境重要提示**: MineDojo/MineRL 安装后**必须**运行修复脚本，否则 Minecraft 编译会失败！  
+> 详见: [DEPLOYMENT.md - Minecraft 编译修复](DEPLOYMENT.md#-minecraft-编译问题修复国内必读)
 
-#### 系统要求
+> **📖 完整部署文档**: 查看 [DEPLOYMENT.md](DEPLOYMENT.md) 获取详细的安装和配置指南
 
-| 配置 | 最低 | 推荐 |
-|------|------|------|
-| CPU | 4核 | 8核+ |
-| 内存 | 8GB | 16GB+ |
-| GPU | 无 | 可选 |
-| 存储 | 10GB | 20GB+ |
-| 系统 | macOS 10.15+ / Ubuntu 18.04+ | macOS 13+ / Ubuntu 22.04+ |
-
-#### 快速部署
+### 快速开始（5 步）
 
 ```bash
-# 1. 安装 Java 8+
-# Ubuntu/Debian
-sudo apt-get update && sudo apt-get install openjdk-8-jdk
-
-# macOS (Intel)
-brew install openjdk@8
+# 1. 安装系统依赖
+# macOS: brew install temurin@8
+# Ubuntu: sudo apt install openjdk-8-jdk
 
 # 2. 创建 Python 环境
 conda create -n minedojo python=3.9 -y
 conda activate minedojo
 
-# 3. 克隆项目
-git clone https://github.com/your-repo/aimc.git
-cd aimc
+# 3. 降级构建工具（重要！）
+pip install "pip<24.1" "setuptools<58" "wheel<0.38.0"
+pip install "numpy==1.24.3"
 
-# 4. 安装依赖
-pip install -r requirements.txt
+# 4. 克隆项目并安装
+git clone <你的仓库地址> aimc
+cd aimc
+pip install minedojo  # 先安装 MineDojo
+./scripts/fix_minecraft_build.sh minedojo  # 修复编译配置（国内必需）
+pip install -r requirements.txt  # 安装其他依赖
 
 # 5. 验证安装
-python tools/validate_install.py
+python tools/validate_environment.py
 ```
 
----
+### 不同平台部署
 
-### 方法2: Apple M 芯片部署（ARM64）⭐
+| 平台 | 文档链接 | 特殊要求 |
+|------|---------|---------|
+| **macOS Intel** | [DEPLOYMENT.md - 方案A](DEPLOYMENT.md#方案-a-标准部署linux--intel-mac) | 标准安装 |
+| **macOS M 系列** | [DEPLOYMENT.md - 方案B](DEPLOYMENT.md#方案-b-apple-m-芯片部署) | 需要 Rosetta 2 + x86 环境 |
+| **Linux x86_64** | [DEPLOYMENT.md - 方案A](DEPLOYMENT.md#方案-a-标准部署linux--intel-mac) | 标准安装 |
+| **国内环境** | [DEPLOYMENT.md - Minecraft 修复](DEPLOYMENT.md#-minecraft-编译问题修复国内必读) | **必读** |
 
-Apple M 系列芯片需要通过 Rosetta 2 运行 MineDojo（因为 Minecraft 服务端需要 x86 架构）。
-
-#### 快速部署
+### Apple M 系列芯片快速部署 ⭐
 
 ```bash
 # 1. 安装 Rosetta 2
 softwareupdate --install-rosetta --agree-to-license
 
-# 2. 安装 x86 版本的 Java
+# 2. 在 x86 模式下安装
 arch -x86_64 brew install temurin@8
-
-# 3. 设置环境变量
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-8.jdk/Contents/Home/
-echo 'export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-8.jdk/Contents/Home/' >> ~/.zshrc
-
-# 4. 在 x86 模式下创建环境
-arch -x86_64 /bin/bash
+arch -x86_64 /bin/zsh
 conda create -n minedojo-x86 python=3.9 -y
 conda activate minedojo-x86
 
-# 5. 安装依赖
+# 3. 降级构建工具（重要！）
 pip install "pip<24.1" "setuptools<58" "wheel<0.38.0"
-pip install "numpy>=1.21.0,<2.0"
-pip install minedojo
+pip install "numpy==1.24.3"
 
-# 6. 克隆项目并安装
-cd /path/to/aimc
-pip install -r requirements.txt
+# 4. 安装项目
+git clone <你的仓库地址> aimc
+cd aimc
+pip install minedojo  # 先安装 MineDojo
+./scripts/fix_minecraft_build.sh minedojo  # 修复编译配置（国内必需）
+pip install -r requirements.txt  # 安装其他依赖
 
-# 7. 使用便捷脚本运行
-./scripts/run_minedojo_x86.sh python tools/validate_install.py
+# 5. 使用启动脚本运行
+./scripts/run_minedojo_x86.sh python tools/validate_environment.py
 ```
 
-**重要提示**:
-- 每次运行都需要：`arch -x86_64 /bin/bash`
-- 或使用项目脚本：`./scripts/run_minedojo_x86.sh <命令>`
-- GPU 加速：M 系列芯片使用 MPS，指定 `--device mps`
-
-详细步骤见：[当前 README.md 的 "Apple M 芯片部署" 章节](#apple-m-芯片部署arm64)
-
----
-
-### 方法3: Docker 部署
-
-```bash
-# 1. 构建镜像
-cd docker
-docker build --platform linux/amd64 -t aimc-minedojo:latest .
-
-# 2. 运行容器
-docker run -it --rm \
-  --platform linux/amd64 \
-  -v $(pwd):/workspace \
-  aimc-minedojo:latest
-
-# 3. 在容器中验证
-python tools/validate_install.py
-```
-
-**网络受限环境**: 参考 `docker/README.md` 获取代理配置和离线部署方案
+**详细文档**: 
+- 📖 [DEPLOYMENT.md](DEPLOYMENT.md) - 完整部署指南
+- 🔧 [Minecraft 编译修复](DEPLOYMENT.md#-minecraft-编译问题修复国内必读) - 国内环境必读
 
 ---
 
@@ -664,6 +633,10 @@ ls -lh data/tasks/harvest_1_log/checkpoints/
 #### 验证安装
 
 ```bash
+# 完整环境验证
+python tools/validate_environment.py
+
+# 快速验证（旧版）
 python tools/validate_install.py
 ```
 

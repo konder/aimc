@@ -104,7 +104,7 @@ def analyze_sequence(sequence_dir, num_frames=16, stride=4, task_prompt="choppin
         stride: 滑动窗口步长
         task_prompt: 任务描述
     """
-    device = "cpu"
+    device = "auto"
     
     print("=" * 80)
     print("MineCLIP 16帧视频模式验证")

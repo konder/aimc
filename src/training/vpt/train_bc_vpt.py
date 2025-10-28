@@ -459,11 +459,11 @@ def main():
     print("🤖 创建VPT Policy...")
     if not args.no_pretrain:
         print(f"  加载VPT预训练权重: {args.vpt_weights}")
-        vpt_policy, result = load_vpt_policy(args.vpt_weights, device='cpu', verbose=False)
+        vpt_policy, result = load_vpt_policy(args.vpt_weights, device='auto', verbose=False)
         print(f"  ✓ VPT权重加载成功 (Missing: {len(result.missing_keys)}, Unexpected: {len(result.unexpected_keys)})")
     else:
         print("  使用随机初始化（--no-pretrain）")
-        vpt_policy = create_vpt_policy(device='cpu')
+        vpt_policy = create_vpt_policy(device='auto')
     
     # 创建MineDojo适配器
     print("\n🔄 创建MineDojo适配器...")

@@ -4,23 +4,28 @@
 
 set -e
 
+# 首先保存脚本的绝对路径（在arch切换之前）
+if [ -z "$SCRIPT_REAL_PATH" ]; then
+    export SCRIPT_REAL_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+fi
+
 # 检查是否在x86模式下运行
 CURRENT_ARCH=$(uname -m)
 if [ "$CURRENT_ARCH" = "arm64" ]; then
     echo "切换到x86_64架构..."
     echo ""
-    # 重新在x86模式下执行此脚本
-    exec arch -x86_64 /bin/zsh "$0" "$@"
+    # 重新在x86模式下执行此脚本（使用保存的绝对路径）
+    exec arch -x86_64 /bin/zsh "$SCRIPT_REAL_PATH" "$@"
 fi
 
 # 现在我们在x86模式下，设置JAVA_HOME
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-8.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
-#export JAVA_OPTS="-Djava.awt.headless=true"
 
 # 设置 locale 环境变量，解决 Python subprocess 的编码问题
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
+unset DISPLAY
 
 echo "=========================================="
 echo "MineDojo x86 环境"
@@ -51,6 +56,16 @@ export PATH="$JAVA_HOME/bin:$PATH"
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
+# 设置项目根目录到 PYTHONPATH（脚本所在目录的父目录）
+# 使用之前保存的SCRIPT_REAL_PATH来计算正确的路径
+SCRIPT_DIR="$(dirname "$SCRIPT_REAL_PATH")"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+
+echo "✓ Project Root: $PROJECT_ROOT"
+echo "✓ PYTHONPATH: $PYTHONPATH"
+echo ""
+
 # 如果有参数，执行传入的命令
 if [ $# -eq 0 ]; then
     # 没有参数，启动交互式shell
@@ -58,11 +73,13 @@ if [ $# -eq 0 ]; then
     echo "提示: 现在可以直接运行MineDojo脚本了！"
     echo "退出请使用 'exit' 命令"
     echo ""
+    cd "$PROJECT_ROOT"
     exec /bin/bash
 else
-    # 有参数，执行命令
+    # 有参数，执行命令（在项目根目录下）
     echo "执行: $@"
     echo ""
+    cd "$PROJECT_ROOT"
     exec "$@"
 fi
 
