@@ -42,12 +42,7 @@ ENV MINEDOJO_HEADLESS=1
 # 配置 conda 和 pip 使用国内镜像源（可选）
 RUN conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/ && \
     conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/ && \
-    conda config --set show_channel_urls yes && \
-    mkdir -p /root/.pip && \
-    echo "[global]" > /root/.pip/pip.conf && \
-    echo "index-url = https://pypi.tuna.tsinghua.edu.cn/simple" >> /root/.pip/pip.conf && \
-    echo "[install]" >> /root/.pip/pip.conf && \
-    echo "trusted-host = pypi.tuna.tsinghua.edu.cn" >> /root/.pip/pip.conf
+    conda config --set show_channel_urls yes
 
 # 接受 Conda 服务条款并创建 minedojo-x86 环境
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
@@ -58,6 +53,8 @@ RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkg
 
 # 复制项目文件
 COPY requirements.txt /tmp/requirements.txt
+COPY build_local_cache.zip /root/build_local_cache.zip
+RUN unzip /root/build_local_cache.zip -d /root/
 
 # 安装 Python 依赖
 SHELL ["/bin/bash", "-c"]

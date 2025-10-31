@@ -25,6 +25,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 # 设置 locale 环境变量，解决 Python subprocess 的编码问题
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
+export HF_HUB_OFFLINE=1
 unset DISPLAY
 
 echo "=========================================="

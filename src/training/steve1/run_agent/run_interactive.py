@@ -1,8 +1,6 @@
 import os
 import sys
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 import argparse
 import json
 import os
@@ -10,6 +8,10 @@ import os
 import cv2
 import numpy as np
 import torch
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 from steve1.data.text_alignment.vae import load_vae_model
 from steve1.utils.mineclip_agent_env_utils import load_mineclip_agent_env
 from steve1.utils.text_overlay_utils import created_fitted_text_image
