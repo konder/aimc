@@ -56,16 +56,6 @@ export PATH="$JAVA_HOME/bin:$PATH"
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
-# 设置项目根目录到 PYTHONPATH（脚本所在目录的父目录）
-# 使用之前保存的SCRIPT_REAL_PATH来计算正确的路径
-SCRIPT_DIR="$(dirname "$SCRIPT_REAL_PATH")"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
-
-echo "✓ Project Root: $PROJECT_ROOT"
-echo "✓ PYTHONPATH: $PYTHONPATH"
-echo ""
-
 # 如果有参数，执行传入的命令
 if [ $# -eq 0 ]; then
     # 没有参数，启动交互式shell
@@ -76,10 +66,10 @@ if [ $# -eq 0 ]; then
     cd "$PROJECT_ROOT"
     exec /bin/bash
 else
-    # 有参数，执行命令（在项目根目录下）
+    # 有参数，执行命令（保持当前目录）
     echo "执行: $@"
     echo ""
-    cd "$PROJECT_ROOT"
+    # 不改变当前目录，让命令在调用者的目录执行
     exec "$@"
 fi
 
