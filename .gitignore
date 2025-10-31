@@ -38,11 +38,7 @@ env/
 
 # Training outputs
 logs/
-checkpoints/
-outputs/
-runs/
-wandb/
-data/
+/data/
 
 # MineDojo specific
 .minedojo/
