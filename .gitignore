@@ -45,4 +45,4 @@ logs/
 minecraft_data/
 
 # Tensorboard
-events.out.tfevents.*
+events.out.tfevents.*gradle-4.10.2-all.zip
