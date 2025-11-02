@@ -83,7 +83,6 @@ RUN mkdir -p /opt && \
 ENV MINE_DOJO_MC_PATH=/opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft
 
 # 步骤 2: 应用 MC 配置补丁 并编译
-#COPY gradle-4.10.2-all.zip /opt/gradle-4.10.2-all.zip
 COPY mc_config.patch /tmp/mc_config.patch
 RUN cd $MINE_DOJO_MC_PATH && \
     patch -p0 < /tmp/mc_config.patch && \

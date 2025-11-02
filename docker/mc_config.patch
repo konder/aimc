@@ -7,7 +7,7 @@
  zipStoreBase=GRADLE_USER_HOME
  zipStorePath=wrapper/dists
 -distributionUrl=https://services.gradle.org/distributions/gradle-4.10.2-all.zip
-+distributionUrl=https://mirrors.aliyun.com/gradle/gradle-4.10.2-all.zip
++distributionUrl=https://mirrors.cloud.tencent.com/gradle/gradle-4.10.2-all.zip
 --- build.gradle	2025-10-25 17:50:08
 +++ build.gradle	2025-10-25 17:37:09
 @@ -1,7 +1,7 @@
