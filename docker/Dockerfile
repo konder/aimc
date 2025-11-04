@@ -99,7 +99,8 @@ RUN mkdir -p ${MINE_DOJO_MC_PATH}/run/gradle && \
 WORKDIR /workspace
 
 RUN git clone https://github.com/konder/aimc.git
-RUN cd aimc && pip install -r requirements.txt
+RUN cd aimc && git pull origin main
+#RUN cd aimc && pip install -r requirements.txt
 
 # 默认激活 minedojo-x86 环境
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate minedojo-x86 && exec /bin/bash"]
