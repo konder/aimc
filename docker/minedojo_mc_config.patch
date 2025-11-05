@@ -1,0 +1,65 @@
+--- gradle/wrapper/gradle-wrapper.properties	2025-10-25 17:56:27
++++ gradle/wrapper/gradle-wrapper.properties	2025-10-25 17:40:13
+@@ -1,6 +1,6 @@
+ #Mon Sep 14 12:28:28 PDT 2015
+ distributionBase=GRADLE_USER_HOME
+ distributionPath=wrapper/dists
+ zipStoreBase=GRADLE_USER_HOME
+ zipStorePath=wrapper/dists
+-distributionUrl=https://services.gradle.org/distributions/gradle-4.10.2-all.zip
++distributionUrl=https://mirrors.aliyun.com/gradle/gradle-4.10.2-all.zip
+--- build.gradle	2025-10-25 17:50:08
++++ build.gradle	2025-10-25 17:37:09
+@@ -1,7 +1,7 @@
+ // For those who want the bleeding edge
+ buildscript {
+     repositories {
+-
++	maven { url "file:///opt/hotfix" }
+         maven { url 'https://jitpack.io' }
+         jcenter()
+         mavenCentral()
+@@ -16,13 +16,13 @@
+     }
+     dependencies {
+         classpath 'org.ow2.asm:asm:6.0'
+-        classpath('com.github.SpongePowered:MixinGradle:dcfaf61'){ // 0.6
++        classpath('MixinGradle-dcfaf61:MixinGradle:dcfaf61'){ // 0.6
+             // Because forgegradle requires 6.0 (not -debug-all) while mixingradle depends on 5.0
+             // and putting mixin right here will place it before forge in the class loader
+             exclude group: 'org.ow2.asm', module: 'asm-debug-all'
+         }
+ 
+-        classpath 'com.github.brandonhoughton:ForgeGradle:FG_2.2_patched-SNAPSHOT'
++        classpath 'com.github.MineDojo:ForgeGradle:FG_2.2_patched-SNAPSHOT'
+     }
+     configurations {
+         compileClasspath {
+@@ -42,7 +42,7 @@
+ }
+ 
+ dependencies {
+-    implementation 'com.github.brandonhoughton:forgegradle:FG_2.2_patched-SNAPSHOT'
++    implementation 'com.github.MineDojo:Forgegradle:FG_2.2_patched-SNAPSHOT'
+ }
+ 
+ apply plugin: 'net.minecraftforge.gradle.forge'
+@@ -306,7 +306,7 @@
+     description 'Generate source files for our XML schemas using JAXB'
+ 
+     // Create an index file listing all the schemas:
+-    def schemaIndexFile = new File('src/main/resources/schemas.index')
++    def schemaIndexFile = new File(projectDir, 'src/main/resources/schemas.index')
+     def contents = ""
+     def tree = copySchemas.source
+     tree.visit { fileDetails ->
+--- launchClient.sh	2025-10-25 17:56:27
++++ launchClient.sh	2025-10-25 17:40:13
+@@ -121,7 +121,7 @@
+     export GRADLE_USER_HOME=${runDir}/gradle
+     cd $runDir
+-    cmd="java -Dfml.coreMods.load=com.microsoft.Malmo.OverclockingPlugin -Xmx2G -Dfile.encoding=UTF-8 -Duser.country=US -Duser.language=en -Duser.variant -jar ../build/libs/MalmoMod-0.37.0-fat.jar"
++    cmd="java -Dfml.coreMods.load=com.microsoft.Malmo.OverclockingPlugin -Xmx2G -Dfile.encoding=UTF-8 -Duser.country=US -Duser.language=en -Duser.variant -Djava.awt.headless=true -Dsun.java2d.xrender=false -Dsun.java2d.pmoffscreen=false -Dprism.order=sw -jar ../build/libs/MalmoMod-0.37.0-fat.jar"
+ fi
+ # If build/libs/MalmoMod-0.37.0-fat.jar does not exist change command to 'test'
+ 

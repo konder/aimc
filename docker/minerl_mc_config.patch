@@ -1,0 +1,48 @@
+--- scripts/patch_mcp.sh	2025-11-04 08:00:00
++++ scripts/patch_mcp.sh	2025-11-04 08:30:00
+@@ -8,3 +8,21 @@
+ cp -r ${DIR}/cursors ./src/main/resources
+ # Ensure all scripts are runnable
+ chmod +x *
++
++# ============================================================================
++# Docker 兼容性修复 - 禁用 MixinGradle 插件和 verifyRepos
++# ============================================================================
++echo '✓ Applying Docker compatibility patches...'
++
++# 1. 禁用 Mixin 插件 (修复 universalJar.jar 错误)
++sed -i "s/apply plugin: 'org.spongepowered.mixin'/\/\/ DISABLED: apply plugin: 'org.spongepowered.mixin'/" build.gradle
++
++# 2. 注释掉 mixin 配置块
++sed -i '/^mixin {/,/^}/s/^/\/\/ DISABLED: /' build.gradle
++
++# 3. 禁用 verifyRepos 强制检查
++sed -i 's/it.dependsOn(verifyRepos)/\/\/ DISABLED: it.dependsOn(verifyRepos)/' build.gradle
++
++# 4. 替换镜像源为阿里云
++sed -i 's|mavenCentral()|maven { url "https://maven.aliyun.com/repository/central" }|g' build.gradle
++sed -i 's|jcenter()|maven { url "https://maven.aliyun.com/repository/jcenter" }|g' build.gradle
+--- minerl/herobraine/hero/handlers/agent/observations/lifestats.py	2025-11-04 08:00:00
++++ minerl/herobraine/hero/handlers/agent/observations/lifestats.py	2025-11-04 08:30:00
+@@ -55,7 +55,7 @@
+     def __init__(self):
+         keys = ['is_alive']
+         super().__init__(hero_keys=keys, univ_keys=keys,
+-                         space=spaces.Box(low=False, high=True, shape=(), dtype=np.bool),
++                         space=spaces.Box(low=False, high=True, shape=(), dtype=np.bool_),
+                          default_if_missing=True)
+ 
+ 
+--- minerl/herobraine/hero/spaces.py	2025-11-04 08:00:00
++++ minerl/herobraine/hero/spaces.py	2025-11-04 08:30:00
+@@ -202,10 +202,9 @@
+ class Discrete(gym.spaces.Discrete, MineRLSpace):
+     def __init__(self, *args, **kwargs):
+         super(Discrete, self).__init__(*args, **kwargs)
+         self.eye = np.eye(self.n, dtype=np.float32)
+-        self.shape = ()
+ 
+     def no_op(self, batch_shape=()):
+         if len(batch_shape) == 0:
+             return 0
+         else:

@@ -1,6 +1,4 @@
-# AIMC MineDojo Docker 镜像 - 调试版本
-# 只构建到 Python 依赖安装，不包含 MineCLIP 和 MC 编译
-# 用于进入容器手动调试
+# AIMC（MineDojo/MineRL/MineClip/Steve1）环境
 
 FROM ubuntu:20.04
 
@@ -9,8 +7,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # [重要] 如果在企业网络环境中，需要配置代理或使用国内镜像源
 # 取消下面的注释来使用阿里云镜像源
-#RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list && \
-#    sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list
 
 # 更新系统并安装基础依赖
 RUN apt-get update && \
@@ -55,52 +53,98 @@ RUN conda create -n minedojo-x86 python=3.9 -y && \
     echo "conda activate minedojo-x86" >> /root/.bashrc
 
 # [重要] 如果在企业网络环境中，复制本地缓存文件
-COPY build_local_cache.zip /root/build_local_cache.zip
+COPY docker/build_local_cache.zip /root/build_local_cache.zip
 RUN unzip /root/build_local_cache.zip -d /root/
 
-# 安装 Python 依赖
+# 设置 SHELL 为 bash（重要！Docker 默认是 sh）
 SHELL ["/bin/bash", "-c"]
-RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate minedojo-x86 && \
+
+# 创建 conda 环境激活脚本，方便后续使用
+RUN echo '#!/bin/bash' > /opt/activate_env.sh && \
+    echo 'source /opt/conda/etc/profile.d/conda.sh' >> /opt/activate_env.sh && \
+    echo 'conda activate minedojo-x86' >> /opt/activate_env.sh && \
+    chmod +x /opt/activate_env.sh
+
+# ============================================================================
+# 阶段 1: 准备依赖和补丁文件
+# ============================================================================
+# 准备 MixinGradle hotfix（MineDojo 编译依赖）
+RUN mkdir -p /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61
+COPY docker/MixinGradle-dcfaf61.jar /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/
+COPY docker/MixinGradle-dcfaf61.pom /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/
+
+# 克隆 MineRL 源码（先下载，后面再安装）
+RUN cd /tmp && \
+    git clone https://github.com/minerllabs/minerl.git && \
+    cd minerl && \
+    git checkout v1.0.0
+
+# 复制所有补丁文件到容器
+COPY docker/minedojo_mc_config.patch /tmp/minedojo_mc_config.patch
+COPY docker/minerl_mc_config.patch /tmp/minerl/minerl_mc_config.patch
+
+# ============================================================================
+# 阶段 2: 安装和配置 MineDojo
+# ============================================================================
+# 安装基础 Python 依赖和 MineDojo
+RUN source /opt/activate_env.sh && \
     pip install "pip<24.1" "setuptools<58" "wheel<0.38.0" && \
-    pip install minedojo
+    pip install minedojo && \
+    pip install --force-reinstall gym==0.21.0
 
-# ==================== Minedojo MC 编译步骤 ====================
-# 步骤 1: 克隆 MixinGradle hotfix 并重组为标准 Maven 仓库结构
-RUN mkdir -p /opt && \
-    cd /opt && \
-    git clone https://github.com/verityw/MixinGradle-dcfaf61.git hotfix-temp && \
-    mkdir -p /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61 && \
-    cp /opt/hotfix-temp/MixinGradle/dcfaf61/MixinGradle-dcfaf61.jar /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/ && \
-    echo '<?xml version="1.0" encoding="UTF-8"?>' > /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    echo '<project xmlns="http://maven.apache.org/POM/4.0.0">' >> /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    echo '  <modelVersion>4.0.0</modelVersion>' >> /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    echo '  <groupId>MixinGradle-dcfaf61</groupId>' >> /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    echo '  <artifactId>MixinGradle</artifactId>' >> /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    echo '  <version>dcfaf61</version>' >> /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    echo '</project>' >> /opt/hotfix/MixinGradle-dcfaf61/MixinGradle/dcfaf61/MixinGradle-dcfaf61.pom && \
-    rm -rf /opt/hotfix-temp
 ENV MINE_DOJO_MC_PATH=/opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/sim/Malmo/Minecraft
-
-# 步骤 2: 应用 MC 配置补丁 并编译
-COPY mc_config.patch /tmp/mc_config.patch
+# # 应用 MineDojo MC 配置补丁并编译
 RUN cd $MINE_DOJO_MC_PATH && \
-    patch -p0 < /tmp/mc_config.patch && \
-    rm /tmp/mc_config.patch && \
-    ./gradlew shadowJar
+    patch -p0 < /tmp/minedojo_mc_config.patch && \
+    ./gradlew shadowJar && \
+    mkdir -p run/gradle && \
+    cp -r /root/.gradle/caches run/gradle/
 
-# 步骤 3: 修复MineDojo拉起MC的问题
-RUN mkdir -p ${MINE_DOJO_MC_PATH}/run/gradle && \
-    cp -r /root/.gradle/caches ${MINE_DOJO_MC_PATH}/run/gradle/
+# ============================================================================
+# 阶段 3: 准备 MineRL（应用补丁但暂不安装）
+# ============================================================================
+# 重要：MineRL 源码使用 CRLF 换行符，需要先转换为 Unix 格式（LF）
+RUN cd /tmp/minerl && \
+    find minerl scripts -name '*.py' -o -name '*.sh' | xargs sed -i 's/\r$//' && \
+    patch -p0 < minerl_mc_config.patch
 
-#RUN pip install git+https://github.com/MineDojo/MineCLIP
-
-# 设置工作目录
+# ============================================================================
+# 阶段 4: 安装项目依赖
+# ============================================================================
 WORKDIR /workspace
 
-RUN git clone https://github.com/konder/aimc.git
-RUN cd aimc && git pull origin main
-#RUN cd aimc && pip install -r requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN source /opt/activate_env.sh && \
+    pip install -r /tmp/requirements.txt
+
+RUN source /opt/activate_env.sh && \
+    pip install git+https://github.com/MineDojo/MineCLIP
+# ============================================================================
+# 阶段 5: 安装 MineRL
+# ============================================================================
+# 注意: 如果 gym 0.21.0 导致 AttributeError，取消下面的注释强制使用 0.19.0
+RUN source /opt/activate_env.sh && \
+    cd /tmp/minerl && \
+    pip install . && \
+    cd /tmp && \
+    rm -rf minerl /tmp/minerl_mc_config.patch /tmp/requirements.txt
+
+# 修复 MineRL launchClient.sh - 在 Docker 无头模式下使用 xvfb-run
+RUN sed -i 's#^java -Xmx\(.*\)$#[ -z "$DISPLAY" ] \&\& exec xvfb-run -a -e /dev/stdout -s '\''-screen 0 1400x900x24'\'' java -Xmx\1 || exec java -Xmx\1#' /opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minerl/MCP-Reborn/launchClient.sh
+
+ENV MINE_RL_MC_PATH=/opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minerl/MCP-Reborn/
+# ============================================================================
+# 阶段 6: 环境验证
+# ============================================================================
+COPY docker/test_environments.py /workspace/
+
+# ============================================================================
+# 阶段 7: 解决核心包冲突
+# ============================================================================
+RUN source /opt/activate_env.sh && \
+    pip install gymnasium=="1.1.1" && \
+    pip install numpy=="1.24.3" && \
+    pip install gym=="0.21.0"
 
 # 默认激活 minedojo-x86 环境
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate minedojo-x86 && exec /bin/bash"]
