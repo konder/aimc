@@ -1,0 +1,397 @@
+# 中文AIMC Agent 评估任务配置
+# Chinese AIMC Agent Evaluation Tasks Configuration
+#
+# 版本: v1.0
+# 创建日期: 2025-11-06
+#
+# 说明:
+#   - 本配置文件定义了用于评估中文AIMC Agent的任务集
+#   - 支持3个评估维度:
+#     1. 自动翻译质量测试 (zh_instruction + 自动翻译)
+#     2. 语义等价性验证 (zh_manual_translation)
+#     3. 语义变体鲁棒性 (zh_variants)
+
+# ============================================================================
+# 评估参数配置
+# ============================================================================
+evaluation:
+  n_trials: 10              # 每个任务运行次数（用于计算成功率）
+  max_steps: 6000           # 每个trial的最大步数
+  timeout_seconds: 600      # 超时时间（秒）
+  image_size: [160, 256]    # MineDojo图像尺寸 [height, width]
+  
+  # 翻译配置
+  translation:
+    method: "baidu"         # 翻译方法: baidu/openai/manual
+    use_term_dict: true     # 使用术语词典优化翻译
+    term_dict_path: "data/chinese_terms.json"
+  
+  # 结果保存
+  output:
+    results_dir: "results/evaluation"
+    save_videos: false      # 是否保存视频
+    save_trajectories: true # 是否保存轨迹数据
+
+# ============================================================================
+# 任务集定义
+# ============================================================================
+
+# 基础任务 (Basic Tasks) - 简单、易完成、用于快速验证
+basic_tasks:
+  
+  # -------------------- Harvest 采集任务 --------------------
+  
+  # 任务1: 英文指令砍树
+  - task_id: "harvest_wood_en"
+    category: "harvest"
+    difficulty: "easy"
+    description: "使用英文指令砍树获取木头"
+    env_name: "MineRLHarvestEnv-v0"  # 自定义环境
+    
+    # 英文指令
+    en_instruction: "chop tree"
+    
+    # 评估参数（覆盖全局配置）
+    n_trials: 3
+    max_steps: 2000
+  
+  # 任务2: 中文指令砍树
+  - task_id: "harvest_wood_zh"
+    category: "harvest"
+    difficulty: "easy"
+    description: "使用中文指令砍树获取木头"
+    env_name: "MineRLHarvestEnv-v0"  # 自定义环境
+    
+    # 中文指令
+    zh_instruction: "砍树"
+    
+    # 评估参数（覆盖全局配置）
+    n_trials: 3
+    max_steps: 2000
+  
+  - task_id: "harvest_1_log"
+    category: "harvest"
+    difficulty: "easy"
+    description: "采集1个原木"
+    
+    # 英文指令 (Baseline)
+    en_instruction: "chop tree"
+    
+    # 中文指令 (原始)
+    zh_instruction: "砍树"
+    
+    # 中文人工翻译 (用于验证Agent本身正常)
+    zh_manual_translation: "chop tree"
+    
+    # 中文语义变体 (测试鲁棒性)
+    zh_variants:
+      - "伐木"
+      - "获取木头"
+      - "采集原木"
+    
+    # 成功判定条件
+    success_condition:
+      type: "inventory_has_item"
+      item: "log"
+      count: 1
+    
+    # 任务特定参数
+    max_steps: 300
+    expected_steps: 100-200  # 预期步数范围（参考）
+  
+  - task_id: "harvest_1_dirt"
+    category: "harvest"
+    difficulty: "easy"
+    description: "采集1个泥土"
+    
+    en_instruction: "collect dirt"
+    zh_instruction: "采集泥土"
+    zh_manual_translation: "collect dirt"
+    zh_variants:
+      - "挖泥土"
+      - "获得泥土"
+      - "收集泥土块"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "dirt"
+      count: 1
+    
+    max_steps: 200
+    expected_steps: 50-100
+  
+  - task_id: "harvest_1_milk"
+    category: "harvest"
+    difficulty: "easy"
+    description: "采集1桶牛奶"
+    
+    en_instruction: "get milk"
+    zh_instruction: "获取牛奶"
+    zh_manual_translation: "get milk"
+    zh_variants:
+      - "挤牛奶"
+      - "采集牛奶"
+      - "收集一桶牛奶"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "milk_bucket"
+      count: 1
+    
+    max_steps: 400
+    expected_steps: 150-300
+  
+  - task_id: "harvest_1_apple"
+    category: "harvest"
+    difficulty: "medium"
+    description: "采集1个苹果"
+    
+    en_instruction: "collect apple"
+    zh_instruction: "采集苹果"
+    zh_manual_translation: "collect apple"
+    zh_variants:
+      - "获得苹果"
+      - "收集苹果"
+      - "摘苹果"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "apple"
+      count: 1
+    
+    max_steps: 400
+    expected_steps: 150-300
+  
+  - task_id: "harvest_1_wheat"
+    category: "harvest"
+    difficulty: "medium"
+    description: "采集1个小麦"
+    
+    en_instruction: "collect wheat"
+    zh_instruction: "采集小麦"
+    zh_manual_translation: "collect wheat"
+    zh_variants:
+      - "收割小麦"
+      - "获得小麦"
+      - "收集小麦"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "wheat"
+      count: 1
+    
+    max_steps: 500
+    expected_steps: 200-400
+
+  # -------------------- Combat 战斗任务 --------------------
+  
+  - task_id: "combat_cow_forest_barehand"
+    category: "combat"
+    difficulty: "easy"
+    description: "在森林中空手击杀牛"
+    
+    en_instruction: "kill cow"
+    zh_instruction: "杀牛"
+    zh_manual_translation: "kill cow"
+    zh_variants:
+      - "击杀牛"
+      - "击败牛"
+      - "打死牛"
+    
+    success_condition:
+      type: "kill_entity"
+      entity: "cow"
+      count: 1
+    
+    max_steps: 300
+    expected_steps: 100-200
+
+  - task_id: "combat_pig_plains_barehand"
+    category: "combat"
+    difficulty: "easy"
+    description: "在平原中空手击杀猪"
+    
+    en_instruction: "kill pig"
+    zh_instruction: "杀猪"
+    zh_manual_translation: "kill pig"
+    zh_variants:
+      - "击杀猪"
+      - "击败猪"
+      - "打死猪"
+    
+    success_condition:
+      type: "kill_entity"
+      entity: "pig"
+      count: 1
+    
+    max_steps: 300
+    expected_steps: 100-200
+
+# ============================================================================
+# 中等难度任务 (Medium Tasks) - 需要多步规划
+# ============================================================================
+medium_tasks:
+  
+  - task_id: "harvest_1_crafting_table"
+    category: "harvest"
+    difficulty: "medium"
+    description: "制作1个工作台"
+    
+    en_instruction: "craft crafting table"
+    zh_instruction: "制作工作台"
+    zh_manual_translation: "craft crafting table"
+    zh_variants:
+      - "做工作台"
+      - "合成工作台"
+      - "制造合成台"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "crafting_table"
+      count: 1
+    
+    max_steps: 600
+    expected_steps: 200-400
+  
+  - task_id: "harvest_1_stick"
+    category: "harvest"
+    difficulty: "medium"
+    description: "制作1个木棍"
+    
+    en_instruction: "craft stick"
+    zh_instruction: "制作木棍"
+    zh_manual_translation: "craft stick"
+    zh_variants:
+      - "做木棍"
+      - "合成木棍"
+      - "制造木棒"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "stick"
+      count: 1
+    
+    max_steps: 600
+    expected_steps: 200-400
+  
+  - task_id: "harvest_1_torch"
+    category: "harvest"
+    difficulty: "medium"
+    description: "制作1个火把"
+    
+    en_instruction: "craft torch"
+    zh_instruction: "制作火把"
+    zh_manual_translation: "craft torch"
+    zh_variants:
+      - "做火把"
+      - "合成火炬"
+      - "制造火把"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "torch"
+      count: 1
+    
+    max_steps: 800
+    expected_steps: 300-600
+
+# ============================================================================
+# 困难任务 (Hard Tasks) - 需要复杂策略和长时间规划
+# ============================================================================
+hard_tasks:
+  
+  - task_id: "techtree_from_barehand_to_wooden_pickaxe"
+    category: "techtree"
+    difficulty: "hard"
+    description: "从空手制作木镐"
+    
+    en_instruction: "craft wooden pickaxe"
+    zh_instruction: "制作木镐"
+    zh_manual_translation: "craft wooden pickaxe"
+    zh_variants:
+      - "做木镐"
+      - "合成木质镐"
+      - "制造木制镐子"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "wooden_pickaxe"
+      count: 1
+    
+    max_steps: 1000
+    expected_steps: 400-800
+  
+  - task_id: "harvest_1_iron_ingot"
+    category: "harvest"
+    difficulty: "hard"
+    description: "冶炼1个铁锭"
+    
+    en_instruction: "smelt iron ingot"
+    zh_instruction: "冶炼铁锭"
+    zh_manual_translation: "smelt iron ingot"
+    zh_variants:
+      - "烧制铁锭"
+      - "熔炼铁锭"
+      - "获得铁锭"
+    
+    success_condition:
+      type: "inventory_has_item"
+      item: "iron_ingot"
+      count: 1
+    
+    max_steps: 2000
+    expected_steps: 800-1500
+
+# ============================================================================
+# 快速测试集 (Quick Test Set) - 用于快速验证系统是否工作
+# ============================================================================
+quick_test:
+  - "harvest_1_log"
+  - "harvest_1_dirt"
+  - "combat_cow_forest_barehand"
+
+# ============================================================================
+# 完整基线测试集 (Full Baseline Test Set) - 用于建立完整的性能基线
+# ============================================================================
+baseline_test:
+  - "harvest_1_log"
+  - "harvest_1_dirt"
+  - "harvest_1_milk"
+  - "harvest_1_apple"
+  - "harvest_1_wheat"
+  - "combat_cow_forest_barehand"
+  - "combat_pig_plains_barehand"
+  - "harvest_1_crafting_table"
+  - "harvest_1_stick"
+  - "harvest_1_torch"
+
+# ============================================================================
+# 注释和说明
+# ============================================================================
+# 
+# 任务难度分级:
+#   easy:   完成时间 < 5分钟,   步数 < 500
+#   medium: 完成时间 5-10分钟,  步数 500-1000
+#   hard:   完成时间 > 10分钟,  步数 > 1000
+#
+# 成功条件类型:
+#   inventory_has_item: 检查物品栏中是否有指定物品
+#   kill_entity:        检查是否击杀了指定生物
+#   equipment_has_item: 检查装备栏中是否有指定物品
+#
+# 评估维度说明:
+#   维度1 (自动翻译质量): zh_instruction + 自动翻译API
+#   维度2 (语义等价性):   zh_manual_translation (应该 = en_instruction)
+#   维度3 (语义鲁棒性):   zh_variants (不同表述的成功率方差)
+#
+# 使用示例:
+#   # 快速测试（3个任务）
+#   python src/evaluation/eval_framework.py --test-set quick_test --n-trials 3
+#   
+#   # 完整基线（10个任务）
+#   python src/evaluation/eval_framework.py --test-set baseline_test --n-trials 10
+#   
+#   # 单个任务评估
+#   python src/evaluation/eval_framework.py --task harvest_1_log --n-trials 10
+#
+

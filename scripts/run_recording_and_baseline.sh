@@ -279,7 +279,7 @@ if [ "$SKIP_BC" = false ]; then
     echo "  输出模型: $BC_MODEL"
     echo ""
     
-    python src/training/bc/train_bc.py \
+    python src/training/dagger/train_bc.py \
         --data "$EXPERT_DIR" \
         --output "$BC_MODEL" \
         --epochs "$BC_EPOCHS" \

@@ -39,6 +39,7 @@ env/
 # Training outputs
 logs/
 /data/
+/results/
 
 # MineDojo specific
 .minedojo/

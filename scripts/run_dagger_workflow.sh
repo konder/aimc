@@ -476,7 +476,7 @@ if [[ -z "$SKIP_BC" ]]; then
     echo "  训练设备: $DEVICE"
     echo ""
     
-    python src/training/bc/train_bc.py \
+    python src/training/dagger/train_bc.py \
         --data "$EXPERT_DIR" \
         --output "$BC_MODEL" \
         --epochs "$BC_EPOCHS" \

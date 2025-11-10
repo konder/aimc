@@ -22,7 +22,7 @@
 
 ```bash
 # 方式1：使用脚本（推荐）
-bash scripts/start_web.sh
+bash scripts/run_web.sh start
 
 # 方式2：直接运行
 cd /Users/nanzhang/aimc
@@ -34,10 +34,18 @@ python -m src.web.app
 
 打开浏览器访问：**http://localhost:5000**
 
+### 检查状态
+
+```bash
+# 查看Web服务器运行状态
+bash scripts/run_web.sh        # 默认为 status
+bash scripts/run_web.sh status
+```
+
 ### 停止服务器
 
 ```bash
-bash scripts/stop_web.sh
+bash scripts/run_web.sh stop
 ```
 
 ---
@@ -374,11 +382,11 @@ http://localhost:6006
 
 **解决**：
 ```bash
-# 检查端口占用
-lsof -i :5000
+# 检查端口占用和服务状态
+bash scripts/run_web.sh status
 
 # 停止旧进程
-bash scripts/stop_web.sh
+bash scripts/run_web.sh stop
 
 # 或手动kill
 pkill -f "python.*src.web.app"

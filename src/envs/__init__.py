@@ -1,20 +1,18 @@
 """
-MineDojo环境相关模块
-
-核心功能：
-- env_wrappers: MineDojo环境包装器和辅助函数
-- task_wrappers: 任务特定的包装器（harvest、combat、craft等）
+自定义 MineRL 任务环境
 """
 
-from .env_wrappers import make_minedojo_env
-from .task_wrappers import (
-    HarvestLogWrapper,
-    apply_task_wrapper,
+from .minerl_harvest import (
+    MineRLHarvestEnvSpec,
+    MineRLHarvestWrapper,
+    register_minerl_harvest_env,
 )
 
-__all__ = [
-    'make_minedojo_env',
-    'HarvestLogWrapper',
-    'apply_task_wrapper',
-]
+# 自动注册环境
+register_minerl_harvest_env()
 
+__all__ = [
+    'MineRLHarvestEnvSpec',
+    'MineRLHarvestWrapper',
+    'register_minerl_harvest_env',
+]
