@@ -4,7 +4,7 @@
 
 from .minerl_harvest import (
     MineRLHarvestEnvSpec,
-    MineRLHarvestWrapper,
+    MineRLHarvestWrapper,  # Wrapper 用于添加自定义奖励
     register_minerl_harvest_env,
 )
 

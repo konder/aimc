@@ -30,7 +30,7 @@ def load_mineclip_wconfig():
     return load(MINECLIP_CONFIG, device=DEVICE)
 
 
-def make_env(seed, env_name='MineRLBasaltFindCave-v0'):
+def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
     """
     创建环境
     
@@ -39,25 +39,57 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0'):
         env_name: 环境名称
             - 使用官方环境: 'MineRLBasaltFindCave-v0', 'HumanSurvival' 等
             - 使用自定义环境: 'MineRLHarvestEnv-v0' 等
+        env_config: 环境配置（包含 reward_config、reward_rule、max_episode_steps 等）
     
     Returns:
-        env: MineRL 环境
+        env: MineRL 环境（可能被 Wrapper 包装）
     """
+    import logging
+    import time
+    
+    logger = logging.getLogger(__name__)
     print(f'Loading MineRL environment: {env_name}...')
     
-    # 如果是 HumanSurvival，使用原始方式创建
-    if env_name == 'HumanSurvival':
-        from minerl.herobraine.env_specs.human_survival_specs import HumanSurvival
-        env = HumanSurvival(**ENV_KWARGS).make()
+    # 如果是自定义环境且有配置，传递所有配置参数
+    if env_name == 'MineRLHarvestEnv-v0' and env_config:
+        # 从 env_config 中提取参数
+        reward_config = env_config.get('reward_config')
+        reward_rule = env_config.get('reward_rule', 'any')
+        world_generator = env_config.get('world_generator')
+        time_condition = env_config.get('time_condition')
+        spawning_condition = env_config.get('spawning_condition')
+        initial_inventory = env_config.get('initial_inventory')  # 🎒 添加初始物品配置
+        max_episode_steps = env_config.get('max_episode_steps', 2000)
+        
+        logger.info(f"创建 MineRLHarvestEnv，配置:")
+        logger.info(f"  reward_config: {len(reward_config)} 项" if reward_config else "  reward_config: None")
+        logger.info(f"  reward_rule: {reward_rule}")
+        logger.info(f"  initial_inventory: {initial_inventory}" if initial_inventory else "  initial_inventory: None")
+        logger.info(f"  max_episode_steps: {max_episode_steps}")
+        
+        # 创建环境并传递所有配置
+        env = gym.make(
+            env_name,
+            reward_config=reward_config,
+            reward_rule=reward_rule,
+            world_generator=world_generator,
+            time_condition=time_condition,
+            spawning_condition=spawning_condition,
+            initial_inventory=initial_inventory,  # 🎒 传递初始物品配置
+            max_episode_steps=max_episode_steps
+        )
     else:
-        # 使用 gym.make 创建环境（支持所有已注册的环境）
+        # 创建标准环境
         env = gym.make(env_name)
     
+    # 首次 reset
     print('Starting new env...')
     env.reset()
+    
     if seed is not None:
         print(f'Setting seed to {seed}...')
         env.seed(seed)
+    
     return env
 
 
@@ -74,7 +106,7 @@ def make_agent(in_model, in_weights, cond_scale):
     return agent
 
 
-def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='MineRLBasaltFindCave-v0'):
+def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='MineRLBasaltFindCave-v0', env_config=None):
     """
     加载 MineCLIP, Agent 和环境
     
@@ -84,6 +116,7 @@ def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='Mi
         seed: 随机种子
         cond_scale: CFG scale
         env_name: 环境名称（支持自定义环境）
+        env_config: 环境配置（用于自定义环境）
     
     Returns:
         agent: MineRLConditionalAgent
@@ -92,7 +125,7 @@ def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='Mi
     """
     mineclip = load_mineclip_wconfig()
     agent = make_agent(in_model, in_weights, cond_scale=cond_scale)
-    env = make_env(seed, env_name=env_name)
+    env = make_env(seed, env_name=env_name, env_config=env_config)
     return agent, mineclip, env
 
 

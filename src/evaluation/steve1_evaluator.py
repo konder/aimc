@@ -10,6 +10,8 @@ from pathlib import Path
 
 import torch as th
 import numpy as np
+import cv2
+from tqdm import tqdm
 
 # 导入本地版本的工具函数（支持自定义环境）
 from src.utils.steve1_mineclip_agent_env_utils import (
@@ -28,37 +30,8 @@ from ..translation.translator import ChineseTranslator
 
 logger = logging.getLogger(__name__)
 
-
-def reset_env_with_retry(env, max_retries=3, retry_delay=2.0):
-    """
-    带重试机制的环境重置
-    
-    Args:
-        env: MineRL 环境
-        max_retries: 最大重试次数
-        retry_delay: 重试间隔（秒）
-        
-    Returns:
-        obs: 重置后的观察
-        
-    Raises:
-        RuntimeError: 如果所有重试都失败
-    """
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"重置环境 ({attempt + 1}/{max_retries})...")
-            obs = env.reset()
-            logger.info("✅ 环境重置成功")
-            return obs
-        except Exception as e:
-            logger.warning(f"❌ 环境重置失败 (尝试 {attempt + 1}/{max_retries}): {e}")
-            
-            if attempt < max_retries - 1:
-                logger.info(f"等待 {retry_delay} 秒后重试...")
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"环境重置失败，已达到最大重试次数 ({max_retries})")
-                raise RuntimeError(f"环境重置失败: {e}") from e
+# 视频帧配置
+VIDEO_RESIZE = (128, 128)  # 视频帧尺寸 (width, height)
 
 
 class STEVE1Evaluator:
@@ -90,7 +63,9 @@ class STEVE1Evaluator:
         visual_cond_scale: float = 7.0,
         seed: int = 42,
         enable_render: bool = False,
-        env_name: str = 'MineRLHarvestEnv-v0'
+        collect_frames: bool = False,
+        env_name: str = 'MineRLHarvestEnv-v0',
+        env_config: Optional[Dict] = None
     ):
         """
         初始化 STEVE-1 评估器（执行器/Worker）
@@ -99,7 +74,7 @@ class STEVE1Evaluator:
         - 加载 STEVE-1 模型和环境
         - 集成中文翻译器
         - 执行单个任务评估
-        - 返回任务结果
+        - 返回任务结果（可选包含视频帧）
         
         Args:
             model_path: VPT 模型配置文件路径
@@ -109,7 +84,9 @@ class STEVE1Evaluator:
             visual_cond_scale: Visual classifier-free guidance scale
             seed: 随机种子
             enable_render: 是否启用渲染
+            collect_frames: 是否收集视频帧（由framework决定是否保存）
             env_name: 环境名称（支持自定义环境，如 'MineRLHarvestEnv-v0'）
+            env_config: 环境配置（传递给环境的参数，如 reward_config 等）
         """
         self.model_path = model_path
         self.weights_path = weights_path
@@ -118,7 +95,9 @@ class STEVE1Evaluator:
         self.visual_cond_scale = visual_cond_scale
         self.seed = seed
         self.enable_render = enable_render
+        self.collect_frames = collect_frames
         self.env_name = env_name
+        self.env_config = env_config
         
         # 延迟加载
         self._agent = None
@@ -133,6 +112,8 @@ class STEVE1Evaluator:
         )
         
         logger.info("STEVE-1 评估器初始化完成")
+        if self.collect_frames:
+            logger.info(f"  视频帧收集: 启用")
     
     def _load_components(self):
         """延迟加载 Agent, MineCLIP, Prior 和环境"""
@@ -142,16 +123,19 @@ class STEVE1Evaluator:
             logger.info(f"  权重: {self.weights_path}")
             logger.info(f"  Prior: {self.prior_weights}")
             logger.info(f"  环境: {self.env_name}")
+            if self.env_config:
+                logger.info(f"  环境配置: {self.env_config}")
             logger.info(f"  Text CFG Scale: {self.text_cond_scale}")
             logger.info(f"  Visual CFG Scale: {self.visual_cond_scale}")
             
-            # 1. 加载 Agent 和环境（支持自定义环境）
+            # 1. 加载 Agent 和环境（支持自定义环境和配置）
             self._agent, self._mineclip, self._env = load_mineclip_agent_env(
                 in_model=self.model_path,
                 in_weights=self.weights_path,
                 seed=self.seed,
                 cond_scale=self.text_cond_scale,
-                env_name=self.env_name  # 传递环境名称
+                env_name=self.env_name,
+                env_config=self.env_config  # 传递环境配置
             )
             
             # 2. 加载 Prior 模型（官方方式）
@@ -169,7 +153,8 @@ class STEVE1Evaluator:
         language: str = "en",
         n_trials: int = 10,
         max_steps: int = 1000,
-        instruction: Optional[str] = None
+        instruction: Optional[str] = None,
+        output_dir: Optional[Path] = None
     ) -> TaskResult:
         """
         评估单个任务
@@ -180,6 +165,7 @@ class STEVE1Evaluator:
             n_trials: 试验次数
             max_steps: 最大步数
             instruction: 自定义指令（如果不提供，使用默认）
+            output_dir: 输出目录（用于保存视频等）
             
         Returns:
             TaskResult: 任务评估结果
@@ -212,20 +198,23 @@ class STEVE1Evaluator:
                 task_id=task_id,
                 instruction=instruction,
                 max_steps=max_steps,
-                trial_idx=trial_idx
+                trial_idx=trial_idx + 1,  # 1-based for display
+                n_trials=n_trials,  # 传递总试验数
+                output_dir=output_dir  # 传递输出目录
             )
             
             trials.append(trial_result)
             
             logger.info(f"    结果: {'✅ 成功' if trial_result.success else '❌ 失败'}, "
                        f"步数: {trial_result.steps}, "
-                       f"时间: {trial_result.time_seconds:.1f}s")
+                       f"时间: {trial_result.time_seconds:.1f}s"
+                       + (f", 帧数: {len(trial_result.frames)}" if trial_result.frames else ""))
         
         # 构建任务结果
         task_result = TaskResult(
             task_id=task_id,
             language=language,
-            instruction=instruction,
+            instruction=original_instruction,  # 保存原始指令
             trials=trials
         )
         
@@ -233,16 +222,18 @@ class STEVE1Evaluator:
         
         return task_result
     
-   
     def _run_single_trial(
         self,
         task_id: str,
         instruction: str,
         max_steps: int,
-        trial_idx: int
+        trial_idx: int,
+        n_trials: int,  # 总试验数
+        output_dir: Optional[Path] = None  # 输出目录
     ) -> TrialResult:
-        """运行单次试验"""
+        """运行单次试验，可选收集视频帧"""
         start_time = time.time()
+        frames = [] if self.collect_frames else None  # 只在需要时收集帧
         
         try:
             # 使用 Prior 编码指令（官方方式）
@@ -258,8 +249,8 @@ class STEVE1Evaluator:
                 # 转换为 numpy（MineRLConditionalAgent 需要）
                 prompt_embed_np = prompt_embed.cpu().numpy() if hasattr(prompt_embed, 'cpu') else prompt_embed
             
-            # 重置环境（带重试机制）
-            obs = reset_env_with_retry(self._env, max_retries=3, retry_delay=2.0)
+            # 重置环境
+            obs = self._env.reset()
             
             # 注意: 官方实现中没有显式调用 agent.reset()
             # Agent 的内部状态（LSTM）会在第一次调用时自动初始化
@@ -270,23 +261,82 @@ class STEVE1Evaluator:
             steps = 0
             total_reward = 0.0
             
-            while not done and steps < max_steps:
-                # 获取动作（使用 Prior 计算的嵌入）
-                with th.no_grad():
-                    action = self._agent.get_action(obs, prompt_embed_np)
-                
-                # 执行动作
-                obs, reward, done, info = self._env.step(action)
-                total_reward += reward
-                steps += 1
-                
-                # 记录奖励（用于调试）
-                if reward > 0:
-                    logger.debug(f"    Step {steps}: reward={reward:.3f}")
-                
-                # 可选渲染
-                if self.enable_render:
-                    self._env.render()
+            # 创建 tqdm 进度条
+            with tqdm(
+                total=max_steps, 
+                desc=f"Trial {trial_idx}/{n_trials}",
+                unit="step",
+                leave=False,
+                ncols=100,
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]'
+            ) as pbar:
+                while not done and steps < max_steps:
+                    # 获取动作（使用 Prior 计算的嵌入）
+                    with th.no_grad():
+                        action = self._agent.get_action(obs, prompt_embed_np)
+                    
+                    # 执行动作
+                    obs, reward, done, info = self._env.step(action)
+                    
+                    # 累积奖励（环境自己计算奖励）
+                    total_reward += reward
+                    steps += 1
+                    
+                    # 更新进度条
+                    pbar.update(1)
+                    if reward > 0:
+                        pbar.set_postfix({'reward': f'{total_reward:.1f}'})
+                    
+                    # 收集视频帧（参考STEVE-1官方实现）
+                    if frames is not None and 'pov' in obs:
+                        frame = obs['pov']
+                        # 调整大小（参考 STEVE-1 官方实现）
+                        frame_resized = cv2.resize(frame, VIDEO_RESIZE)
+                        frames.append(frame_resized)
+                    
+                    # 记录奖励（用于调试）
+                    if reward > 0:
+                        logger.debug(f"    Step {steps}: reward={reward:.3f}")
+                    
+                    # 可选渲染
+                    if self.enable_render:
+                        self._env.render()
+            
+            # 调试：任务结束时打印详细信息（无论done是True还是超时）
+            logger.info("="*60)
+            logger.info(f"🔍 任务结束调试信息 (Step {steps})")
+            logger.info("="*60)
+            
+            # 打印基本信息
+            logger.info(f"总奖励: {total_reward}")
+            logger.info(f"最后done: {done}")
+            
+            # 打印所有非0库存
+            non_zero_items = {}
+            if 'inventory' in obs:
+                for key, value in obs['inventory'].items():
+                    # 处理 numpy array
+                    if hasattr(value, 'item'):
+                        value = value.item()
+                    if value > 0:
+                        non_zero_items[key] = value
+            
+            if non_zero_items:
+                logger.info("📦 库存中的物品:")
+                for item, count in non_zero_items.items():
+                    logger.info(f"  {item}: {count}")
+            else:
+                logger.info("📦 库存为空")            # 打印结束原因
+            if steps >= max_steps:
+                logger.info(f"⏰ 结束原因: 达到最大步数 ({steps})")
+            elif done and total_reward > 0:
+                logger.info(f"✅ 结束原因: 任务目标达成 (总奖励: {total_reward})")
+            elif done:
+                logger.info(f"⚠️ 结束原因: 任务提前结束但无奖励 (done=True)")
+            else:
+                logger.info(f"❓ 结束原因: 未知")
+            
+            logger.info("="*60)
             
             # 判断成功
             # 1. 如果 done=True 且有奖励，说明任务完成
@@ -304,7 +354,8 @@ class STEVE1Evaluator:
                 instruction=instruction,
                 success=success,
                 steps=steps,
-                time_seconds=time_seconds
+                time_seconds=time_seconds,
+                frames=frames if frames else []  # 返回frames（如果收集了）
             )
             
         except Exception as e:
@@ -320,7 +371,8 @@ class STEVE1Evaluator:
                 instruction=instruction,
                 success=False,
                 steps=0,
-                time_seconds=time_seconds
+                time_seconds=time_seconds,
+                frames=[]
             )
     
     def close(self):

@@ -17,7 +17,7 @@ import yaml
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
 # 添加项目根目录到 Python 路径
@@ -46,6 +46,7 @@ class EvaluationConfig:
     text_cond_scale: float = 6.0
     seed: int = 42
     enable_render: bool = False
+    enable_video_save: bool = False  # 是否保存视频
     
     # 评估配置
     n_trials: int = 3  # 默认每个任务运行次数
@@ -99,6 +100,7 @@ class EvaluationFramework:
                 text_cond_scale=self.config.text_cond_scale,
                 seed=self.config.seed,
                 enable_render=self.config.enable_render,
+                collect_frames=self.config.enable_video_save,  # 根据是否保存视频决定是否收集帧
                 env_name='MineRLHarvestEnv-v0'  # 默认使用自定义环境
             )
         else:
@@ -108,14 +110,18 @@ class EvaluationFramework:
         # 结果存储
         self.results: List[TaskResult] = []
         
+        # Task-set 目录（用于批量评估时组织结果）
+        self.current_task_set_dir: Optional[Path] = None
+        
         logger.info("评估框架初始化完成")
     
     def evaluate_single_task(
         self,
         task_id: str,
         n_trials: Optional[int] = None,
-        max_steps: Optional[int] = None
-    ) -> TaskResult:
+        max_steps: Optional[int] = None,
+        parent_dir: Optional[Path] = None  # 父目录（用于 task-set）
+    ) -> Tuple[TaskResult, Optional[Path]]:
         """
         评估单个任务
         
@@ -123,9 +129,10 @@ class EvaluationFramework:
             task_id: 任务ID
             n_trials: 试验次数（如果None则使用配置中的值）
             max_steps: 最大步数（如果None则使用配置中的值）
+            parent_dir: 父目录（如果提供，任务目录将创建在这个目录下）
         
         Returns:
-            TaskResult: 任务结果
+            Tuple[TaskResult, Optional[Path]]: 任务结果 + 输出目录路径
         """
         # 从配置加载任务
         task_config = self.task_loader.get_task(task_id)
@@ -147,14 +154,26 @@ class EvaluationFramework:
             instruction = task_config['zh_instruction']
             language = "zh"
         
-        # 如果任务配置了自定义环境，更新评估器
-        if 'env_name' in task_config:
-            env_name = task_config['env_name']
-            if self.evaluator.env_name != env_name:
-                logger.info(f"切换环境: {self.evaluator.env_name} → {env_name}")
-                self.evaluator.env_name = env_name
-                # 强制重新加载环境
-                self.evaluator._env = None
+        # 从任务配置读取环境配置（包括奖励配置）
+        env_config = task_config.get('env_config', {}).copy()  # 复制一份，避免修改原配置
+        env_name = task_config.get('env_name', 'MineRLHarvestEnv-v0')
+        
+        # 将 max_steps 添加到 env_config 中（作为 max_episode_steps）
+        env_config['max_episode_steps'] = max_steps
+        
+        # 为当前任务创建专用的 evaluator（确保环境配置正确）
+        logger.info("创建任务专用评估器...")
+        task_evaluator = STEVE1Evaluator(
+            model_path=self.config.model_path,
+            weights_path=self.config.weights_path,
+            prior_weights=self.config.prior_weights,
+            text_cond_scale=self.config.text_cond_scale,
+            seed=self.config.seed,
+            enable_render=self.config.enable_render,
+            collect_frames=self.config.enable_video_save,
+            env_name=env_name,
+            env_config=env_config  # 传递环境配置（包含 max_episode_steps）
+        )
         
         logger.info(f"\n{'='*80}")
         logger.info(f"评估任务: {task_id}")
@@ -167,25 +186,111 @@ class EvaluationFramework:
         logger.info(f"  试验次数: {n_trials}")
         logger.info(f"  最大步数: {max_steps}")
         
+        # 创建任务输出目录（总是创建，不管是否保存视频）
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dir_name = f"{task_id}_{language}_{timestamp}"
+        
+        # 如果提供了父目录，在父目录下创建任务目录
+        if parent_dir:
+            output_dir = parent_dir / dir_name
+        else:
+            output_dir = Path(self.config.results_dir) / dir_name
+        
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"  结果目录: {output_dir}")
+        
         # 调用评估器执行
-        result = self.evaluator.evaluate_task(
+        result = task_evaluator.evaluate_task(
             task_id=task_id,
             language=language,
             n_trials=n_trials,
             max_steps=max_steps,
-            instruction=instruction
+            instruction=instruction,
+            output_dir=output_dir  # 传递输出目录给evaluator
         )
+        
+        # 保存任务结果到目录
+        self._save_task_results(result, output_dir)
         
         # 保存结果
         self.results.append(result)
         
         return result
     
+    def _save_task_results(self, result: TaskResult, output_dir: Path):
+        """
+        保存任务结果到指定目录（JSON、TXT、视频）
+        
+        Args:
+            result: 任务结果
+            output_dir: 输出目录
+        """
+        # 保存视频（如果有frames）
+        if any(trial.frames for trial in result.trials):
+            from steve1.utils.video_utils import save_frames_as_video
+            
+            for i, trial in enumerate(result.trials, 1):
+                if trial.frames:
+                    video_path = output_dir / f"trial_{i}.mp4"
+                    try:
+                        logger.info(f"  保存视频: trial_{i}.mp4 ({len(trial.frames)} 帧)")
+                        save_frames_as_video(trial.frames, str(video_path), 20, to_bgr=True)
+                        logger.info(f"  ✓ 视频已保存: {video_path.name}")
+                    except Exception as e:
+                        logger.warning(f"  ⚠ 视频保存失败: {e}")
+        
+        # 构建结果数据（不包含frames，避免JSON过大）
+        result_data = {
+            "task_id": result.task_id,
+            "language": result.language,
+            "instruction": result.instruction,
+            "success_rate": result.success_rate,
+            "avg_steps": result.avg_steps,
+            "avg_time": result.avg_time,
+            "trials": [
+                {
+                    "trial_idx": i + 1,
+                    "success": trial.success,
+                    "steps": trial.steps,
+                    "time_seconds": trial.time_seconds,
+                    "has_video": len(trial.frames) > 0  # 标记是否有视频
+                }
+                for i, trial in enumerate(result.trials)
+            ]
+        }
+        
+        # 保存JSON
+        json_path = output_dir / "result.json"
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
+        logger.info(f"  ✓ 结果已保存: {json_path.name}")
+        
+        # 保存TXT（人类可读）
+        txt_path = output_dir / "result.txt"
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write("="*80 + "\n")
+            f.write(f"任务评估结果: {result.task_id}\n")
+            f.write("="*80 + "\n\n")
+            f.write(f"语言: {result.language}\n")
+            f.write(f"指令: {result.instruction}\n")
+            f.write(f"成功率: {result.success_rate*100:.1f}%\n")
+            f.write(f"平均步数: {result.avg_steps:.1f}\n")
+            f.write(f"平均时间: {result.avg_time:.1f}s\n\n")
+            f.write("试验详情:\n")
+            f.write("-"*80 + "\n")
+            for i, trial in enumerate(result.trials, 1):
+                status = "✅ 成功" if trial.success else "❌ 失败"
+                video_status = "🎬" if trial.frames else ""
+                f.write(f"Trial {i}: {status} | 步数: {trial.steps:4d} | 时间: {trial.time_seconds:.1f}s {video_status}\n")
+        logger.info(f"  ✓ 报告已保存: {txt_path.name}")
+    
     def evaluate_task_list(
         self,
         task_ids: List[str],
         n_trials: Optional[int] = None,
-        max_steps: Optional[int] = None
+        max_steps: Optional[int] = None,
+        task_set_name: Optional[str] = None  # 任务集名称（用于创建目录）
     ) -> List[TaskResult]:
         """
         批量评估任务列表
@@ -194,6 +299,7 @@ class EvaluationFramework:
             task_ids: 任务ID列表
             n_trials: 试验次数（应用于所有任务）
             max_steps: 最大步数（应用于所有任务）
+            task_set_name: 任务集名称（如果提供，将创建专门的目录）
         
         Returns:
             List[TaskResult]: 任务结果列表
@@ -202,18 +308,33 @@ class EvaluationFramework:
         logger.info(f"批量评估开始: {len(task_ids)} 个任务")
         logger.info(f"{'='*80}\n")
         
+        # 如果提供了 task_set_name，创建 task-set 目录
+        task_set_dir = None
+        if task_set_name:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            task_set_dir_name = f"{task_set_name}_{timestamp}"
+            task_set_dir = Path(self.config.results_dir) / task_set_dir_name
+            task_set_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"📁 Task-set 目录: {task_set_dir}")
+            logger.info(f"{'='*80}\n")
+            # 保存 task_set_dir 供后续 generate_report 使用
+            self.current_task_set_dir = task_set_dir
+        
         results = []
         
         for i, task_id in enumerate(task_ids, 1):
             logger.info(f"\n[{i}/{len(task_ids)}] 评估任务: {task_id}")
             
             try:
+                # evaluate_single_task 现在返回 tuple
                 result = self.evaluate_single_task(
                     task_id=task_id,
                     n_trials=n_trials,
-                    max_steps=max_steps
+                    max_steps=max_steps,
+                    parent_dir=task_set_dir  # 传递 task-set 目录
                 )
-                results.append(result)
+                results.append(result)  # 只保存 TaskResult
                 
                 # 打印任务摘要
                 logger.info(f"  ✅ 完成: 成功率 {result.success_rate*100:.1f}%, "
@@ -228,33 +349,35 @@ class EvaluationFramework:
         logger.info(f"批量评估完成: {len(results)}/{len(task_ids)} 个任务成功")
         logger.info(f"{'='*80}\n")
         
+        # 注意：不要在这里重置 current_task_set_dir，因为 generate_report 还需要用它
+        
         return results
     
-    def evaluate_test_set(
+    def evaluate_task_set(
         self,
-        test_set_name: str,
+        task_set_name: str,
         n_trials: Optional[int] = None,
         max_steps: Optional[int] = None
     ) -> List[TaskResult]:
         """
-        评估测试集（从 YAML 配置中的 quick_test, baseline_test 等）
+        评估任务集（从 YAML 配置中的 harvest_tasks, quick_test, baseline_test 等）
         
         Args:
-            test_set_name: 测试集名称 ('quick_test', 'baseline_test')
+            task_set_name: 任务集名称 ('harvest_tasks', 'quick_test', 'baseline_test')
             n_trials: 试验次数
             max_steps: 最大步数
         
         Returns:
             List[TaskResult]: 任务结果列表
         """
-        # 从 YAML 加载测试集
-        task_ids = self.task_loader.get_task_set(test_set_name)
+        # 从 YAML 加载任务集
+        task_ids = self.task_loader.get_task_set(task_set_name)
         
         if not task_ids:
-            raise ValueError(f"测试集不存在或为空: {test_set_name}")
+            raise ValueError(f"任务集不存在或为空: {task_set_name}")
         
         logger.info(f"\n{'='*80}")
-        logger.info(f"评估测试集: {test_set_name}")
+        logger.info(f"评估任务集: {task_set_name}")
         logger.info(f"任务数量: {len(task_ids)}")
         logger.info(f"任务列表: {', '.join(task_ids)}")
         logger.info(f"{'='*80}\n")
@@ -262,7 +385,8 @@ class EvaluationFramework:
         return self.evaluate_task_list(
             task_ids=task_ids,
             n_trials=n_trials,
-            max_steps=max_steps
+            max_steps=max_steps,
+            task_set_name=task_set_name  # 传递任务集名称
         )
     
     def print_summary(self, results: Optional[List[TaskResult]] = None):
@@ -371,7 +495,31 @@ class EvaluationFramework:
         # 保存JSON报告
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         json_filename = f"{report_name}_{timestamp}.json"
-        json_path = Path(self.report_generator.output_dir) / json_filename
+        
+        # 优先级：task-set 目录 > 单任务目录 > 全局目录
+        if self.current_task_set_dir:
+            # 多任务评估（task-set），保存到 task-set 目录
+            json_path = self.current_task_set_dir / json_filename
+            logger.info(f"  将报告保存到 task-set 目录: {self.current_task_set_dir.name}")
+        elif len(results) == 1:
+            # 单任务评估，保存到任务目录下
+            task_id = results[0].task_id
+            language = results[0].language
+            # 查找匹配的目录（按时间倒序）
+            pattern = f"{task_id}_{language}_*"
+            matching_dirs = sorted(
+                Path(self.config.results_dir).glob(pattern),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            if matching_dirs:
+                json_path = matching_dirs[0] / json_filename
+                logger.info(f"  将报告保存到任务目录: {matching_dirs[0].name}")
+            else:
+                json_path = Path(self.report_generator.output_dir) / json_filename
+        else:
+            # 多任务但无 task-set，使用全局目录
+            json_path = Path(self.report_generator.output_dir) / json_filename
         
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(report_data, f, ensure_ascii=False, indent=2)
@@ -407,7 +555,39 @@ class EvaluationFramework:
             f.write(f"  总试验数: {summary['total_trials']}\n")
             f.write(f"  成功试验数: {summary['successful_trials']}\n\n")
             
-            # 每个任务的详情
+            # ===== 添加表格汇总 =====
+            f.write("="*80 + "\n")
+            f.write("评估结果汇总\n")
+            f.write("="*80 + "\n\n")
+            
+            # 表头
+            f.write(f"{'任务ID':<30} {'指令':<20} {'成功率':<10} {'平均步数':<12} {'平均时间'}\n")
+            f.write("-" * 80 + "\n")
+            
+            # 每个任务的汇总
+            for task in report_data['tasks']:
+                task_id = task['task_id'][:28]  # 截断过长的ID
+                instruction = (task['instruction'][:18] if task['instruction'] else "N/A")
+                success_rate = f"{task['success_rate']:.1f}%"
+                avg_steps = f"{task['avg_steps']:.1f}"
+                avg_time = f"{task['avg_time']:.1f}s"
+                
+                f.write(f"{task_id:<30} {instruction:<20} {success_rate:<10} {avg_steps:<12} {avg_time}\n")
+            
+            # 总体统计行
+            f.write("\n" + "-" * 80 + "\n")
+            f.write(f"{'总体统计':<30} {'N/A':<20} {summary['overall_success_rate']:.1f}% ")
+            
+            # 计算平均步数和时间
+            avg_steps_all = sum(task['avg_steps'] for task in report_data['tasks']) / len(report_data['tasks'])
+            avg_time_all = sum(task['avg_time'] for task in report_data['tasks']) / len(report_data['tasks'])
+            f.write(f"{avg_steps_all:<12.1f} {avg_time_all:.1f}s\n")
+            
+            f.write(f"\n总任务数: {report_data['metadata']['total_tasks']}\n")
+            f.write(f"总试验数: {summary['total_trials']}\n")
+            f.write("="*80 + "\n\n")
+            
+            # ===== 详细任务信息 =====
             f.write("="*80 + "\n")
             f.write("任务详情\n")
             f.write("="*80 + "\n\n")
@@ -449,10 +629,9 @@ if __name__ == "__main__":
         help='评估单个任务（任务ID）'
     )
     parser.add_argument(
-        '--test-set',
+        '--task-set',
         type=str,
-        choices=['quick_test', 'baseline_test'],
-        help='评估测试集'
+        help='评估任务集（如 harvest_tasks, quick_test, baseline_test）'
     )
     parser.add_argument(
         '--task-list',
@@ -478,6 +657,11 @@ if __name__ == "__main__":
         help='启用渲染'
     )
     parser.add_argument(
+        '--enable_video_save',
+        action='store_true',
+        help='启用视频保存'
+    )
+    parser.add_argument(
         '--report-name',
         type=str,
         default='evaluation_report',
@@ -490,7 +674,8 @@ if __name__ == "__main__":
     config = EvaluationConfig(
         n_trials=args.n_trials,
         max_steps=args.max_steps,
-        enable_render=args.render
+        enable_render=args.render,
+        enable_video_save=args.enable_video_save
     )
     
     # 创建评估框架
@@ -505,9 +690,9 @@ if __name__ == "__main__":
             result = framework.evaluate_single_task(args.task)
             results = [result]
         
-        elif args.test_set:
-            # 测试集
-            results = framework.evaluate_test_set(args.test_set)
+        elif args.task_set:
+            # 任务集
+            results = framework.evaluate_task_set(args.task_set)
         
         elif args.task_list:
             # 任务列表
@@ -516,13 +701,16 @@ if __name__ == "__main__":
         else:
             # 默认：快速测试
             logger.info("未指定任务，运行快速测试...")
-            results = framework.evaluate_test_set('quick_test')
+            results = framework.evaluate_task_set('quick_test')
         
         # 打印摘要
         framework.print_summary(results)
         
         # 生成报告
         framework.generate_report(results, args.report_name)
+        
+        # 重置 task-set 目录（避免影响后续评估）
+        framework.current_task_set_dir = None
         
     except KeyboardInterrupt:
         logger.info("\n用户中断")

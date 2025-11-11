@@ -18,10 +18,11 @@ NC='\033[0m' # No Color
 # 默认配置
 TASK=""
 TASK_LIST=""
-TEST_SET=""
+TASK_SET=""
 N_TRIALS=3
 MAX_STEPS=2000
 RENDER=""
+ENABLE_VIDEO_SAVE=""
 REPORT_NAME="evaluation_report"
 USE_X86=false
 
@@ -37,12 +38,13 @@ show_help() {
     echo "评估模式（三选一）："
     echo "  --task TASK_ID              评估单个任务"
     echo "  --task-list \"T1 T2 T3\"      评估任务列表（用空格分隔）"
-    echo "  --test-set SET_NAME         评估测试集（quick_test, baseline_test）"
+    echo "  --task-set SET_NAME         评估任务集（harvest_tasks, quick_test, baseline_test）"
     echo ""
     echo "参数配置："
     echo "  --n-trials N                试验次数（默认: 3）"
     echo "  --max-steps N               最大步数（默认: 2000）"
     echo "  --render                    启用渲染"
+    echo "  --enable_video_save         启用视频保存"
     echo "  --report-name NAME          报告名称（默认: evaluation_report）"
     echo ""
     echo "环境配置："
@@ -52,17 +54,20 @@ show_help() {
     echo "  -h, --help                  显示此帮助信息"
     echo ""
     echo "示例："
-    echo "  # 评估单个中文任务"
-    echo "  $0 --task harvest_wood_zh --n-trials 3 --render"
+    echo "  # 评估单个任务"
+    echo "  $0 --task harvest_1_milk --n-trials 3 --render"
     echo ""
-    echo "  # 批量评估中英文任务"
-    echo "  $0 --task-list \"harvest_wood_en harvest_wood_zh\" --n-trials 3"
+    echo "  # 批量评估多个任务"
+    echo "  $0 --task-list \"harvest_1_milk harvest_1_dirt harvest_1_grass\" --n-trials 3"
     echo ""
-    echo "  # 评估测试集"
-    echo "  $0 --test-set quick_test --n-trials 5"
+    echo "  # 评估任务集"
+    echo "  $0 --task-set harvest_tasks --n-trials 5"
+    echo ""
+    echo "  # 评估预定义测试集"
+    echo "  $0 --task-set quick_test --n-trials 3"
     echo ""
     echo "  # 使用 x86 架构（M1/M2 Mac）"
-    echo "  $0 --task harvest_wood_zh --x86"
+    echo "  $0 --task harvest_1_milk --x86"
     echo ""
     exit 0
 }
@@ -81,8 +86,8 @@ while [[ $# -gt 0 ]]; do
             TASK_LIST="$2"
             shift 2
             ;;
-        --test-set)
-            TEST_SET="$2"
+        --task-set)
+            TASK_SET="$2"
             shift 2
             ;;
         --n-trials)
@@ -95,6 +100,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --render)
             RENDER="--render"
+            shift
+            ;;
+        --enable_video_save)
+            ENABLE_VIDEO_SAVE="--enable_video_save"
             shift
             ;;
         --report-name)
@@ -117,10 +126,10 @@ done
 MODE_COUNT=0
 [[ -n "$TASK" ]] && ((MODE_COUNT++))
 [[ -n "$TASK_LIST" ]] && ((MODE_COUNT++))
-[[ -n "$TEST_SET" ]] && ((MODE_COUNT++))
+[[ -n "$TASK_SET" ]] && ((MODE_COUNT++))
 
 if [[ $MODE_COUNT -eq 0 ]]; then
-    echo -e "${RED}错误: 必须指定评估模式（--task, --task-list 或 --test-set）${NC}"
+    echo -e "${RED}错误: 必须指定评估模式（--task, --task-list 或 --task-set）${NC}"
     echo "使用 --help 查看帮助信息"
     exit 1
 fi
@@ -137,14 +146,18 @@ if [[ -n "$TASK" ]]; then
     PYTHON_CMD="$PYTHON_CMD --task $TASK"
 elif [[ -n "$TASK_LIST" ]]; then
     PYTHON_CMD="$PYTHON_CMD --task-list $TASK_LIST"
-elif [[ -n "$TEST_SET" ]]; then
-    PYTHON_CMD="$PYTHON_CMD --test-set $TEST_SET"
+elif [[ -n "$TASK_SET" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --task-set $TASK_SET"
 fi
 
 PYTHON_CMD="$PYTHON_CMD --n-trials $N_TRIALS --max-steps $MAX_STEPS"
 
 if [[ -n "$RENDER" ]]; then
     PYTHON_CMD="$PYTHON_CMD $RENDER"
+fi
+
+if [[ -n "$ENABLE_VIDEO_SAVE" ]]; then
+    PYTHON_CMD="$PYTHON_CMD $ENABLE_VIDEO_SAVE"
 fi
 
 PYTHON_CMD="$PYTHON_CMD --report-name $REPORT_NAME"
@@ -161,14 +174,15 @@ if [[ -n "$TASK" ]]; then
 elif [[ -n "$TASK_LIST" ]]; then
     echo -e "${GREEN}评估模式:${NC} 批量任务"
     echo -e "${GREEN}任务列表:${NC} $TASK_LIST"
-elif [[ -n "$TEST_SET" ]]; then
-    echo -e "${GREEN}评估模式:${NC} 测试集"
-    echo -e "${GREEN}测试集:${NC} $TEST_SET"
+elif [[ -n "$TASK_SET" ]]; then
+    echo -e "${GREEN}评估模式:${NC} 任务集"
+    echo -e "${GREEN}任务集:${NC} $TASK_SET"
 fi
 
 echo -e "${GREEN}试验次数:${NC} $N_TRIALS"
 echo -e "${GREEN}最大步数:${NC} $MAX_STEPS"
 echo -e "${GREEN}启用渲染:${NC} $([ -n "$RENDER" ] && echo "是" || echo "否")"
+echo -e "${GREEN}视频保存:${NC} $([ -n "$ENABLE_VIDEO_SAVE" ] && echo "是" || echo "否")"
 echo -e "${GREEN}报告名称:${NC} $REPORT_NAME"
 echo -e "${GREEN}架构模式:${NC} $([ "$USE_X86" = true ] && echo "x86_64" || echo "原生")"
 echo -e "${BLUE}==========================================${NC}"

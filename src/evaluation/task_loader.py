@@ -36,12 +36,13 @@ class TaskLoader:
         """解析所有任务配置"""
         tasks = {}
         
-        # 解析不同难度的任务
-        for category in ['basic_tasks', 'medium_tasks', 'hard_tasks']:
-            if category in self.config:
-                for task in self.config[category]:
-                    task_id = task['task_id']
-                    tasks[task_id] = task
+        # 解析不同类别的任务（支持任意以 _tasks 结尾的键）
+        for key in self.config.keys():
+            if key.endswith('_tasks') and isinstance(self.config[key], list):
+                for task in self.config[key]:
+                    if 'task_id' in task:
+                        task_id = task['task_id']
+                        tasks[task_id] = task
         
         return tasks
     
@@ -62,17 +63,44 @@ class TaskLoader:
         获取任务集
         
         Args:
-            set_name: 任务集名称 (quick_test, baseline_test, 或 all)
+            set_name: 任务集名称 (quick_test, baseline_test, harvest_tasks, 或 all)
             
         Returns:
             任务ID列表
         """
         if set_name == 'all':
             return list(self.tasks.keys())
+        elif set_name.endswith('_tasks'):
+            # 直接从配置中的任务列表获取
+            if set_name in self.config and isinstance(self.config[set_name], list):
+                task_list = self.config[set_name]
+                # 检查列表中的元素类型
+                if task_list and isinstance(task_list[0], dict):
+                    # 如果是字典列表（完整任务定义），提取 task_id
+                    return [task['task_id'] for task in task_list if 'task_id' in task]
+                else:
+                    # 如果是字符串列表（任务ID列表），直接返回
+                    return task_list
+            else:
+                return []  # 返回空列表而不是抛出异常
         elif set_name in self.config:
+            # 预定义的任务集（如 quick_test, baseline_test）
             return self.config[set_name]
         else:
             raise ValueError(f"未知的任务集: {set_name}")
+    
+    def list_task_sets(self) -> List[str]:
+        """
+        列出所有可用的任务集
+        
+        Returns:
+            任务集名称列表
+        """
+        task_sets = []
+        for key in self.config.keys():
+            if key.endswith('_tasks') and isinstance(self.config[key], list):
+                task_sets.append(key)
+        return task_sets
     
     def get_tasks_by_category(self, category: str) -> List[str]:
         """
