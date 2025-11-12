@@ -12,13 +12,17 @@
 
 ### 修复内容
 
-已在以下文件中添加dtype转换代码：
+已在以下文件中添加dtype转换和autocast禁用代码：
 
 1. **`src/evaluation/steve1_evaluator.py`** (第262-265行)
    - 自动检测float16嵌入
    - 转换为float32
 
-2. **`src/utils/steve1_mineclip_agent_env_utils.py`** (第105-109行)
+2. **`src/evaluation/steve1_evaluator.py`** (第293-297行) ⭐ **关键修复**
+   - 在agent.get_action调用时禁用autocast
+   - 防止推理过程中被自动转换为float16
+
+3. **`src/utils/steve1_mineclip_agent_env_utils.py`** (第105-109行)
    - 确保Agent模型权重为float32
 
 ### 使用方法

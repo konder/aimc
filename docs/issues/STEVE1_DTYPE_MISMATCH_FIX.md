@@ -89,7 +89,7 @@ PyTorch在矩阵乘法时要求输入和权重的dtype必须一致，因此报�
 
 ### 方案1: 转换嵌入为float32 (已实施)
 
-**位置**: `src/evaluation/steve1_evaluator.py`
+**位置**: `src/evaluation/steve1_evaluator.py` (第262-265行)
 
 在获取Prior嵌入后，确保转换为float32：
 
@@ -118,9 +118,12 @@ with th.no_grad():
 - ✅ 不修改官方steve1包代码
 - ✅ 兼容所有GPU
 
+**局限**:
+- ⚠️ 在agent内部forward时可能仍被autocast影响
+
 ### 方案2: 确保Agent模型权重为float32 (已实施)
 
-**位置**: `src/utils/steve1_mineclip_agent_env_utils.py`
+**位置**: `src/utils/steve1_mineclip_agent_env_utils.py` (第105-109行)
 
 在加载Agent时，显式转换模型为float32：
 
@@ -150,7 +153,37 @@ def make_agent(in_model, in_weights, cond_scale):
 - ✅ 双重保险（结合方案1）
 - ✅ 不修改官方steve1包代码
 
-### 方案3: 禁用AMP (不推荐)
+**局限**:
+- ⚠️ 在agent内部forward时可能仍被autocast影响
+
+### 方案3: 禁用agent推理时的autocast (已实施) ⭐ **关键修复**
+
+**位置**: `src/evaluation/steve1_evaluator.py` (第293-297行)
+
+在调用agent.get_action时显式禁用autocast：
+
+```python
+while not done and steps < max_steps:
+    # 获取动作（使用 Prior 计算的嵌入）
+    # 🔧 在no_grad环境下禁用autocast，防止dtype自动转换
+    with th.no_grad():
+        # 禁用autocast以防止float16自动转换
+        with th.cuda.amp.autocast(enabled=False):
+            action = self._agent.get_action(obs, prompt_embed_np)
+```
+
+**优点**:
+- ✅ **彻底解决问题**：防止agent内部forward时被autocast影响
+- ✅ 不修改官方steve1包代码
+- ✅ 兼容所有GPU
+- ✅ 性能影响极小
+
+**为什么这个修复是关键**:
+- 方案1和2只处理了输入和权重的dtype
+- 但在4090等GPU上，agent内部的forward过程仍可能被全局autocast影响
+- 需要显式禁用autocast来确保整个推理过程保持float32
+
+### 方案4: 禁用AMP (不推荐)
 
 修改官方steve1包的`embed_utils.py`，移除`autocast`：
 
