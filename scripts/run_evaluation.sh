@@ -25,6 +25,7 @@ RENDER=""
 ENABLE_VIDEO_SAVE=""
 REPORT_NAME="evaluation_report"
 USE_X86=false
+DEBUG=false  # 添加调试模式
 
 # 显示帮助信息
 show_help() {
@@ -114,6 +115,10 @@ while [[ $# -gt 0 ]]; do
             USE_X86=true
             shift
             ;;
+        --debug)
+            DEBUG=true
+            shift
+            ;;
         *)
             echo -e "${RED}错误: 未知参数 '$1'${NC}"
             echo "使用 --help 查看帮助信息"
@@ -121,6 +126,19 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# 调试模式输出
+if [[ "$DEBUG" = true ]]; then
+    echo -e "${YELLOW}=== 调试信息 ===${NC}"
+    echo "TASK=$TASK"
+    echo "TASK_LIST=$TASK_LIST"
+    echo "TASK_SET=$TASK_SET"
+    echo "N_TRIALS=$N_TRIALS"
+    echo "MAX_STEPS=$MAX_STEPS"
+    echo "参数数量: $#"
+    echo -e "${YELLOW}================${NC}"
+    echo ""
+fi
 
 # 验证参数
 MODE_COUNT=0
@@ -197,11 +215,20 @@ if ! python -c "import gym" &> /dev/null; then
     echo -e "${YELLOW}提示: 请确保已激活正确的 conda 环境${NC}"
     echo -e "${YELLOW}      conda activate minedojo-x86  (或 minedojo)${NC}"
     echo ""
-    read -p "是否继续？(y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "已取消"
-        exit 1
+    
+    # 检查是否为交互式终端
+    if [[ -t 0 ]]; then
+        # 交互式：询问用户
+        read -p "是否继续？(y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "已取消"
+            exit 1
+        fi
+    else
+        # 非交互式：自动继续，但显示警告
+        echo -e "${YELLOW}非交互式模式：自动继续执行${NC}"
+        echo ""
     fi
 fi
 
