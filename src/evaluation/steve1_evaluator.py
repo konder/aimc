@@ -290,8 +290,11 @@ class STEVE1Evaluator:
             ) as pbar:
                 while not done and steps < max_steps:
                     # 获取动作（使用 Prior 计算的嵌入）
+                    # 🔧 在no_grad环境下禁用autocast，防止dtype自动转换
                     with th.no_grad():
-                        action = self._agent.get_action(obs, prompt_embed_np)
+                        # 禁用autocast以防止float16自动转换
+                        with th.cuda.amp.autocast(enabled=False):
+                            action = self._agent.get_action(obs, prompt_embed_np)
                     
                     # 执行动作
                     obs, reward, done, info = self._env.step(action)
