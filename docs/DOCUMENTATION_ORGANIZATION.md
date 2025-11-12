@@ -44,19 +44,21 @@ docs/
 │   ├── WEB_IMPROVEMENTS_SUMMARY.md
 │   └── WEB_RESTRUCTURE.md
 │
-├── issues/           # 问题修复 (5个)
+├── issues/           # 问题修复 (7个)
 │   ├── DAGGER_COMBINED_DATA_FIX.md
 │   ├── DAGGER_DEVICE_PARAMETER_FIX.md
 │   ├── DATA_NORMALIZATION_FIX_SUMMARY.md
 │   ├── DATA_NORMALIZATION_INVESTIGATION.md
-│   └── INVENTORY_FORMAT_FIX_PLAN.md
+│   ├── INVENTORY_FORMAT_FIX_PLAN.md
+│   ├── STEVE1_DTYPE_MISMATCH_FIX.md
+│   └── STEVE1_4090_DTYPE_FIX_QUICKSTART.md
 │
 └── status/           # 状态追踪 (2个)
     ├── IMITATION_LEARNING_ROADMAP.md
     └── MINECLIP_STATUS_SUMMARY.md
 ```
 
-**总计**: 30个文档，分类清晰，结构合理
+**总计**: 32个文档，分类清晰，结构合理
 
 ---
 
@@ -149,6 +151,8 @@ docs/
 - `DAGGER_DEVICE_PARAMETER_FIX.md` - 设备参数修复
 - `DATA_NORMALIZATION_INVESTIGATION.md` - 数据问题调查
 - `INVENTORY_FORMAT_FIX_PLAN.md` - 库存格式修复计划
+- `STEVE1_DTYPE_MISMATCH_FIX.md` - **STEVE-1 Dtype不匹配修复** ⭐
+- `STEVE1_4090_DTYPE_FIX_QUICKSTART.md` - **4090 GPU快速修复指南** ⭐
 
 **何时查阅**:
 - 遇到类似问题
@@ -197,6 +201,7 @@ docs/
 | 键盘控制说明 | `reference/KEYBOARD_REFERENCE.md` |
 | 模型架构详解 | `technical/DAGGER_CNN_ARCHITECTURE.md` |
 | 架构重构历史 | `summaries/ARCHITECTURE_REFACTORING_SUMMARY.md` |
+| 4090 GPU修复 | `issues/STEVE1_4090_DTYPE_FIX_QUICKSTART.md` ⭐ |
 | 问题修复记录 | `issues/` 目录 |
 | 项目路线图 | `status/IMITATION_LEARNING_ROADMAP.md` |
 
