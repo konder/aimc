@@ -151,6 +151,21 @@ class STEVE1Evaluator:
                 env_config=self.env_config  # 传递环境配置
             )
             
+            # 🔧 包装agent的get_action方法，确保输入tensor是float32
+            original_get_action = self._agent.get_action
+            def get_action_float32(obs, goal_embed):
+                """包装get_action，确保输入是float32"""
+                # 如果goal_embed是numpy，确保是float32
+                if isinstance(goal_embed, np.ndarray) and goal_embed.dtype == np.float16:
+                    goal_embed = goal_embed.astype(np.float32)
+                
+                # 使用原始方法，但在禁用autocast的环境下
+                with th.cuda.amp.autocast(enabled=False):
+                    return original_get_action(obs, goal_embed)
+            
+            self._agent.get_action = get_action_float32
+            logger.info("  ✓ Agent get_action 已包装为float32模式")
+            
             # 2. 加载 Prior 模型（官方方式）
             logger.info(f"  加载 Prior CVAE...")
             prior_info = PRIOR_INFO.copy()
@@ -290,11 +305,9 @@ class STEVE1Evaluator:
             ) as pbar:
                 while not done and steps < max_steps:
                     # 获取动作（使用 Prior 计算的嵌入）
-                    # 🔧 在no_grad环境下禁用autocast，防止dtype自动转换
+                    # wrapper已经处理了dtype和autocast，直接调用即可
                     with th.no_grad():
-                        # 禁用autocast以防止float16自动转换
-                        with th.cuda.amp.autocast(enabled=False):
-                            action = self._agent.get_action(obs, prompt_embed_np)
+                        action = self._agent.get_action(obs, prompt_embed_np)
                     
                     # 执行动作
                     obs, reward, done, info = self._env.step(action)

@@ -102,11 +102,16 @@ def make_agent(in_model, in_weights, cond_scale):
                                    pi_head_kwargs=agent_pi_head_kwargs)
     agent.load_weights(in_weights)
     
-    # 🔧 修复dtype问题: 确保模型权重是float32（针对4090等支持混合精度的GPU）
-    # 将agent的policy网络转为float32，避免与float16嵌入混用时出错
-    if hasattr(agent, 'policy') and hasattr(agent.policy, 'float'):
+    # 🔧 修复dtype问题: 确保模型所有参数和buffers都是float32（针对4090等支持混合精度的GPU）
+    # 将agent的policy网络及其所有子模块转为float32，避免与float16嵌入混用时出错
+    if hasattr(agent, 'policy'):
+        # 转换所有参数和buffers为float32
         agent.policy.float()
-        print('  Agent policy 已转换为 float32')
+        # 递归转换所有子模块
+        for module in agent.policy.modules():
+            if hasattr(module, 'float'):
+                module.float()
+        print('  Agent policy 及所有子模块已转换为 float32')
     
     agent.reset(cond_scale=cond_scale)
     env.close()
