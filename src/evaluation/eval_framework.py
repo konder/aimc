@@ -200,23 +200,29 @@ class EvaluationFramework:
         output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"  结果目录: {output_dir}")
         
-        # 调用评估器执行
-        result = task_evaluator.evaluate_task(
-            task_id=task_id,
-            language=language,
-            n_trials=n_trials,
-            max_steps=max_steps,
-            instruction=instruction,
-            output_dir=output_dir  # 传递输出目录给evaluator
-        )
-        
-        # 保存任务结果到目录
-        self._save_task_results(result, output_dir)
-        
-        # 保存结果
-        self.results.append(result)
-        
-        return result
+        try:
+            # 调用评估器执行
+            result = task_evaluator.evaluate_task(
+                task_id=task_id,
+                language=language,
+                n_trials=n_trials,
+                max_steps=max_steps,
+                instruction=instruction,
+                output_dir=output_dir  # 传递输出目录给evaluator
+            )
+            
+            # 保存任务结果到目录
+            self._save_task_results(result, output_dir)
+            
+            # 保存结果
+            self.results.append(result)
+            
+            return result
+        finally:
+            # ⚠️ 重要：立即关闭任务评估器，释放资源
+            logger.info(f"  关闭任务评估器，释放环境资源...")
+            task_evaluator.close()
+            logger.info(f"  ✓ 资源已释放")
     
     def _save_task_results(self, result: TaskResult, output_dir: Path):
         """

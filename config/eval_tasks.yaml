@@ -990,6 +990,38 @@ harvest_tasks:
 # 任务集定义 - 按功能和难度分类
 # ============================================================================
 
+# 全部任务集合（包含所有harvest_tasks）⭐完整基线评估
+all_tasks:
+  - harvest_any_1_logs
+  - harvest_1_milk
+  - harvest_1_dirt
+  - harvest_1_grass
+  - harvest_1_cobblestone
+  - harvest_1_coal
+  - harvest_1_iron_ore
+  - harvest_1_sand
+  - harvest_1_gravel
+  - harvest_1_wool
+  - harvest_1_beef
+  - harvest_1_porkchop
+  - harvest_1_chicken
+  - harvest_1_leather
+  - harvest_1_feather
+  - harvest_1_flower
+  - harvest_1_sapling
+  - harvest_1_mushroom
+  - harvest_1_clay
+  - harvest_1_snow
+  - harvest_1_gold_ore
+  - harvest_1_lapis_ore
+  - harvest_1_apple
+  - harvest_1_wheat
+  - harvest_1_carrot
+  - harvest_1_potato
+  - harvest_1_beetroot
+  - harvest_1_pumpkin
+  - harvest_1_reeds
+
 # 快速测试集 - 只包含简单快速的任务
 quick_harvest_tasks:
   - harvest_any_1_logs      # 1000 steps
@@ -1104,8 +1136,8 @@ crops_tasks:
 #   维度3 (语义鲁棒性):   zh_variants (不同表述的成功率方差)
 #
 # 使用示例:
-#   # 完整评估（所有31个采集任务）
-#   scripts/run_evaluation.sh --task-set all_harvest_tasks --n-trials 1
+#   # 完整评估（所有29个采集任务）⭐推荐
+#   scripts/run_evaluation.sh --task-set all_tasks --n-trials 1
 #
 #   # 快速测试（只测试简单任务）
 #   scripts/run_evaluation.sh --task-set quick_harvest_tasks --n-trials 3
@@ -1135,16 +1167,22 @@ crops_tasks:
 #   scripts/run_evaluation.sh --task harvest_1_flower --n-trials 10
 #
 # 任务集说明:
-#   all_harvest_tasks:       所有采集任务（31个）⭐完整评估
-#   harvest_tasks:           harvest_tasks定义（31个任务定义）
+#   all_tasks:               全部任务（29个）⭐完整基线评估
+#   all_harvest_tasks:       所有采集任务（29个，同all_tasks）
+#   harvest_tasks:           harvest_tasks定义（29个任务定义）
 #   quick_harvest_tasks:     快速测试集（1个简单任务）
-#   raw_resources_tasks:     原始资源（11个，包含矿石）
-#   mining_tasks:            矿石采集（6个，需要工具）
+#   raw_resources_tasks:     原始资源（9个，包含矿石）
+#   mining_tasks:            矿石采集（5个，需要工具）
 #   animal_drops_tasks:      动物掉落物（4个）
 #   special_drops_tasks:     特殊掉落物（2个）
 #   plants_tasks:            植物类（3个）
 #   special_blocks_tasks:    特殊方块（2个）
 #   food_tasks:              食物（1个）
 #   crops_tasks:             农作物（6个，需要长时间）
+#
+# 💡 资源管理优化:
+#   - 每个任务评估完成后立即关闭环境，释放内存
+#   - 批量任务不会累积内存占用
+#   - GPU内存在每个任务后自动清理
 #
 

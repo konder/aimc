@@ -118,7 +118,20 @@ class STEVE1Evaluator:
     def _load_components(self):
         """延迟加载 Agent, MineCLIP, Prior 和环境"""
         if self._agent is None:
+            # 获取当前device信息
+            import torch
+            from src.utils.device import DEVICE
+            
             logger.info("加载 STEVE-1 组件...")
+            logger.info(f"  🖥️  Device 模式: {DEVICE}")
+            if DEVICE == 'cuda':
+                logger.info(f"  🎮 GPU: {torch.cuda.get_device_name(0)}")
+                logger.info(f"  💾 显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            elif DEVICE == 'mps':
+                logger.info(f"  🍎 Apple Silicon GPU")
+            else:
+                logger.info(f"  💻 CPU 模式")
+            
             logger.info(f"  模型: {self.model_path}")
             logger.info(f"  权重: {self.weights_path}")
             logger.info(f"  Prior: {self.prior_weights}")
@@ -209,7 +222,7 @@ class STEVE1Evaluator:
                        f"步数: {trial_result.steps}, "
                        f"时间: {trial_result.time_seconds:.1f}s"
                        + (f", 帧数: {len(trial_result.frames)}" if trial_result.frames else ""))
-        
+
         # 构建任务结果
         task_result = TaskResult(
             task_id=task_id,
@@ -246,6 +259,11 @@ class STEVE1Evaluator:
                     self._prior,
                     DEVICE
                 )
+                # 🔧 修复dtype问题: 确保嵌入是float32（针对4090等支持混合精度的GPU）
+                if hasattr(prompt_embed, 'dtype') and prompt_embed.dtype == th.float16:
+                    logger.debug(f"  检测到 float16 嵌入，转换为 float32")
+                    prompt_embed = prompt_embed.float()
+                
                 # 转换为 numpy（MineRLConditionalAgent 需要）
                 prompt_embed_np = prompt_embed.cpu().numpy() if hasattr(prompt_embed, 'cpu') else prompt_embed
             
@@ -376,7 +394,29 @@ class STEVE1Evaluator:
             )
     
     def close(self):
-        """清理资源"""
+        """清理资源，释放内存"""
         if self._env is not None:
-            self._env.close()
-            logger.info("环境已关闭")
+            try:
+                self._env.close()
+                logger.debug("✓ 环境已关闭")
+            except Exception as e:
+                logger.warning(f"关闭环境时出错: {e}")
+            finally:
+                self._env = None
+        
+        # 释放模型引用，帮助垃圾回收
+        if self._agent is not None:
+            self._agent = None
+        if self._mineclip is not None:
+            self._mineclip = None
+        if self._prior is not None:
+            self._prior = None
+        
+        # 清理 CUDA 缓存（如果使用GPU）
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.debug("✓ CUDA 缓存已清理")
+        except Exception:
+            pass

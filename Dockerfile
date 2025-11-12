@@ -147,11 +147,11 @@ RUN source /opt/activate_env.sh && \
     pip install gym=="0.21.0"
 
 RUN source /opt/activate_env.sh && \
-    cd /tmp && \
+    cd /opt && \
     git clone https://github.com/Shalev-Lifshitz/STEVE-1.git && \
     mv STEVE-1 steve1 && \
-    cd ~/steve1 && \
-    pip install .
+    cd steve1 && \
+    pip install -e .
 
 # 默认激活 minedojo-x86 环境
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate minedojo-x86 && exec /bin/bash"]

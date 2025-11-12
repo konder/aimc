@@ -101,6 +101,13 @@ def make_agent(in_model, in_weights, cond_scale):
     agent = MineRLConditionalAgent(env, device=DEVICE, policy_kwargs=agent_policy_kwargs,
                                    pi_head_kwargs=agent_pi_head_kwargs)
     agent.load_weights(in_weights)
+    
+    # 🔧 修复dtype问题: 确保模型权重是float32（针对4090等支持混合精度的GPU）
+    # 将agent的policy网络转为float32，避免与float16嵌入混用时出错
+    if hasattr(agent, 'policy') and hasattr(agent.policy, 'float'):
+        agent.policy.float()
+        print('  Agent policy 已转换为 float32')
+    
     agent.reset(cond_scale=cond_scale)
     env.close()
     return agent
