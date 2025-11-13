@@ -46,7 +46,7 @@ class EvaluationConfig:
     text_cond_scale: float = 6.0
     seed: int = 42
     enable_render: bool = False
-    enable_video_save: bool = False  # 是否保存视频
+    video_size: Optional[Tuple[int, int]] = None  # 视频尺寸 (width, height)，None 表示不录制
     
     # 评估配置
     n_trials: int = 3  # 默认每个任务运行次数
@@ -103,7 +103,7 @@ class EvaluationFramework:
                 text_cond_scale=self.config.text_cond_scale,
                 seed=self.config.seed,
                 enable_render=self.config.enable_render,
-                collect_frames=self.config.enable_video_save,  # 根据是否保存视频决定是否收集帧
+                video_size=self.config.video_size,  # 视频尺寸，None 表示不录制
                 env_name='MineRLHarvestEnv-v0'  # 默认使用自定义环境
             )
         else:
@@ -198,7 +198,7 @@ class EvaluationFramework:
             text_cond_scale=self.config.text_cond_scale,
             seed=self.config.seed,
             enable_render=self.config.enable_render,
-            collect_frames=self.config.enable_video_save,
+            video_size=self.config.video_size,  # 视频尺寸，None 表示不录制
             env_name=env_name,
             env_config=env_config  # 传递环境配置（包含 max_episode_steps）
         )
@@ -254,27 +254,15 @@ class EvaluationFramework:
     
     def _save_task_results(self, result: TaskResult, output_dir: Path):
         """
-        保存任务结果到指定目录（JSON、TXT、视频）
+        保存任务结果到指定目录（JSON、TXT）
+        
+        注意：视频保存现在由 steve1_evaluator 在 _run_single_trial 中完成
         
         Args:
             result: 任务结果
             output_dir: 输出目录
         """
-        # 保存视频（如果有frames）
-        if any(trial.frames for trial in result.trials):
-            from steve1.utils.video_utils import save_frames_as_video
-            
-            for i, trial in enumerate(result.trials, 1):
-                if trial.frames:
-                    video_path = output_dir / f"trial_{i}.mp4"
-                    try:
-                        logger.info(f"  保存视频: trial_{i}.mp4 ({len(trial.frames)} 帧)")
-                        save_frames_as_video(trial.frames, str(video_path), 20, to_bgr=True)
-                        logger.info(f"  ✓ 视频已保存: {video_path.name}")
-                    except Exception as e:
-                        logger.warning(f"  ⚠ 视频保存失败: {e}")
-        
-        # 构建结果数据（不包含frames，避免JSON过大）
+        # 构建结果数据
         result_data = {
             "task_id": result.task_id,
             "language": result.language,
@@ -288,7 +276,7 @@ class EvaluationFramework:
                     "success": trial.success,
                     "steps": trial.steps,
                     "time_seconds": trial.time_seconds,
-                    "has_video": len(trial.frames) > 0  # 标记是否有视频
+                    "has_video": (output_dir / f"trial_{i+1}.mp4").exists()  # 检查视频文件是否存在
                 }
                 for i, trial in enumerate(result.trials)
             ]
@@ -315,7 +303,7 @@ class EvaluationFramework:
             f.write("-"*80 + "\n")
             for i, trial in enumerate(result.trials, 1):
                 status = "✅ 成功" if trial.success else "❌ 失败"
-                video_status = "🎬" if trial.frames else ""
+                video_status = "🎬" if (output_dir / f"trial_{i}.mp4").exists() else ""
                 f.write(f"Trial {i}: {status} | 步数: {trial.steps:4d} | 时间: {trial.time_seconds:.1f}s {video_status}\n")
         logger.info(f"  ✓ 报告已保存: {txt_path.name}")
     
@@ -712,9 +700,10 @@ if __name__ == "__main__":
         help='启用渲染'
     )
     parser.add_argument(
-        '--enable_video_save',
-        action='store_true',
-        help='启用视频保存'
+        '--video-size',
+        type=str,
+        default=None,
+        help='视频尺寸，格式: WIDTHxHEIGHT 或 WIDTH,HEIGHT (如: 128x128)，默认不录制'
     )
     parser.add_argument(
         '--report-name',
@@ -725,12 +714,29 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # 解析 video_size 参数
+    video_size = None
+    if args.video_size:
+        try:
+            # 支持 "128x128" 或 "128,128" 格式
+            if 'x' in args.video_size:
+                width, height = map(int, args.video_size.split('x'))
+            elif ',' in args.video_size:
+                width, height = map(int, args.video_size.split(','))
+            else:
+                raise ValueError(f"无效的视频尺寸格式: {args.video_size}")
+            video_size = (width, height)
+            logger.info(f"视频录制: {width}x{height}")
+        except Exception as e:
+            logger.warning(f"解析视频尺寸失败: {e}，将不录制视频")
+            video_size = None
+    
     # 创建配置
     config = EvaluationConfig(
         n_trials=args.n_trials,
         max_steps=args.max_steps,
         enable_render=args.render,
-        enable_video_save=args.enable_video_save
+        video_size=video_size
     )
     
     # 创建评估框架

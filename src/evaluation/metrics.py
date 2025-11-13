@@ -18,7 +18,6 @@ class TrialResult:
     steps: int             # 使用的步数
     time_seconds: float    # 使用的时间（秒）
     trajectory: List = field(default_factory=list)  # 轨迹数据（可选）
-    frames: List = field(default_factory=list)      # 视频帧数据（可选）
 
 
 @dataclass

@@ -2,8 +2,6 @@
 # STEVE-1 评估框架启动脚本
 # 通过参数配置评估任务，无需修改 Python 代码
 
-set -e
-
 # 获取脚本所在目录和项目根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -22,7 +20,7 @@ TASK_SET=""
 N_TRIALS=3
 MAX_STEPS=2000
 RENDER=""
-ENABLE_VIDEO_SAVE=""
+VIDEO_SIZE="128x128"  # 默认视频尺寸，设为空字符串则不录制
 REPORT_NAME="evaluation_report"
 USE_X86=false
 DEBUG=false  # 添加调试模式
@@ -45,7 +43,8 @@ show_help() {
     echo "  --n-trials N                试验次数（默认: 3）"
     echo "  --max-steps N               最大步数（默认: 2000）"
     echo "  --render                    启用渲染"
-    echo "  --enable_video_save         启用视频保存"
+    echo "  --video-size WxH            视频尺寸，格式: WIDTHxHEIGHT (如: 128x128，默认: 128x128)"
+    echo "                               设为空字符串则不录制视频"
     echo "  --report-name NAME          报告名称（默认: evaluation_report）"
     echo ""
     echo "环境配置："
@@ -103,9 +102,9 @@ while [[ $# -gt 0 ]]; do
             RENDER="--render"
             shift
             ;;
-        --enable_video_save)
-            ENABLE_VIDEO_SAVE="--enable_video_save"
-            shift
+        --video-size)
+            VIDEO_SIZE="$2"
+            shift 2
             ;;
         --report-name)
             REPORT_NAME="$2"
@@ -174,8 +173,8 @@ if [[ -n "$RENDER" ]]; then
     PYTHON_CMD="$PYTHON_CMD $RENDER"
 fi
 
-if [[ -n "$ENABLE_VIDEO_SAVE" ]]; then
-    PYTHON_CMD="$PYTHON_CMD $ENABLE_VIDEO_SAVE"
+if [[ -n "$VIDEO_SIZE" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --video-size $VIDEO_SIZE"
 fi
 
 PYTHON_CMD="$PYTHON_CMD --report-name $REPORT_NAME"
@@ -200,7 +199,7 @@ fi
 echo -e "${GREEN}试验次数:${NC} $N_TRIALS"
 echo -e "${GREEN}最大步数:${NC} $MAX_STEPS"
 echo -e "${GREEN}启用渲染:${NC} $([ -n "$RENDER" ] && echo "是" || echo "否")"
-echo -e "${GREEN}视频保存:${NC} $([ -n "$ENABLE_VIDEO_SAVE" ] && echo "是" || echo "否")"
+echo -e "${GREEN}视频尺寸:${NC} $([ -n "$VIDEO_SIZE" ] && echo "$VIDEO_SIZE" || echo "不录制")"
 echo -e "${GREEN}报告名称:${NC} $REPORT_NAME"
 echo -e "${GREEN}架构模式:${NC} $([ "$USE_X86" = true ] && echo "x86_64" || echo "原生")"
 echo -e "${BLUE}==========================================${NC}"

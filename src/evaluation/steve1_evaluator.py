@@ -5,7 +5,7 @@ STEVE-1 评估器 (基于 MineRL 环境)
 
 import time
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
 import torch as th
@@ -29,9 +29,6 @@ from .metrics import TrialResult, TaskResult
 from ..translation.translator import ChineseTranslator
 
 logger = logging.getLogger(__name__)
-
-# 视频帧配置
-VIDEO_RESIZE = (128, 128)  # 视频帧尺寸 (width, height)
 
 
 class STEVE1Evaluator:
@@ -63,7 +60,7 @@ class STEVE1Evaluator:
         visual_cond_scale: float = 7.0,
         seed: int = 42,
         enable_render: bool = False,
-        collect_frames: bool = False,
+        video_size: Optional[Tuple[int, int]] = None,
         env_name: str = 'MineRLHarvestEnv-v0',
         env_config: Optional[Dict] = None
     ):
@@ -74,7 +71,7 @@ class STEVE1Evaluator:
         - 加载 STEVE-1 模型和环境
         - 集成中文翻译器
         - 执行单个任务评估
-        - 返回任务结果（可选包含视频帧）
+        - 录制和保存视频（如果启用）
         
         Args:
             model_path: VPT 模型配置文件路径
@@ -84,7 +81,7 @@ class STEVE1Evaluator:
             visual_cond_scale: Visual classifier-free guidance scale
             seed: 随机种子
             enable_render: 是否启用渲染
-            collect_frames: 是否收集视频帧（由framework决定是否保存）
+            video_size: 视频尺寸 (width, height)，None 表示不录制
             env_name: 环境名称（支持自定义环境，如 'MineRLHarvestEnv-v0'）
             env_config: 环境配置（传递给环境的参数，如 reward_config 等）
         """
@@ -95,7 +92,7 @@ class STEVE1Evaluator:
         self.visual_cond_scale = visual_cond_scale
         self.seed = seed
         self.enable_render = enable_render
-        self.collect_frames = collect_frames
+        self.video_size = video_size  # None 或 (width, height)
         self.env_name = env_name
         self.env_config = env_config
         
@@ -112,8 +109,8 @@ class STEVE1Evaluator:
         )
         
         logger.info("STEVE-1 评估器初始化完成")
-        if self.collect_frames:
-            logger.info(f"  视频帧收集: 启用")
+        if self.video_size:
+            logger.info(f"  视频录制: 启用 (尺寸: {self.video_size[0]}x{self.video_size[1]})")
     
     def _load_components(self):
         """延迟加载 Agent, MineCLIP, Prior 和环境"""
@@ -235,8 +232,7 @@ class STEVE1Evaluator:
             
             logger.info(f"    结果: {'✅ 成功' if trial_result.success else '❌ 失败'}, "
                        f"步数: {trial_result.steps}, "
-                       f"时间: {trial_result.time_seconds:.1f}s"
-                       + (f", 帧数: {len(trial_result.frames)}" if trial_result.frames else ""))
+                       f"时间: {trial_result.time_seconds:.1f}s")
 
         # 构建任务结果
         task_result = TaskResult(
@@ -259,9 +255,22 @@ class STEVE1Evaluator:
         n_trials: int,  # 总试验数
         output_dir: Optional[Path] = None  # 输出目录
     ) -> TrialResult:
-        """运行单次试验，可选收集视频帧"""
+        """
+        运行单次试验，可选录制视频
+        
+        Args:
+            task_id: 任务ID
+            instruction: 指令文本
+            max_steps: 最大步数
+            trial_idx: 试验索引（从1开始）
+            n_trials: 总试验数
+            output_dir: 输出目录（用于保存视频）
+            
+        Returns:
+            TrialResult: 试验结果（不包含frames）
+        """
         start_time = time.time()
-        frames = [] if self.collect_frames else None  # 只在需要时收集帧
+        frames = [] if self.video_size else None  # 只在需要时收集帧
         
         try:
             # 使用 Prior 编码指令（官方方式）
@@ -321,11 +330,11 @@ class STEVE1Evaluator:
                     if reward > 0:
                         pbar.set_postfix({'reward': f'{total_reward:.1f}'})
                     
-                    # 收集视频帧（参考STEVE-1官方实现）
+                    # 收集视频帧（如果启用录制）
                     if frames is not None and 'pov' in obs:
                         frame = obs['pov']
-                        # 调整大小（参考 STEVE-1 官方实现）
-                        frame_resized = cv2.resize(frame, VIDEO_RESIZE)
+                        # 使用 video_size 调整大小
+                        frame_resized = cv2.resize(frame, self.video_size)
                         frames.append(frame_resized)
                     
                     # 记录奖励（用于调试）
@@ -382,20 +391,47 @@ class STEVE1Evaluator:
             
             time_seconds = time.time() - start_time
             
+            # 保存视频（如果录制了）
+            if frames and output_dir:
+                try:
+                    from steve1.utils.video_utils import save_frames_as_video
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    video_path = output_dir / f"trial_{trial_idx}.mp4"
+                    logger.info(f"  保存视频: trial_{trial_idx}.mp4 ({len(frames)} 帧)")
+                    save_frames_as_video(frames, str(video_path), 20, to_bgr=True)
+                    logger.info(f"  ✓ 视频已保存: {video_path.name}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ 视频保存失败: {e}")
+                finally:
+                    # 清空 frames 释放内存
+                    frames.clear()
+            
             return TrialResult(
                 task_id=task_id,
                 language="",  # 将在外层填充
                 instruction=instruction,
                 success=success,
                 steps=steps,
-                time_seconds=time_seconds,
-                frames=frames if frames else []  # 返回frames（如果收集了）
+                time_seconds=time_seconds
             )
             
         except Exception as e:
             logger.error(f"Trial {trial_idx} 执行失败: {e}")
             import traceback
             traceback.print_exc()
+            
+            # 如果录制了视频但出错，也尝试保存（可能部分帧已收集）
+            if frames and output_dir:
+                try:
+                    from steve1.utils.video_utils import save_frames_as_video
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    video_path = output_dir / f"trial_{trial_idx}.mp4"
+                    if frames:
+                        logger.info(f"  保存部分视频: trial_{trial_idx}.mp4 ({len(frames)} 帧)")
+                        save_frames_as_video(frames, str(video_path), 20, to_bgr=True)
+                    frames.clear()
+                except Exception as save_error:
+                    logger.warning(f"  ⚠ 视频保存失败: {save_error}")
             
             time_seconds = time.time() - start_time
             
@@ -405,8 +441,7 @@ class STEVE1Evaluator:
                 instruction=instruction,
                 success=False,
                 steps=0,
-                time_seconds=time_seconds,
-                frames=[]
+                time_seconds=time_seconds
             )
     
     def close(self):

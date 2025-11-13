@@ -442,3 +442,4 @@ A: 测试余弦相似度
 **创建日期**: 2025-11-10  
 **下一步**: 运行 `scripts/generate_alignment_data.py` 开始实施！
 
+

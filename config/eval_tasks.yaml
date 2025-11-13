@@ -38,7 +38,7 @@ evaluation:
 harvest_tasks:
   
   # 使用英文指令砍任意树木获取一块木头
-  - task_id: "harvest_any_1_logs"
+  - task_id: "harvest_1_log"
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令砍任意树木获取一块木头"
@@ -76,48 +76,7 @@ harvest_tasks:
       spawning_condition:
         allow_spawning: true
     
-    max_steps: 1000
-  
-  # 使用英文指令砍任意树木获取8块木头
-  - task_id: "harvest_any_8_logs"
-    category: "raw_resources"
-    difficulty: "medium"
-    description: "使用英文指令砍任意树木获取8块木头"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "chop tree, collect 8 logs"
-    
-    env_config:
-      reward_config:
-        - entity: "oak_log"
-          amount: 8
-          reward: 100
-        - entity: "birch_log"
-          amount: 8
-          reward: 100
-        - entity: "spruce_log"
-          amount: 8
-          reward: 100
-        - entity: "dark_oak_log"
-          amount: 8
-          reward: 100
-        - entity: "jungle_log"
-          amount: 8
-          reward: 100
-        - entity: "acacia_log"
-          amount: 8
-          reward: 100
-      reward_rule: "any"  # 任意一种木头达标即可
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"forest"}'
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 4000
+    max_steps: 500
   
   # 使用英文指令获取1桶牛奶
   - task_id: "harvest_1_milk"
@@ -208,6 +167,7 @@ harvest_tasks:
     env_name: "MineRLHarvestEnv-v0"
     
     en_instruction: "mine cobblestone"
+    #en_instruction: "Mining cobblestone"
     
     env_config:
       reward_config:
@@ -227,36 +187,7 @@ harvest_tasks:
         - type: "wooden_pickaxe"
           quantity: 1  # 提供木镐采集石头
     
-    max_steps: 1000
-  
-  # 使用英文指令采集8个圆石（需要木镐）
-  - task_id: "harvest_8_cobblestone"
-    category: "raw_resources"
-    difficulty: "medium"
-    description: "使用英文指令采集8个圆石（提供木镐）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "mine 8 cobblestone"
-    
-    env_config:
-      reward_config:
-        - entity: "cobblestone"
-          amount: 8
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"plains"}'
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_pickaxe"
-          quantity: 1
-    
-    max_steps: 3000
+    max_steps: 2000
   
   # 使用英文指令采集1个煤炭（需要木镐）
   - task_id: "harvest_1_coal"
@@ -359,7 +290,7 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
+        generator_options: '{"biome":"swampland"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -990,45 +921,13 @@ harvest_tasks:
 # 任务集定义 - 按功能和难度分类
 # ============================================================================
 
-# 全部任务集合（包含所有harvest_tasks）⭐完整基线评估
-all_tasks:
-  - harvest_any_1_logs
-  - harvest_1_milk
-  - harvest_1_dirt
-  - harvest_1_grass
-  - harvest_1_cobblestone
-  - harvest_1_coal
-  - harvest_1_iron_ore
-  - harvest_1_sand
-  - harvest_1_gravel
-  - harvest_1_wool
-  - harvest_1_beef
-  - harvest_1_porkchop
-  - harvest_1_chicken
-  - harvest_1_leather
-  - harvest_1_feather
-  - harvest_1_flower
-  - harvest_1_sapling
-  - harvest_1_mushroom
-  - harvest_1_clay
-  - harvest_1_snow
-  - harvest_1_gold_ore
-  - harvest_1_lapis_ore
-  - harvest_1_apple
-  - harvest_1_wheat
-  - harvest_1_carrot
-  - harvest_1_potato
-  - harvest_1_beetroot
-  - harvest_1_pumpkin
-  - harvest_1_reeds
-
 # 快速测试集 - 只包含简单快速的任务
 quick_harvest_tasks:
-  - harvest_any_1_logs      # 1000 steps
+  - harvest_1_log     # 1000 steps
 
 # 所有采集任务（完整测试集）⭐推荐用于完整评估
 all_harvest_tasks:
-  - harvest_any_1_logs
+  - harvest_1_log
   - harvest_1_milk
   - harvest_1_dirt
   - harvest_1_grass
@@ -1057,10 +956,12 @@ all_harvest_tasks:
   - harvest_1_beetroot
   - harvest_1_pumpkin
   - harvest_1_reeds
+  - harvest_1_clay           # 粘土（新增）
+  - harvest_1_snow           # 雪块（新增）
 
-# 原始资源测试集
+# 原始资源测试集（无需工具）
 raw_resources_tasks:
-  - harvest_any_1_logs       # 木头
+  - harvest_1_log       # 木头
   - harvest_1_milk           # 牛奶
   - harvest_1_dirt           # 泥土
   - harvest_1_grass          # 草方块
@@ -1070,7 +971,7 @@ raw_resources_tasks:
   - harvest_1_sand           # 沙子
   - harvest_1_gravel         # 沙砾
 
-# 矿石采集测试集（需要工具）
+# 原始资源测试集（需要工具）
 mining_tasks:
   - harvest_1_cobblestone
   - harvest_1_coal
@@ -1078,31 +979,17 @@ mining_tasks:
   - harvest_1_gold_ore       # 金矿石（新增）
   - harvest_1_lapis_ore      # 青金石（新增）
 
-# 动物掉落物测试集
+# 植物动物掉落物测试集
 animal_drops_tasks:
   - harvest_1_wool           # 羊毛（新增）
   - harvest_1_beef           # 牛肉（新增）
   - harvest_1_porkchop       # 猪肉（新增）
   - harvest_1_chicken        # 鸡肉（新增）
-
-# 特殊掉落物测试集（新增）
-special_drops_tasks:
   - harvest_1_leather        # 皮革（新增）
   - harvest_1_feather        # 羽毛（新增）
-
-# 植物类测试集（新增）
-plants_tasks:
   - harvest_1_flower         # 花朵（新增）
   - harvest_1_sapling        # 树苗（新增）
   - harvest_1_mushroom       # 蘑菇（新增）
-
-# 特殊方块测试集（新增）
-special_blocks_tasks:
-  - harvest_1_clay           # 粘土（新增）
-  - harvest_1_snow           # 雪块（新增）
-
-# 食物测试集
-food_tasks:
   - harvest_1_apple
 
 # 农作物测试集（需要较长时间）
@@ -1113,8 +1000,6 @@ crops_tasks:
   - harvest_1_beetroot
   - harvest_1_pumpkin
   - harvest_1_reeds
-
-
 
 # ============================================================================
 # 注释和说明
@@ -1167,17 +1052,11 @@ crops_tasks:
 #   scripts/run_evaluation.sh --task harvest_1_flower --n-trials 10
 #
 # 任务集说明:
-#   all_tasks:               全部任务（29个）⭐完整基线评估
 #   all_harvest_tasks:       所有采集任务（29个，同all_tasks）
-#   harvest_tasks:           harvest_tasks定义（29个任务定义）
 #   quick_harvest_tasks:     快速测试集（1个简单任务）
 #   raw_resources_tasks:     原始资源（9个，包含矿石）
 #   mining_tasks:            矿石采集（5个，需要工具）
-#   animal_drops_tasks:      动物掉落物（4个）
-#   special_drops_tasks:     特殊掉落物（2个）
-#   plants_tasks:            植物类（3个）
-#   special_blocks_tasks:    特殊方块（2个）
-#   food_tasks:              食物（1个）
+#   animal_drops_tasks:      动物植物掉落物（4个）
 #   crops_tasks:             农作物（6个，需要长时间）
 #
 # 💡 资源管理优化:
