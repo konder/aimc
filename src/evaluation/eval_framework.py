@@ -454,12 +454,21 @@ class EvaluationFramework:
         Returns:
             Tuple[str, str]: JSON报告路径和TXT报告路径
         """
+        logger.info(f"\n{'='*80}")
+        logger.info(f"开始生成评估报告...")
+        logger.info(f"{'='*80}")
+        
         if results is None:
             results = self.results
         
         if not results:
-            logger.warning("没有评估结果，无法生成报告")
+            logger.warning("⚠️  没有评估结果，无法生成报告")
             return None, None
+        
+        logger.info(f"  结果数量: {len(results)}")
+        logger.info(f"  Task-set 目录: {self.current_task_set_dir}")
+        if self.current_task_set_dir:
+            logger.info(f"  目录路径: {self.current_task_set_dir}")
         
         # 构建报告数据
         report_data = {
@@ -503,44 +512,80 @@ class EvaluationFramework:
         json_filename = f"{report_name}_{timestamp}.json"
         
         # 优先级：task-set 目录 > 单任务目录 > 全局目录
-        if self.current_task_set_dir:
-            # 多任务评估（task-set），保存到 task-set 目录
-            json_path = self.current_task_set_dir / json_filename
-            logger.info(f"  将报告保存到 task-set 目录: {self.current_task_set_dir.name}")
-        elif len(results) == 1:
-            # 单任务评估，保存到任务目录下
-            task_id = results[0].task_id
-            language = results[0].language
-            # 查找匹配的目录（按时间倒序）
-            pattern = f"{task_id}_{language}_*"
-            matching_dirs = sorted(
-                Path(self.config.results_dir).glob(pattern),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
-            if matching_dirs:
-                json_path = matching_dirs[0] / json_filename
-                logger.info(f"  将报告保存到任务目录: {matching_dirs[0].name}")
+        json_path = None
+        try:
+            if self.current_task_set_dir and self.current_task_set_dir.exists():
+                # 多任务评估（task-set），保存到 task-set 目录
+                json_path = self.current_task_set_dir / json_filename
+                logger.info(f"  📁 将报告保存到 task-set 目录: {self.current_task_set_dir.name}")
+            elif len(results) == 1:
+                # 单任务评估，保存到任务目录下
+                task_id = results[0].task_id
+                language = results[0].language
+                # 查找匹配的目录（按时间倒序）
+                pattern = f"{task_id}_{language}_*"
+                matching_dirs = sorted(
+                    Path(self.config.results_dir).glob(pattern),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                if matching_dirs:
+                    json_path = matching_dirs[0] / json_filename
+                    logger.info(f"  📁 将报告保存到任务目录: {matching_dirs[0].name}")
+                else:
+                    json_path = Path(self.report_generator.output_dir) / json_filename
+                    logger.info(f"  📁 将报告保存到全局目录（未找到任务目录）")
             else:
+                # 多任务但无 task-set，使用全局目录
                 json_path = Path(self.report_generator.output_dir) / json_filename
-        else:
-            # 多任务但无 task-set，使用全局目录
-            json_path = Path(self.report_generator.output_dir) / json_filename
-        
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(report_data, f, ensure_ascii=False, indent=2)
-        
-        # 生成文本报告
-        txt_path = json_path.with_suffix('.txt')
-        self._generate_text_report(report_data, txt_path)
-        
-        logger.info(f"\n{'='*80}")
-        logger.info(f"报告已生成:")
-        logger.info(f"  JSON: {json_path}")
-        logger.info(f"  TXT:  {txt_path}")
-        logger.info(f"{'='*80}\n")
-        
-        return str(json_path), str(txt_path)
+                logger.info(f"  📁 将报告保存到全局目录（无 task-set 目录）")
+            
+            # 确保目录存在
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 保存JSON报告
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(report_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"  ✓ JSON 报告已保存")
+            
+            # 生成文本报告
+            txt_path = json_path.with_suffix('.txt')
+            self._generate_text_report(report_data, txt_path)
+            logger.info(f"  ✓ TXT 报告已保存")
+            
+            logger.info(f"\n{'='*80}")
+            logger.info(f"✅ 报告已生成:")
+            logger.info(f"  JSON: {json_path}")
+            logger.info(f"  TXT:  {txt_path}")
+            logger.info(f"{'='*80}\n")
+            
+            return str(json_path), str(txt_path)
+            
+        except Exception as e:
+            logger.error(f"❌ 生成报告时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 尝试在全局目录生成报告作为后备
+            try:
+                fallback_path = Path(self.report_generator.output_dir) / json_filename
+                fallback_path.parent.mkdir(parents=True, exist_ok=True)
+                logger.warning(f"⚠️  尝试在全局目录生成报告: {fallback_path}")
+                
+                with open(fallback_path, 'w', encoding='utf-8') as f:
+                    json.dump(report_data, f, ensure_ascii=False, indent=2)
+                
+                txt_fallback = fallback_path.with_suffix('.txt')
+                self._generate_text_report(report_data, txt_fallback)
+                
+                logger.info(f"✅ 后备报告已生成:")
+                logger.info(f"  JSON: {fallback_path}")
+                logger.info(f"  TXT:  {txt_fallback}")
+                
+                return str(fallback_path), str(txt_fallback)
+            except Exception as e2:
+                logger.error(f"❌ 后备报告生成也失败: {e2}")
+                return None, None
     
     def _generate_text_report(self, report_data: Dict[str, Any], output_path: Path):
         """生成人类可读的文本报告"""
