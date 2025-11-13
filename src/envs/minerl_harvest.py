@@ -273,6 +273,27 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         force_reset = self.world_generator.get("force_reset", True)
         generator_options = self.world_generator.get("generator_options", '{"biome":"plains"}')
         
+        # 添加详细日志，确认参数传递
+        logger.info("=" * 60)
+        logger.info("🌍 世界生成器配置:")
+        logger.info(f"  force_reset: {force_reset}")
+        logger.info(f"  generator_options: {generator_options}")
+        logger.info(f"  generator_options 类型: {type(generator_options)}")
+        
+        # 尝试解析 JSON 以验证格式
+        try:
+            import json
+            if isinstance(generator_options, str):
+                parsed = json.loads(generator_options)
+                logger.info(f"  ✅ JSON 解析成功: {parsed}")
+                if 'biome' in parsed:
+                    logger.info(f"  🏔️  生物群系: {parsed['biome']}")
+            else:
+                logger.warning(f"  ⚠️  generator_options 不是字符串: {type(generator_options)}")
+        except Exception as e:
+            logger.error(f"  ❌ JSON 解析失败: {e}")
+        logger.info("=" * 60)
+        
         return [
             handlers.DefaultWorldGenerator(
                 force_reset=force_reset,
