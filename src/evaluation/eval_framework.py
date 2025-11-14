@@ -83,6 +83,10 @@ class EvaluationFramework:
         """
         # 配置日志过滤器，过滤掉不必要的警告
         self._setup_log_filters()
+
+        logger.info(f"{'='*30}")
+        logger.info(f"调度器加载...")
+        logger.info(f"{'='*30}")
         
         self.config = config or EvaluationConfig()
         
@@ -92,23 +96,12 @@ class EvaluationFramework:
         
         # 初始化报告生成器
         self.report_generator = ReportGenerator(self.config.results_dir)
-        
-        # 创建或使用提供的评估器
-        if evaluator is None:
-            logger.info("创建 STEVE-1 评估器...")
-            self.evaluator = STEVE1Evaluator(
-                model_path=self.config.model_path,
-                weights_path=self.config.weights_path,
-                prior_weights=self.config.prior_weights,
-                text_cond_scale=self.config.text_cond_scale,
-                seed=self.config.seed,
-                enable_render=self.config.enable_render,
-                video_size=self.config.video_size,  # 视频尺寸，None 表示不录制
-                env_name='MineRLHarvestEnv-v0'  # 默认使用自定义环境
-            )
-        else:
+
+        # 保留 evaluator 参数用于向后兼容，但不在初始化时创建
+        # 每个任务会创建专用的 evaluator，避免环境配置冲突
+        self.evaluator = evaluator  # 通常为 None
+        if self.evaluator:
             logger.info("使用提供的评估器实例")
-            self.evaluator = evaluator
         
         # 结果存储
         self.results: List[TaskResult] = []
@@ -119,8 +112,12 @@ class EvaluationFramework:
         logger.info("评估框架初始化完成")
     
     def _setup_log_filters(self):
-        """配置日志过滤器，过滤掉不必要的警告信息"""
+        """配置日志系统：格式化、过滤器等"""
         import warnings
+        from src.utils.logging_config import setup_evaluation_logging
+        
+        # 配置统一的日志格式和过滤器（缩短模块名、过滤不需要的日志）
+        setup_evaluation_logging()
         
         # 1. 过滤 PyTorch 的 UserWarning（如 autocast 警告）
         warnings.filterwarnings('ignore', category=UserWarning, module='torch')
@@ -141,7 +138,7 @@ class EvaluationFramework:
         # 3. 过滤 STEVE-1 的 UserWarning
         warnings.filterwarnings('ignore', category=UserWarning, module='steve1')
         
-        logger.debug("日志过滤器已配置：已过滤 MineRL/Malmo WARNING 和 PyTorch UserWarning")
+        logger.debug("日志系统已配置：缩短模块名、过滤不需要的日志")
     
     def evaluate_single_task(
         self,
@@ -203,9 +200,9 @@ class EvaluationFramework:
             env_config=env_config  # 传递环境配置（包含 max_episode_steps）
         )
         
-        logger.info(f"\n{'='*80}")
-        logger.info(f"评估任务: {task_id}")
-        logger.info(f"{'='*80}")
+        logger.info(f"{'='*30}")
+        logger.info(f"调度任务: {task_id}")
+        logger.info(f"{'='*30}")
         logger.info(f"  描述: {task_config.get('description', 'N/A')}")
         logger.info(f"  类别: {task_config.get('category', 'N/A')}")
         logger.info(f"  难度: {task_config.get('difficulty', 'N/A')}")
@@ -638,12 +635,10 @@ class EvaluationFramework:
 if __name__ == "__main__":
     import argparse
     import warnings
+    from src.utils.logging_config import setup_evaluation_logging
     
-    # 配置日志
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # 配置日志（使用统一的格式和过滤器）
+    setup_evaluation_logging()
     
     # 过滤不必要的警告信息（在框架初始化之前）
     # 1. PyTorch 警告
@@ -726,7 +721,7 @@ if __name__ == "__main__":
             else:
                 raise ValueError(f"无效的视频尺寸格式: {args.video_size}")
             video_size = (width, height)
-            logger.info(f"视频录制: {width}x{height}")
+            #logger.info(f"视频录制: {width}x{height}")
         except Exception as e:
             logger.warning(f"解析视频尺寸失败: {e}，将不录制视频")
             video_size = None

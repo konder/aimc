@@ -16,6 +16,11 @@ from steve1.data.text_alignment.vae import TranslatorVAE
 
 from .device import DEVICE
 
+import logging
+import time
+    
+logger = logging.getLogger(__name__)
+
 
 def load_model_parameters(path_to_model_file):
     agent_parameters = pickle.load(open(path_to_model_file, "rb"))
@@ -26,7 +31,7 @@ def load_model_parameters(path_to_model_file):
 
 
 def load_mineclip_wconfig():
-    print('Loading MineClip...')
+    logger.info('Loading MineClip...')
     return load(MINECLIP_CONFIG, device=DEVICE)
 
 
@@ -44,26 +49,27 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
     Returns:
         env: MineRL 环境（可能被 Wrapper 包装）
     """
-    import logging
-    import time
-    
-    logger = logging.getLogger(__name__)
-    print(f'Loading MineRL environment: {env_name}...')
+    logger.info(f'Loading MineRL environment: {env_name}...')
     
     # 如果是自定义环境且有配置，传递所有配置参数
-    if env_name == 'MineRLHarvestEnv-v0' and env_config:
+    custom_envs = ['MineRLHarvestEnv-v0', 'MineRLHarvestDefaultEnv-v0', 'MineRLHarvestFlatWorldEnv-v0']
+    if env_name in custom_envs and env_config:
         # 从 env_config 中提取参数
         reward_config = env_config.get('reward_config')
         reward_rule = env_config.get('reward_rule', 'any')
         world_generator = env_config.get('world_generator')
+        generator_string = env_config.get('generator_string')  # FlatWorld 参数
         time_condition = env_config.get('time_condition')
         spawning_condition = env_config.get('spawning_condition')
         initial_inventory = env_config.get('initial_inventory')  # 🎒 添加初始物品配置
         max_episode_steps = env_config.get('max_episode_steps', 2000)
         
-        logger.info(f"创建 MineRLHarvestEnv，配置:")
+        logger.info(f"{'='*30}")
+        logger.info(f"创建 MineRLHarvestEnv 及配置")
+        logger.info(f"{'='*30}")
         logger.info(f"  reward_config: {len(reward_config)} 项" if reward_config else "  reward_config: None")
         logger.info(f"  reward_rule: {reward_rule}")
+        logger.info(f"  generator_string: {generator_string}" if generator_string else f"  world_generator: {world_generator}")
         logger.info(f"  initial_inventory: {initial_inventory}" if initial_inventory else "  initial_inventory: None")
         logger.info(f"  max_episode_steps: {max_episode_steps}")
         
@@ -73,6 +79,7 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
             reward_config=reward_config,
             reward_rule=reward_rule,
             world_generator=world_generator,
+            generator_string=generator_string,  # 传递 FlatWorld 参数
             time_condition=time_condition,
             spawning_condition=spawning_condition,
             initial_inventory=initial_inventory,  # 🎒 传递初始物品配置
@@ -83,18 +90,18 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
         env = gym.make(env_name)
     
     # 首次 reset
-    print('Starting new env...')
+    logger.info('Starting new env...')
     env.reset()
     
     if seed is not None:
-        print(f'Setting seed to {seed}...')
+        logger.info(f'Setting seed to {seed}...')
         env.seed(seed)
     
     return env
 
 
 def make_agent(in_model, in_weights, cond_scale):
-    print(f'Loading agent with cond_scale {cond_scale}...')
+    logger.info(f'Loading agent with cond_scale {cond_scale}...')
     agent_policy_kwargs, agent_pi_head_kwargs = load_model_parameters(in_model)
     env = gym.make("MineRLBasaltFindCave-v0")
     # Make conditional agent
@@ -111,7 +118,7 @@ def make_agent(in_model, in_weights, cond_scale):
         for module in agent.policy.modules():
             if hasattr(module, 'float'):
                 module.float()
-        print('  Agent policy 及所有子模块已转换为 float32')
+        logger.info('  Agent policy 及所有子模块已转换为 float32')
     
     agent.reset(cond_scale=cond_scale)
     env.close()

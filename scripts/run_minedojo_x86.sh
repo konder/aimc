@@ -57,6 +57,9 @@ export PATH="$JAVA_HOME/bin:$PATH"
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
+export MINE_RL_MC_PATH=/usr/local/Caskroom/miniforge/base/envs/minedojo-x86/lib/python3.9/site-packages/minerl/
+export MINE_DOJO_MC_PATH=/usr/local/Caskroom/miniforge/base/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/
+
 # 如果有参数，执行传入的命令
 if [ $# -eq 0 ]; then
     # 没有参数，启动交互式shell

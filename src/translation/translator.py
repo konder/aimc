@@ -39,7 +39,7 @@ class ChineseTranslator:
         # 加载术语词典
         self.term_dict = self._load_term_dict(term_dict_path)
         
-        logger.info(f"翻译器初始化完成: method={method}, terms={len(self.term_dict)}")
+        #logger.info(f"翻译器初始化完成: method={method}, terms={len(self.term_dict)}")
     
     def _load_term_dict(self, dict_path: str) -> Dict[str, str]:
         """
@@ -73,7 +73,7 @@ class ChineseTranslator:
                     elif isinstance(value, str):
                         term_dict[key] = value
                 
-                logger.info(f"成功加载术语词典: {len(term_dict)} 条")
+                #logger.info(f"成功加载术语词典: {len(term_dict)} 条")
                 return term_dict
             except Exception as e:
                 logger.warning(f"加载术语词典失败: {e}，使用空词典")

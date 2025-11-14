@@ -1,6 +1,6 @@
 """
-MineRL Harvest 环境配置
-使用 Gym Wrapper 实现动态奖励（在 Python 端计算）
+MineRL Harvest Default 环境配置
+使用 DefaultWorldGenerator（默认世界生成，无群系控制）
 """
 
 import gym
@@ -40,7 +40,7 @@ class MineRLHarvestWrapper(gym.Wrapper):
         self.item_completed = {cfg["entity"]: False for cfg in reward_config}
         self.task_done = False
         
-        logger.info(f"✅ MineRLHarvestWrapper 初始化")
+        logger.info(f"MineRLHarvestWrapper 初始化")
         logger.info(f"  监控物品: {[cfg['entity'] for cfg in reward_config]}")
         logger.info(f"  完成规则: {reward_rule}")
     
@@ -131,34 +131,31 @@ class MineRLHarvestWrapper(gym.Wrapper):
             if any(self.item_completed.values()):
                 self.task_done = True
                 completed_items = [k for k, v in self.item_completed.items() if v]
-                logger.info(f"🎉 任务完成！(reward_rule=any, 完成: {completed_items})")
+                logger.info(f"任务完成！(reward_rule=any, 完成: {completed_items})")
                 return True
         
         elif self.reward_rule == "all":
             # 所有目标都要完成
             if all(self.item_completed.values()):
                 self.task_done = True
-                logger.info(f"🎉 任务完成！(reward_rule=all)")
+                logger.info(f"任务完成！(reward_rule=all)")
                 return True
         
         return False
 
 
-class MineRLHarvestEnvSpec(HumanControlEnvSpec):
+class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
     """
-    HarvestEnv 任务规范
+    HarvestEnv Default 任务规范
     
-    这是一个简单的基础环境，不包含自定义奖励逻辑
-    奖励逻辑由 MineRLHarvestWrapper 实现
-    
-    世界生成、时间、生成条件等参数可以通过 env_config 动态配置
+    使用 DefaultWorldGenerator（默认世界生成，无群系控制）
+    适用于需要树木、动物、植物等自然生成的任务
     """
     
     def __init__(
         self, 
         resolution=(640, 320), 
         max_episode_steps=2000,
-        world_generator: Optional[Dict] = None,
         time_condition: Optional[Dict] = None,
         spawning_condition: Optional[Dict] = None,
         initial_inventory: Optional[List[Dict]] = None,
@@ -168,28 +165,23 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         Args:
             resolution: 分辨率
             max_episode_steps: 最大步数
-            world_generator: 世界生成器参数 (如 {"force_reset": True, "generator_options": '{"biome":"plains"}'})
             time_condition: 时间条件 (如 {"allow_passage_of_time": False, "start_time": 6000})
             spawning_condition: 生成条件 (如 {"allow_spawning": True})
             initial_inventory: 初始物品 (如 [{"type": "bucket", "quantity": 1}])
         """
         # 设置环境名称
         if 'name' not in kwargs:
-            kwargs['name'] = 'MineRLHarvestEnv-v0'
+            kwargs['name'] = 'MineRLHarvestDefaultEnv-v0'
         
         # 设置 episode 长度
         if 'max_episode_steps' not in kwargs:
             kwargs['max_episode_steps'] = max_episode_steps
         
-        # 在父类初始化之前设置这些属性，因为父类会调用 create_server_quit_producers
+        # 在父类初始化之前设置这些属性
         self.episode_len = kwargs['max_episode_steps']
         self.reward_threshold = 100.0
         
-        # 保存配置参数（使用默认值）
-        self.world_generator = world_generator or {
-            "force_reset": True,
-            "generator_options": '{"biome":"plains"}'  # 默认平原群系
-        }
+        # 保存配置参数
         self.time_condition = time_condition or {
             "allow_passage_of_time": False,
             "start_time": 6000  # 默认白天
@@ -199,12 +191,6 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         }
         self.initial_inventory = initial_inventory or []  # 默认空手
         
-        # 调试日志：打印初始库存配置
-        if initial_inventory:
-            logger.info(f"🎒 MineRLHarvestEnvSpec.__init__ 接收到 initial_inventory: {initial_inventory}")
-        else:
-            logger.info("🎒 MineRLHarvestEnvSpec.__init__ 没有接收到 initial_inventory")
-        
         # 调用父类初始化
         super().__init__(
             resolution=resolution,
@@ -212,7 +198,7 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         )
     
     def create_observables(self) -> List[Handler]:
-        """定义观察空间 - 完整列表（参考 HumanSurvival）"""
+        """定义观察空间"""
         return [
             handlers.POVObservation(self.resolution),
             handlers.FlatInventoryObservation(ALL_ITEMS),
@@ -239,7 +225,7 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         ]
     
     def create_agent_handlers(self) -> List[Handler]:
-        """定义 Agent handlers（空列表，因为是单人游戏）"""
+        """定义 Agent handlers"""
         return []
     
     def create_rewardables(self) -> List[Handler]:
@@ -252,52 +238,21 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         
         # 如果有初始物品配置，添加 SimpleInventoryAgentStart
         if self.initial_inventory:
-            logger.info(f"=" * 60)
-            logger.info(f"✓ 初始物品库存配置: {self.initial_inventory}")
-            logger.info(f"=" * 60)
-            
-            # SimpleInventoryAgentStart 期望的格式就是：
-            # [{'type':'bucket', 'quantity':1}]
-            # 我们的配置已经是这个格式了，直接使用
+            logger.info(f"✓ 初始物品库存: {self.initial_inventory}")
             agent_start_handlers.append(
                 handlers.SimpleInventoryAgentStart(self.initial_inventory)
             )
-            logger.info(f"✓ 已添加 SimpleInventoryAgentStart handler")
-        else:
-            logger.info("ℹ️  没有初始物品配置 (initial_inventory 为空)")
         
         return agent_start_handlers
     
     def create_server_world_generators(self) -> List[Handler]:
-        """世界生成器 - 从配置读取"""
-        force_reset = self.world_generator.get("force_reset", True)
-        generator_options = self.world_generator.get("generator_options", '{"biome":"plains"}')
-        
-        # 添加详细日志，确认参数传递
-        logger.info("=" * 60)
-        logger.info("🌍 世界生成器配置:")
-        logger.info(f"  force_reset: {force_reset}")
-        logger.info(f"  generator_options: {generator_options}")
-        logger.info(f"  generator_options 类型: {type(generator_options)}")
-        
-        # 尝试解析 JSON 以验证格式
-        try:
-            import json
-            if isinstance(generator_options, str):
-                parsed = json.loads(generator_options)
-                logger.info(f"  ✅ JSON 解析成功: {parsed}")
-                if 'biome' in parsed:
-                    logger.info(f"  🏔️  生物群系: {parsed['biome']}")
-            else:
-                logger.warning(f"  ⚠️  generator_options 不是字符串: {type(generator_options)}")
-        except Exception as e:
-            logger.error(f"  ❌ JSON 解析失败: {e}")
-        logger.info("=" * 60)
+        """世界生成器 - 使用 DefaultWorldGenerator"""
+        logger.info(f"使用 DefaultWorldGenerator（默认世界）")
         
         return [
             handlers.DefaultWorldGenerator(
-                force_reset=force_reset,
-                generator_options=generator_options
+                force_reset=True,
+                generator_options=''  # 留空，使用默认世界
             )
         ]
     
@@ -313,7 +268,7 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         return []
     
     def create_server_initial_conditions(self) -> List[Handler]:
-        """初始条件 - 从配置读取"""
+        """初始条件"""
         allow_passage_of_time = self.time_condition.get("allow_passage_of_time", False)
         start_time = self.time_condition.get("start_time", 6000)
         allow_spawning = self.spawning_condition.get("allow_spawning", True)
@@ -329,7 +284,7 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
         ]
     
     def determine_success_from_rewards(self, rewards: list) -> bool:
-        """根据奖励判断任务是否成功 - Wrapper 会设置 done=True"""
+        """根据奖励判断任务是否成功"""
         return False
     
     def is_from_folder(self, folder: str) -> bool:
@@ -339,15 +294,15 @@ class MineRLHarvestEnvSpec(HumanControlEnvSpec):
     def get_docstring(self):
         """获取文档字符串"""
         return """
-        MineRL Harvest Environment
-        使用 MineRLHarvestWrapper 来实现动态奖励配置。
+        MineRL Harvest Default Environment
+        使用 DefaultWorldGenerator 生成默认世界（有树木、动物、植物）。
+        适用于依赖自然生成的任务。
         """
 
 
-def _minerl_harvest_env_entrypoint(
+def _minerl_harvest_default_env_entrypoint(
     reward_config: Optional[List[Dict]] = None,
     reward_rule: str = "any",
-    world_generator: Optional[Dict] = None,
     time_condition: Optional[Dict] = None,
     spawning_condition: Optional[Dict] = None,
     initial_inventory: Optional[List[Dict]] = None,
@@ -360,16 +315,14 @@ def _minerl_harvest_env_entrypoint(
     Args:
         reward_config: 奖励配置
         reward_rule: 完成规则
-        world_generator: 世界生成器参数
         time_condition: 时间条件
         spawning_condition: 生成条件
         initial_inventory: 初始物品配置
-        max_episode_steps: 最大步数（从 eval_tasks 的 max_steps 传入）
+        max_episode_steps: 最大步数
     """
     # 创建 env_spec
-    env_spec = MineRLHarvestEnvSpec(
+    env_spec = MineRLHarvestDefaultEnvSpec(
         max_episode_steps=max_episode_steps,
-        world_generator=world_generator,
         time_condition=time_condition,
         spawning_condition=spawning_condition,
         initial_inventory=initial_inventory,
@@ -387,39 +340,14 @@ def _minerl_harvest_env_entrypoint(
     return env
 
 
-def register_minerl_harvest_env():
-    """
-    注册 MineRL Harvest 环境
-    
-    使用方式:
-        import gym
-        from src.envs import register_minerl_harvest_env
-        
-        register_minerl_harvest_env()
-        
-        # 创建环境（会自动应用配置）
-        env = gym.make(
-            'MineRLHarvestEnv-v0',
-            reward_config=[
-                {"entity": "oak_log", "amount": 1, "reward": 100},
-            ],
-            reward_rule="any",
-            world_generator={"force_reset": True, "generator_options": '{"biome":"plains"}'},
-            time_condition={"allow_passage_of_time": False, "start_time": 6000},
-            spawning_condition={"allow_spawning": True},
-            initial_inventory=[
-                {"type": "bucket", "quantity": 1},
-                {"type": "iron_pickaxe", "quantity": 1}
-            ]
-        )
-    """
+def register_minerl_harvest_default_env():
+    """注册 MineRL Harvest Default 环境"""
     try:
-        # 使用自定义的 entry_point
         gym.register(
-            id='MineRLHarvestEnv-v0',
-            entry_point='src.envs.minerl_harvest:_minerl_harvest_env_entrypoint'
+            id='MineRLHarvestDefaultEnv-v0',
+            entry_point='src.envs.minerl_harvest_default:_minerl_harvest_default_env_entrypoint'
         )
-        logger.info("✓ MineRLHarvestEnv-v0 已注册（使用动态配置 + Wrapper 模式）")
+        logger.info("✓ MineRLHarvestDefaultEnv-v0 已注册（DefaultWorldGenerator）")
     except gym.error.Error:
-        # 已经注册过了
         pass
+

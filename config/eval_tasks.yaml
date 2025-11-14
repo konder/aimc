@@ -112,7 +112,7 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令挖掘1个泥土"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig dirt"
     
@@ -122,35 +122,7 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"plains"}'
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 500
-  
-  # 使用英文指令挖掘1个草方块
-  - task_id: "harvest_1_grass"
-    category: "raw_resources"
-    difficulty: "easy"
-    description: "使用英文指令挖掘1个草方块"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "dig grass block"
-    
-    env_config:
-      reward_config:
-        - entity: "grass"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"plains"}'
+      generator_string: "minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block;minecraft:plains"  # FlatWorld: 泥土层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -164,7 +136,7 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "medium"
     description: "使用英文指令采集1个圆石（提供木镐）"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "mine cobblestone"
     #en_instruction: "Mining cobblestone"
@@ -172,12 +144,10 @@ harvest_tasks:
     env_config:
       reward_config:
         - entity: "cobblestone"
-          amount: 1
+          amount: 3
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"plains"}'
+      generator_string: "minecraft:bedrock,50*minecraft:stone;minecraft:plains"  # FlatWorld: 石头层（挖掘获得圆石）
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -187,14 +157,14 @@ harvest_tasks:
         - type: "wooden_pickaxe"
           quantity: 1  # 提供木镐采集石头
     
-    max_steps: 2000
+    max_steps: 100
   
   # 使用英文指令采集1个煤炭（需要木镐）
   - task_id: "harvest_1_coal"
     category: "raw_resources"
     difficulty: "medium"
     description: "使用英文指令采集1个煤炭（提供木镐）"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "mine coal"
     
@@ -204,9 +174,7 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"plains"}'
+      generator_string: "minecraft:bedrock,20*minecraft:stone,5*minecraft:coal_ore,minecraft:grass_block;minecraft:mountains"  # FlatWorld: 煤矿石层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -216,14 +184,14 @@ harvest_tasks:
         - type: "wooden_pickaxe"
           quantity: 1
     
-    max_steps: 2000  # 需要找到煤矿，可能需要挖掘
+    max_steps: 500  # FlatWorld 地表就有煤矿，无需寻找
   
   # 使用英文指令采集1个铁矿石（需要石镐）
   - task_id: "harvest_1_iron_ore"
     category: "raw_resources"
     difficulty: "hard"
     description: "使用英文指令采集1个铁矿石（提供石镐）"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "mine iron ore"
     
@@ -233,9 +201,7 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"extreme_hills"}'  # 山地铁矿更多
+      generator_string: "minecraft:bedrock,20*minecraft:stone,5*minecraft:iron_ore,minecraft:grass_block;minecraft:mountains"  # FlatWorld: 铁矿石层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -245,14 +211,14 @@ harvest_tasks:
         - type: "stone_pickaxe"
           quantity: 1  # 铁矿需要石镐或更好的工具
     
-    max_steps: 3000  # 铁矿在地下，需要挖掘
+    max_steps: 500  # FlatWorld 地表就有铁矿，无需挖掘
   
   # 使用英文指令采集1个沙子
   - task_id: "harvest_1_sand"
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令采集1个沙子"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig sand"
     
@@ -262,23 +228,21 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"desert"}'  # 沙漠有大量沙子
+      generator_string: "minecraft:bedrock,3*minecraft:sandstone,5*minecraft:sand;minecraft:desert"  # FlatWorld: 沙子层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
       spawning_condition:
         allow_spawning: true
     
-    max_steps: 1000
+    max_steps: 500
   
   # 使用英文指令采集1个沙砾
   - task_id: "harvest_1_gravel"
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令采集1个沙砾"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig gravel"
     
@@ -288,16 +252,14 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"swampland"}'
+      generator_string: "minecraft:bedrock,2*minecraft:stone,10*minecraft:gravel;minecraft:plains"  # FlatWorld: 沙砾层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
       spawning_condition:
         allow_spawning: true
     
-    max_steps: 1000
+    max_steps: 500
 
   # =========================================================================
   # 动物掉落物任务 (Animal Drops)
@@ -577,8 +539,8 @@ harvest_tasks:
   - task_id: "harvest_1_clay"
     category: "special_blocks"
     difficulty: "medium"
-    description: "使用英文指令采集1个粘土块（水下）"
-    env_name: "MineRLHarvestEnv-v0"
+    description: "使用英文指令采集1个粘土块"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig clay"
     
@@ -588,23 +550,21 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"swampland"}'  # 沼泽粘土多
+      generator_string: "minecraft:bedrock,2*minecraft:stone,5*minecraft:clay;minecraft:swamp"  # FlatWorld: 粘土层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
       spawning_condition:
         allow_spawning: true
     
-    max_steps: 2000  # 需要找水源并潜水挖掘
+    max_steps: 500  # FlatWorld 地表就有粘土，无需潜水
   
   # 使用英文指令采集1个雪块
   - task_id: "harvest_1_snow"
     category: "special_blocks"
     difficulty: "easy"
     description: "使用英文指令采集1个雪块"
-    env_name: "MineRLHarvestEnv-v0"
+    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig snow"
     
@@ -614,9 +574,7 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"ice_plains"}'  # 冰原雪最多
+      generator_string: "minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block,minecraft:snow;minecraft:snowy_tundra"  # FlatWorld: 雪地
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -626,7 +584,7 @@ harvest_tasks:
         - type: "wooden_shovel"
           quantity: 1  # 雪需要铲子采集
     
-    max_steps: 1000
+    max_steps: 500
 
   # =========================================================================
   # 矿石扩展任务 (Extended Ores)
@@ -930,7 +888,6 @@ all_harvest_tasks:
   - harvest_1_log
   - harvest_1_milk
   - harvest_1_dirt
-  - harvest_1_grass
   - harvest_1_cobblestone
   - harvest_1_coal
   - harvest_1_iron_ore
@@ -964,7 +921,6 @@ raw_resources_tasks:
   - harvest_1_log       # 木头
   - harvest_1_milk           # 牛奶
   - harvest_1_dirt           # 泥土
-  - harvest_1_grass          # 草方块
   - harvest_1_cobblestone    # 圆石
   - harvest_1_coal           # 煤炭
   - harvest_1_iron_ore       # 铁矿石

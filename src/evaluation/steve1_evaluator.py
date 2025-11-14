@@ -119,15 +119,18 @@ class STEVE1Evaluator:
             import torch
             from src.utils.device import DEVICE
             
-            logger.info("加载 STEVE-1 组件...")
-            logger.info(f"  🖥️  Device 模式: {DEVICE}")
+            logger.info(f"{'='*30}")
+            logger.info(f"加载 STEVE-1 组件...")
+            logger.info(f"{'='*30}")
+
+            logger.info(f"Device 模式: {DEVICE}")
             if DEVICE == 'cuda':
-                logger.info(f"  🎮 GPU: {torch.cuda.get_device_name(0)}")
-                logger.info(f"  💾 显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+                logger.info(f"  GPU: {torch.cuda.get_device_name(0)}")
+                logger.info(f"  显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
             elif DEVICE == 'mps':
-                logger.info(f"  🍎 Apple Silicon GPU")
+                logger.info(f"  Apple Silicon GPU")
             else:
-                logger.info(f"  💻 CPU 模式")
+                logger.info(f"CPU 模式")
             
             logger.info(f"  模型: {self.model_path}")
             logger.info(f"  权重: {self.weights_path}")
@@ -170,7 +173,7 @@ class STEVE1Evaluator:
             self._prior = load_vae_model(prior_info)
             logger.info(f"  ✓ Prior 加载完成")
             
-            logger.info("✅ STEVE-1 所有组件加载完成")
+            logger.info(f"  ✓ STEVE-1 所有组件加载完成")
     
     def evaluate_task(
         self,
@@ -198,6 +201,11 @@ class STEVE1Evaluator:
         # 加载组件
         self._load_components()
         
+        logger.info(f"{'='*30}")
+        logger.info(f"开始评估任务: {task_id}")
+        logger.info(f"{'='*30}")
+        
+
         # 🔑 如果是中文指令，自动翻译成英文
         original_instruction = instruction
         if language in ["zh", "zh_auto", "zh_manual"]:
@@ -206,7 +214,6 @@ class STEVE1Evaluator:
             instruction = self.translator.translate(instruction)
             logger.info(f"  翻译结果: {instruction}")
         
-        logger.info(f"开始评估任务: {task_id}")
         logger.info(f"  语言: {language}")
         logger.info(f"  指令: {original_instruction}")
         if original_instruction != instruction:
@@ -347,7 +354,7 @@ class STEVE1Evaluator:
             
             # 调试：任务结束时打印详细信息（无论done是True还是超时）
             logger.info("="*60)
-            logger.info(f"🔍 任务结束调试信息 (Step {steps})")
+            logger.info(f"任务结束调试信息 (Step {steps})")
             logger.info("="*60)
             
             # 打印基本信息
@@ -365,17 +372,17 @@ class STEVE1Evaluator:
                         non_zero_items[key] = value
             
             if non_zero_items:
-                logger.info("📦 库存中的物品:")
+                logger.info("库存中的物品:")
                 for item, count in non_zero_items.items():
                     logger.info(f"  {item}: {count}")
             else:
-                logger.info("📦 库存为空")            # 打印结束原因
+                logger.info("库存为空")            # 打印结束原因
             if steps >= max_steps:
-                logger.info(f"⏰ 结束原因: 达到最大步数 ({steps})")
+                logger.info(f"结束原因: 达到最大步数 ({steps})")
             elif done and total_reward > 0:
-                logger.info(f"✅ 结束原因: 任务目标达成 (总奖励: {total_reward})")
+                logger.info(f"结束原因: 任务目标达成 (总奖励: {total_reward})")
             elif done:
-                logger.info(f"⚠️ 结束原因: 任务提前结束但无奖励 (done=True)")
+                logger.info(f"结束原因: 任务提前结束但无奖励 (done=True)")
             else:
                 logger.info(f"❓ 结束原因: 未知")
             
@@ -454,6 +461,15 @@ class STEVE1Evaluator:
                 logger.warning(f"关闭环境时出错: {e}")
             finally:
                 self._env = None
+        
+        # 清理 MineRL saves 存档（防止磁盘空间积累）
+        try:
+            from src.utils.minerl_cleanup import clean_minerl_saves
+            removed_count, freed_mb = clean_minerl_saves()
+            if removed_count > 0:
+                logger.info(f"✓ 已清理 {removed_count} 个 MineRL 存档，释放 {freed_mb:.1f} MB 空间")
+        except Exception as e:
+            logger.warning(f"清理 MineRL 存档时出错: {e}")
         
         # 释放模型引用，帮助垃圾回收
         if self._agent is not None:
