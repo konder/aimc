@@ -37,46 +37,38 @@ evaluation:
 # ============================================================================# 基础任务 (Basic Tasks) - 简单、易完成、用于快速验证
 harvest_tasks:
   
-  # 使用英文指令砍任意树木获取一块木头
+  # 使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）
   - task_id: "harvest_1_log"
     category: "raw_resources"
     difficulty: "easy"
-    description: "使用英文指令砍任意树木获取一块木头"
-    env_name: "MineRLHarvestEnv-v0"
+    description: "使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）"
+    env_name: "MineDojoHarvestEnv-v0"
     
     en_instruction: "chop tree"
     
     env_config:
-      reward_config:
-        - entity: "oak_log"
-          amount: 1
-          reward: 100
-        - entity: "birch_log"
-          amount: 1
-          reward: 100
-        - entity: "spruce_log"
-          amount: 1
-          reward: 100
-        - entity: "dark_oak_log"
-          amount: 1
-          reward: 100
-        - entity: "jungle_log"
-          amount: 1
-          reward: 100
-        - entity: "acacia_log"
-          amount: 1
-          reward: 100
-      reward_rule: "any"  # 任意一种木头达标即可
-      world_generator:
-        force_reset: true
-        generator_options: '{"biome":"forest"}'
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
+      # MineDojo 世界生成配置
+      generate_world_type: "specified_biome"
+      specified_biome: "forest"  # 森林 Biome - 树木密集
+      world_seed: "harvest_log_test"
+      task_id: "open-ended"
+      image_size: [160, 256]
+      
+      # 时间和生成设置
+      start_time: 6000  # 白天
+      allow_time_passage: false
+      allow_mob_spawn: false
+      
+      # 初始物品（给一把木斧）
+      initial_inventory:
+        - slot: 0
+          name: "wooden_axe"  # MineDojo 使用 name 而非 type
+          quantity: 1
+      
+      max_episode_steps: 500
     
     max_steps: 500
+    n_trials: 3  # MineDojo 环境下可能效率更高
   
   # 使用英文指令获取1桶牛奶
   - task_id: "harvest_1_milk"
@@ -95,7 +87,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'  # 平原群系，奶牛生成率最高
       time_condition:
         allow_passage_of_time: false
         start_time: 6000  # 白天，有利于动物生成
@@ -112,7 +103,7 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令挖掘1个泥土"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig dirt"
     
@@ -122,7 +113,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block;minecraft:plains"  # FlatWorld: 泥土层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -136,18 +126,17 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "medium"
     description: "使用英文指令采集1个圆石（提供木镐）"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"
     
     en_instruction: "mine cobblestone"
-    #en_instruction: "Mining cobblestone"
     
     env_config:
+      world_file: "data/worlds/mountains"
       reward_config:
         - entity: "cobblestone"
           amount: 3
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,50*minecraft:stone;minecraft:plains"  # FlatWorld: 石头层（挖掘获得圆石）
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -157,14 +146,14 @@ harvest_tasks:
         - type: "wooden_pickaxe"
           quantity: 1  # 提供木镐采集石头
     
-    max_steps: 100
+    max_steps: 500
   
   # 使用英文指令采集1个煤炭（需要木镐）
   - task_id: "harvest_1_coal"
     category: "raw_resources"
     difficulty: "medium"
     description: "使用英文指令采集1个煤炭（提供木镐）"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "mine coal"
     
@@ -174,7 +163,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,20*minecraft:stone,5*minecraft:coal_ore,minecraft:grass_block;minecraft:mountains"  # FlatWorld: 煤矿石层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -191,7 +179,7 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "hard"
     description: "使用英文指令采集1个铁矿石（提供石镐）"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "mine iron ore"
     
@@ -201,7 +189,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,20*minecraft:stone,5*minecraft:iron_ore,minecraft:grass_block;minecraft:mountains"  # FlatWorld: 铁矿石层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -218,7 +205,7 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令采集1个沙子"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig sand"
     
@@ -228,7 +215,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,3*minecraft:sandstone,5*minecraft:sand;minecraft:desert"  # FlatWorld: 沙子层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -242,7 +228,7 @@ harvest_tasks:
     category: "raw_resources"
     difficulty: "easy"
     description: "使用英文指令采集1个沙砾"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig gravel"
     
@@ -252,7 +238,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,2*minecraft:stone,10*minecraft:gravel;minecraft:plains"  # FlatWorld: 沙砾层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -282,7 +267,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'  # 平原羊最多
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -311,7 +295,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -340,7 +323,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -369,7 +351,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -402,7 +383,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -431,7 +411,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -467,7 +446,6 @@ harvest_tasks:
       reward_rule: "any"  # 任意一种花都行
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'  # 平原花朵最多
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -493,7 +471,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"forest"}'  # 森林树木多
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -522,7 +499,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"swampland"}'  # 沼泽蘑菇较多
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -540,7 +516,7 @@ harvest_tasks:
     category: "special_blocks"
     difficulty: "medium"
     description: "使用英文指令采集1个粘土块"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig clay"
     
@@ -550,7 +526,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,2*minecraft:stone,5*minecraft:clay;minecraft:swamp"  # FlatWorld: 粘土层
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -564,7 +539,7 @@ harvest_tasks:
     category: "special_blocks"
     difficulty: "easy"
     description: "使用英文指令采集1个雪块"
-    env_name: "MineRLHarvestFlatWorldEnv-v0"  # 使用 FlatWorld 环境
+    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
     
     en_instruction: "dig snow"
     
@@ -574,7 +549,6 @@ harvest_tasks:
           amount: 1
           reward: 100
       reward_rule: "any"
-      generator_string: "minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block,minecraft:snow;minecraft:snowy_tundra"  # FlatWorld: 雪地
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -607,7 +581,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"extreme_hills"}'  # 山地金矿较多
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -636,7 +609,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"extreme_hills"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -669,7 +641,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'  # 平原有橡树
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -700,7 +671,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -733,7 +703,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -766,7 +735,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -799,7 +767,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -832,7 +799,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'
       time_condition:
         allow_passage_of_time: false
         start_time: 6000
@@ -865,7 +831,6 @@ harvest_tasks:
       reward_rule: "any"
       world_generator:
         force_reset: true
-        generator_options: '{"biome":"plains"}'  # 平原有水源，水边会生成甘蔗
       time_condition:
         allow_passage_of_time: false
         start_time: 6000

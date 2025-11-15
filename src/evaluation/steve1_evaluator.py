@@ -17,7 +17,8 @@ from tqdm import tqdm
 from src.utils.steve1_mineclip_agent_env_utils import (
     load_mineclip_agent_env,
     load_mineclip_wconfig,
-    load_vae_model
+    load_vae_model,
+    make_env  # 添加 make_env 导入
 )
 from src.utils.device import DEVICE
 
@@ -225,6 +226,32 @@ class STEVE1Evaluator:
         trials = []
         for trial_idx in range(n_trials):
             logger.info(f"  Trial {trial_idx + 1}/{n_trials}...")
+            
+            # ⚠️ 临时禁用：每次 trial 前重新加载组件（避免环境状态污染）
+            # 取消注释以下代码块可启用环境重建
+            """
+            if trial_idx > 0:
+                logger.info(f"  ♻️  重新创建环境...")
+                try:
+                    # 关闭旧环境
+                    if self._env is not None:
+                        self._env.close()
+                    
+                    # 清理 saves
+                    self._clean_minedojo_saves()
+                    
+                    # 重新创建环境（保持 agent 和 mineclip）
+                    from src.utils.steve1_mineclip_agent_env_utils import make_env
+                    self._env = make_env(
+                        seed=42,
+                        env_name=self.env_name,
+                        env_config=self.env_config
+                    )
+                    logger.info(f"  ✓ 环境已重新创建")
+                except Exception as e:
+                    logger.error(f"  ⚠️ 重新创建环境失败: {e}")
+                    # 继续使用旧环境
+            """
             
             trial_result = self._run_single_trial(
                 task_id=task_id,
@@ -450,6 +477,44 @@ class STEVE1Evaluator:
                 steps=0,
                 time_seconds=time_seconds
             )
+    
+    def _clean_minedojo_saves(self):
+        """清理 MineDojo 的 saves 目录"""
+        import shutil
+        import sys
+        from pathlib import Path
+        
+        try:
+            # MineDojo saves 目录位于其安装路径下的 Malmo/Minecraft/run/saves/
+            minedojo_path = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages" / "minedojo"
+            saves_path = minedojo_path / "sim" / "Malmo" / "Minecraft" / "run" / "saves"
+            
+            if not saves_path.exists():
+                return
+            
+            # 统计删除前的大小
+            total_size = 0
+            save_count = 0
+            for save_dir in saves_path.iterdir():
+                if save_dir.is_dir():
+                    save_count += 1
+                    for file in save_dir.rglob('*'):
+                        if file.is_file():
+                            total_size += file.stat().st_size
+            
+            if save_count == 0:
+                return
+            
+            # 删除所有存档
+            for save_dir in saves_path.iterdir():
+                if save_dir.is_dir():
+                    shutil.rmtree(save_dir)
+            
+            freed_mb = total_size / (1024 * 1024)
+            logger.info(f"  ✓ 已清理 {save_count} 个 MineDojo 存档，释放 {freed_mb:.1f} MB 空间")
+            
+        except Exception as e:
+            pass  # 静默失败
     
     def close(self):
         """清理资源，释放内存"""

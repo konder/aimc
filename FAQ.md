@@ -575,9 +575,86 @@ image_size=(120, 160)  # 默认是(160, 256)
 
 ---
 
+### Q12: MineRL saves 目录占用大量空间怎么办？
+
+**A**: MineRL 每次运行都会在 `MCP-Reborn/saves/` 目录生成世界存档，需要定期清理。
+
+#### **问题说明**
+
+**Saves 目录位置**:
+```
+/usr/local/Caskroom/miniforge/base/envs/minedojo-x86/lib/python3.9/site-packages/minerl/MCP-Reborn/saves/
+```
+
+**累积原因**:
+- 每次 `env.reset()` 都可能创建新世界
+- 每个世界 10-100+ MB
+- 长期训练会产生数百个世界，占用 GB 级空间
+
+#### **解决方案 1: 查看当前大小**
+
+```bash
+# 使用项目工具
+bash scripts/clean_minerl_saves.sh --show-size
+
+# 或手动检查
+du -sh /usr/.../minerl/MCP-Reborn/saves
+```
+
+#### **解决方案 2: 手动清理**
+
+```bash
+# 预览会删除什么（不实际删除）
+bash scripts/clean_minerl_saves.sh --dry-run
+
+# 删除所有世界
+bash scripts/clean_minerl_saves.sh
+
+# 保留最新的 2 个世界
+bash scripts/clean_minerl_saves.sh --keep-latest 2
+```
+
+#### **解决方案 3: 自动清理**
+
+```bash
+# 只在超过 500MB 时清理
+bash scripts/clean_minerl_saves.sh --auto --threshold 500
+
+# 在训练脚本开头添加这一行
+```
+
+#### **解决方案 4: Python 代码中自动清理**
+
+```python
+from src.utils.minerl_cleanup import auto_clean_if_needed
+
+# 训练前检查清理
+auto_clean_if_needed(threshold_mb=1000, keep_latest=2)
+
+# 正常创建环境
+env = gym.make('MineRLBasaltFindCave-v0')
+# ...
+```
+
+#### **MCP-Reborn 和 Malmo 的关系**
+
+- **MCP-Reborn**: MineRL 使用的 Minecraft 客户端（本项目当前使用）
+  - 位置: `minerl/MCP-Reborn/`
+  - 为 MineRL 框架提供标准化环境
+  
+- **Malmo**: MineDojo 使用的 Minecraft AI 平台（已安装但未使用）
+  - 位置: `minedojo/sim/Malmo/Minecraft/`
+  - 微软开发的官方 Minecraft AI Mod
+
+两者都会生成 `saves/` 目录，当前项目使用 MineRL，所以需要清理 `MCP-Reborn/saves/`。
+
+**详细文档**: `docs/guides/MINERL_SAVES_CLEANUP_GUIDE.md`
+
+---
+
 ## 数据管理相关
 
-### Q12: 如何追加录制更多数据？
+### Q13: 如何追加录制更多数据？
 
 **A**: 使用 `--append-recording` 参数
 
@@ -613,7 +690,7 @@ python src/training/train_bc.py \
 
 ---
 
-### Q13: 可以删除中间数据吗？
+### Q14: 可以删除中间数据吗？
 
 **A**: 可以，但要注意保留顺序
 
@@ -662,7 +739,7 @@ rm -rf data/tasks/harvest_1_log/checkpoints/
 
 ---
 
-### Q14: 多任务的数据会互相干扰吗？
+### Q15: 多任务的数据会互相干扰吗？
 
 **A**: 不会，每个任务有独立的目录
 
@@ -702,7 +779,7 @@ bash scripts/run_dagger_workflow.sh --task harvest_1_wool --iterations 3
 
 ## 训练和评估相关
 
-### Q15: 如何继续训练更多轮 DAgger？
+### Q16: 如何继续训练更多轮 DAgger？
 
 **A**: 使用 `--continue-from` 参数
 
@@ -731,7 +808,7 @@ data/tasks/harvest_1_log/checkpoints/dagger_iter_3.zip
 
 ---
 
-### Q16: 如何查看训练历史和对比模型？
+### Q17: 如何查看训练历史和对比模型？
 
 **A**: 查看评估结果文件
 
@@ -770,7 +847,7 @@ tensorboard --logdir logs/tensorboard
 
 ## 预训练模型相关
 
-### Q17: 能否使用OpenAI的VPT模型作为预训练模型？
+### Q18: 能否使用OpenAI的VPT模型作为预训练模型？
 
 **A**: ✅ **完全可以！而且强烈推荐！**
 
@@ -865,7 +942,7 @@ python src/training/train_bc_with_vpt.py \
 
 ## 其他问题
 
-### Q18: 支持哪些 MineDojo 任务？
+### Q19: 支持哪些 MineDojo 任务？
 
 **A**: 支持所有 MineDojo 程序化任务
 
@@ -904,7 +981,7 @@ bash scripts/run_dagger_workflow.sh \
 
 ---
 
-### Q19: 在哪里获取更多帮助？
+### Q20: 在哪里获取更多帮助？
 
 **A**: 
 

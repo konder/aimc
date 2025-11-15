@@ -164,9 +164,10 @@ class EvaluationFramework:
         if not task_config:
             raise ValueError(f"任务不存在: {task_id}")
         
-        # 确定参数（优先级：函数参数 > 任务配置 > 全局配置）
-        n_trials = n_trials or task_config.get('n_trials') or self.config.n_trials
-        max_steps = max_steps or task_config.get('max_steps') or self.config.max_steps
+        # 确定参数（优先级：函数参数 > 全局配置 > 任务配置）
+        # 注意：命令行参数（n_trials, max_steps）应该优先于任务配置
+        n_trials = n_trials if n_trials is not None else (self.config.n_trials if self.config.n_trials != 3 else task_config.get('n_trials', 3))
+        max_steps = max_steps if max_steps is not None else (self.config.max_steps if self.config.max_steps != 2000 else task_config.get('max_steps', 2000))
         
         # 确定指令和语言
         instruction = None

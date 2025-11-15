@@ -225,6 +225,24 @@ MineDojo提供了**1,572个**内置的Programmatic Tasks（编程任务），涵
 | 沙漠 | `desert` | 无树木，仙人掌 |
 | 海洋 | `ocean` | 深水，鱼类丰富 |
 | 山地 | `extreme_hills` | 高海拔，资源丰富 |
+| 冻原 | `ice_flats` | 冰雪覆盖，无树木 |
+| 热带草原 | `savanna` | 干旱草原，金合欢树 |
+| 红树林沼泽 | `mangrove_swamp` | 红树繁茂，藤蔓缠绕 |
+| 恶地 | `mesa` | 红色岩层，稀有矿石 |
+| 蘑菇岛 | `mushroom_island` | 蘑菇遍地，无怪物生成 |
+| 黑森林 | `roofed_forest` | 黑暗密林，巨型蘑菇 |
+| 丛林边缘 | `jungle_edge` | 丛林过渡带，植被较稀疏 |
+| 针叶林山地 | `taiga_hills` | 针叶林高地，地形起伏 |
+| 平原丘陵 | `plains_hills` | 平原中的缓坡区域 |
+| 沙漠丘陵 | `desert_hills` | 沙丘连绵，视野开阔 |
+| 森林丘陵 | `forest_hills` | 森林与山地结合 |
+| 沼泽丘陵 | `swampland_hills` | 沼泽地形略有抬升 |
+| 冻原丘陵 | `ice_flats_hills` | 冰雪丘陵，寒冷荒凉 |
+| 热带草原丘陵 | `savanna_hills` | 热带草原高地，视野更广 |
+| 恶地高原 | `mesa_plateau` | 平顶恶地，红砂岩平台 |
+| 小型恶地高原 | `mesa_plateau_stone` | 岩石裸露的恶地高原变种 |
+
+
 
 #### 任务示例
 

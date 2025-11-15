@@ -25,6 +25,7 @@ class ShortModuleFormatter(logging.Formatter):
         'src.evaluation.report_generator': 's.ev.report',
         'src.envs.minerl_harvest_flatworld': 's.en.flat',
         'src.envs.minerl_harvest_default': 's.en.default',
+        'src.envs.minedojo_harvest': 's.en.minedojo_h..',  # MineDojo 环境
         'src.utils.steve1_mineclip_agent_env_utils': 's.ut.env_utils',
         'src.utils.minerl_cleanup': 's.ut.cleanup',
         'src.translation.translator': 's.tr.translator',
@@ -95,13 +96,22 @@ class ShortModuleFormatter(logging.Formatter):
 
 class ModuleFilter(logging.Filter):
     """
-    日志过滤器，过滤掉不需要的模块
+    日志过滤器，过滤掉不需要的模块和消息
     """
     
     # 要过滤的模块名（黑名单）
     BLOCKED_MODULES = [
         'process_watcher',
         'minerl.env.malmo.instance',
+        'minedojo.sim.bridge.mc_ins.instance',  # MineDojo Malmo 实例日志
+        'minedojo.sim.bridge.mc_ins',  # MineDojo Malmo 日志（更广泛）
+        'watchdog',  # watchdog 日志
+    ]
+    
+    # 要过滤的消息关键词
+    BLOCKED_MESSAGES = [
+        'STATE ERROR - multiple states in the queue',  # Malmo 状态错误
+        'Attempting to quit: Malmo',  # Malmo 退出日志
     ]
     
     def filter(self, record):
@@ -111,9 +121,15 @@ class ModuleFilter(logging.Filter):
         Returns:
             bool: True 表示允许，False 表示过滤掉
         """
-        # 检查是否在黑名单中
+        # 检查是否在黑名单模块中
         for blocked in self.BLOCKED_MODULES:
             if record.name.startswith(blocked):
+                return False
+        
+        # 检查消息内容是否包含黑名单关键词
+        msg = record.getMessage()
+        for blocked_msg in self.BLOCKED_MESSAGES:
+            if blocked_msg in msg:
                 return False
         
         return True

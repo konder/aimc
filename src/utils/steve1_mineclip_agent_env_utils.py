@@ -51,25 +51,25 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
     """
     logger.info(f'Loading MineRL environment: {env_name}...')
     
-    # 如果是自定义环境且有配置，传递所有配置参数
-    custom_envs = ['MineRLHarvestEnv-v0', 'MineRLHarvestDefaultEnv-v0', 'MineRLHarvestFlatWorldEnv-v0']
-    if env_name in custom_envs and env_config:
-        # 从 env_config 中提取参数
+    # MineRL 自定义环境
+    minerl_custom_envs = ['MineRLHarvestDefaultEnv-v0']
+    # MineDojo 自定义环境
+    minedojo_custom_envs = ['MineDojoHarvestEnv-v0']
+    
+    if env_name in minerl_custom_envs and env_config:
+        # MineRL 环境配置
         reward_config = env_config.get('reward_config')
         reward_rule = env_config.get('reward_rule', 'any')
-        world_generator = env_config.get('world_generator')
-        generator_string = env_config.get('generator_string')  # FlatWorld 参数
         time_condition = env_config.get('time_condition')
         spawning_condition = env_config.get('spawning_condition')
-        initial_inventory = env_config.get('initial_inventory')  # 🎒 添加初始物品配置
+        initial_inventory = env_config.get('initial_inventory')
         max_episode_steps = env_config.get('max_episode_steps', 2000)
         
         logger.info(f"{'='*30}")
-        logger.info(f"创建 MineRLHarvestEnv 及配置")
+        logger.info(f"创建 MineRL Harvest 环境")
         logger.info(f"{'='*30}")
         logger.info(f"  reward_config: {len(reward_config)} 项" if reward_config else "  reward_config: None")
         logger.info(f"  reward_rule: {reward_rule}")
-        logger.info(f"  generator_string: {generator_string}" if generator_string else f"  world_generator: {world_generator}")
         logger.info(f"  initial_inventory: {initial_inventory}" if initial_inventory else "  initial_inventory: None")
         logger.info(f"  max_episode_steps: {max_episode_steps}")
         
@@ -78,20 +78,58 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
             env_name,
             reward_config=reward_config,
             reward_rule=reward_rule,
-            world_generator=world_generator,
-            generator_string=generator_string,  # 传递 FlatWorld 参数
             time_condition=time_condition,
             spawning_condition=spawning_condition,
-            initial_inventory=initial_inventory,  # 🎒 传递初始物品配置
+            initial_inventory=initial_inventory,
+            max_episode_steps=max_episode_steps
+        )
+    elif env_name in minedojo_custom_envs and env_config:
+        # MineDojo 环境配置
+        generate_world_type = env_config.get('generate_world_type', 'default')
+        specified_biome = env_config.get('specified_biome')
+        world_seed = env_config.get('world_seed')
+        task_id = env_config.get('task_id', 'open-ended')
+        image_size = env_config.get('image_size', (160, 256))
+        start_time = env_config.get('start_time', 6000)
+        allow_time_passage = env_config.get('allow_time_passage', False)
+        allow_mob_spawn = env_config.get('allow_mob_spawn', False)
+        spawn_in_village = env_config.get('spawn_in_village', False)
+        initial_inventory = env_config.get('initial_inventory')
+        max_episode_steps = env_config.get('max_episode_steps', 2000)
+        
+        logger.info(f"{'='*30}")
+        logger.info(f"创建 MineDojo Harvest 环境")
+        logger.info(f"{'='*30}")
+        logger.info(f"  task_id: {task_id}")
+        logger.info(f"  generate_world_type: {generate_world_type}")
+        if specified_biome:
+            logger.info(f"  specified_biome: {specified_biome}")
+        logger.info(f"  world_seed: {world_seed}" if world_seed else "  world_seed: (随机)")
+        logger.info(f"  image_size: {image_size}")
+        logger.info(f"  max_episode_steps: {max_episode_steps}")
+        
+        # 创建 MineDojo 环境
+        env = gym.make(
+            env_name,
+            generate_world_type=generate_world_type,
+            specified_biome=specified_biome,
+            world_seed=world_seed,
+            task_id=task_id,
+            image_size=image_size,
+            start_time=start_time,
+            allow_time_passage=allow_time_passage,
+            allow_mob_spawn=allow_mob_spawn,
+            spawn_in_village=spawn_in_village,
+            initial_inventory=initial_inventory,
             max_episode_steps=max_episode_steps
         )
     else:
         # 创建标准环境
         env = gym.make(env_name)
     
-    # 首次 reset
-    logger.info('Starting new env...')
-    env.reset()
+    # 不在这里 reset，留给 _run_single_trial 时首次调用
+    # （避免双重初始化：一次在组件加载时，一次在 trial 开始时）
+    logger.info('Environment created (will be reset on first trial)...')
     
     if seed is not None:
         logger.info(f'Setting seed to {seed}...')
