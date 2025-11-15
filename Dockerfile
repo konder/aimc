@@ -82,7 +82,7 @@ RUN cd /tmp && \
 # 复制所有补丁文件到容器
 COPY docker/minedojo_mc_config.patch /tmp/minedojo_mc_config.patch
 COPY docker/minerl_mc_config.patch /tmp/minerl/minerl_mc_config.patch
-
+COPY docker/minedojo_inventory.patch /tmp/minedojo_inventory.patch
 # ============================================================================
 # 阶段 2: 安装和配置 MineDojo
 # ============================================================================
@@ -152,6 +152,9 @@ RUN source /opt/activate_env.sh && \
     mv STEVE-1 steve1 && \
     cd steve1 && \
     pip install -e .
+
+RUN cd /opt/conda/envs/minedojo-x86/lib/python3.9/site-packages/minedojo/ && \
+    patch -p0 < /tmp/minedojo_inventory.patch
 
 # 默认激活 minedojo-x86 环境
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate minedojo-x86 && exec /bin/bash"]
