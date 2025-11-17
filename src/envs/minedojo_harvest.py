@@ -174,6 +174,7 @@ class MineDojoBiomeWrapper(gym.Wrapper):
         self.camera_center = (self.n_camera_bins - 1) // 2  # 18000
         self.cam_interval = 0.01  # 与 MineDojo 的 cam_interval 一致
         
+        
         logger.info("✓ MineDojoBiomeWrapper 初始化完成")
         logger.info(f"  相机 bins: {self.n_camera_bins} (与 MineRL 相同)")
         logger.info(f"  相机中心: {self.camera_center}")
