@@ -183,7 +183,8 @@ class STEVE1Evaluator:
         n_trials: int = 10,
         max_steps: int = 1000,
         instruction: Optional[str] = None,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        enable_report: bool = False  # 启用详细报告（包含每步的动作和截图）
     ) -> TaskResult:
         """
         评估单个任务
@@ -259,7 +260,8 @@ class STEVE1Evaluator:
                 max_steps=max_steps,
                 trial_idx=trial_idx + 1,  # 1-based for display
                 n_trials=n_trials,  # 传递总试验数
-                output_dir=output_dir  # 传递输出目录
+                output_dir=output_dir,  # 传递输出目录
+                enable_report=enable_report  # 传递报告模式
             )
             
             trials.append(trial_result)
@@ -287,10 +289,11 @@ class STEVE1Evaluator:
         max_steps: int,
         trial_idx: int,
         n_trials: int,  # 总试验数
-        output_dir: Optional[Path] = None  # 输出目录
+        output_dir: Optional[Path] = None,  # 输出目录
+        enable_report: bool = False  # 启用详细报告：保存动作和截图
     ) -> TrialResult:
         """
-        运行单次试验，可选录制视频
+        运行单次试验，可选录制视频和生成详细报告
         
         Args:
             task_id: 任务ID
@@ -298,13 +301,18 @@ class STEVE1Evaluator:
             max_steps: 最大步数
             trial_idx: 试验索引（从1开始）
             n_trials: 总试验数
-            output_dir: 输出目录（用于保存视频）
+            output_dir: 输出目录（用于保存视频和报告）
+            enable_report: 启用详细报告（保存动作、截图、生成HTML报告）
             
         Returns:
             TrialResult: 试验结果（不包含frames）
         """
         start_time = time.time()
         frames = [] if self.video_size else None  # 只在需要时收集帧
+        
+        # 报告模式：收集动作和帧
+        report_actions = [] if enable_report else None
+        report_frames = [] if enable_report else None
         
         try:
             # 使用 Prior 编码指令（官方方式）
@@ -352,8 +360,16 @@ class STEVE1Evaluator:
                     with th.no_grad():
                         action = self._agent.get_action(obs, prompt_embed_np)
                     
+                    # 📊 报告模式：收集动作
+                    if enable_report:
+                        report_actions.append(action.copy() if isinstance(action, dict) else action)
+                    
                     # 执行动作
                     obs, reward, done, info = self._env.step(action)
+                    
+                    # 📊 报告模式：保存帧
+                    if enable_report and 'pov' in obs:
+                        report_frames.append(obs['pov'].copy())
                     
                     # 累积奖励（环境自己计算奖励）
                     total_reward += reward
@@ -439,6 +455,16 @@ class STEVE1Evaluator:
                 finally:
                     # 清空 frames 释放内存
                     frames.clear()
+            
+            # 📊 报告模式：保存动作和帧，生成HTML报告
+            if enable_report and report_actions and report_frames:
+                self._save_report_data(
+                    report_actions, 
+                    report_frames, 
+                    output_dir or Path("/tmp/steve1_reports"), 
+                    task_id, 
+                    trial_idx
+                )
             
             return TrialResult(
                 task_id=task_id,
@@ -543,6 +569,448 @@ class STEVE1Evaluator:
             self._mineclip = None
         if self._prior is not None:
             self._prior = None
+    
+    def _save_report_data(
+        self, 
+        actions: List[Dict], 
+        frames: List[np.ndarray], 
+        output_dir: Path, 
+        task_id: str, 
+        trial_idx: int
+    ):
+        """
+        保存详细报告数据（动作序列、截图、HTML报告）
+        
+        Args:
+            actions: 动作列表
+            frames: 帧列表 (POV 图像)
+            output_dir: 输出目录
+            task_id: 任务ID
+            trial_idx: Trial 索引
+        """
+        import json
+        from PIL import Image
+        
+        # 创建报告目录
+        report_dir = output_dir / f"report_{task_id}_trial{trial_idx}"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"  📊 保存报告数据到: {report_dir}")
+        
+        # 1. 保存动作序列为 JSON
+        actions_file = report_dir / "actions.json"
+        try:
+            # 转换动作为可序列化格式
+            actions_serializable = []
+            for i, action in enumerate(actions):
+                action_dict = {}
+                for key, value in action.items():
+                    if isinstance(value, np.ndarray):
+                        action_dict[key] = value.tolist()
+                    elif hasattr(value, 'item'):  # numpy scalar
+                        action_dict[key] = value.item()
+                    else:
+                        action_dict[key] = value
+                actions_serializable.append({
+                    "step": i,
+                    "action": action_dict
+                })
+            
+            with open(actions_file, 'w', encoding='utf-8') as f:
+                json.dump(actions_serializable, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"    ✓ 动作序列已保存: actions.json ({len(actions)} steps)")
+        except Exception as e:
+            logger.error(f"    ❌ 保存动作序列失败: {e}")
+        
+        # 2. 保存帧图像
+        frames_dir = report_dir / "frames"
+        frames_dir.mkdir(exist_ok=True)
+        
+        try:
+            saved_count = 0
+            for i, frame in enumerate(frames):
+                # frame 是 (H, W, C) 的 numpy 数组
+                img = Image.fromarray(frame)
+                img_path = frames_dir / f"step_{i:04d}.png"
+                img.save(img_path)
+                saved_count += 1
+            
+            logger.info(f"    ✓ 帧图像已保存: frames/ ({saved_count} 张)")
+        except Exception as e:
+            logger.error(f"    ❌ 保存帧图像失败: {e}")
+        
+        # 3. 生成简单的 HTML 报告
+        html_file = report_dir / "report.html"
+        try:
+            html_content = self._generate_report_html(actions, len(frames), task_id, trial_idx)
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            logger.info(f"    ✓ HTML 报告已生成: report.html")
+            logger.info(f"    🌐 打开报告: open {html_file}")
+        except Exception as e:
+            logger.error(f"    ❌ 生成 HTML 报告失败: {e}")
+    
+    def _generate_report_html(
+        self, 
+        actions: List[Dict], 
+        num_frames: int, 
+        task_id: str, 
+        trial_idx: int
+    ) -> str:
+        """
+        生成精美的 HTML 详细报告（左右分栏：动作 | 图像）
+        
+        Args:
+            actions: 动作列表
+            num_frames: 帧数量
+            task_id: 任务ID
+            trial_idx: Trial 索引
+            
+        Returns:
+            HTML 字符串
+        """
+        import json
+        
+        # 统计动作组合
+        action_combo_stats = {}
+        for action in actions:
+            # 收集非零动作
+            active_keys = []
+            
+            # 移动和功能键
+            for key in ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 
+                        'attack', 'use', 'drop', 'inventory']:
+                val = action.get(key, 0)
+                if val:
+                    active_keys.append(key)
+            
+            # Camera
+            camera = action.get('camera', [0, 0])
+            if isinstance(camera, np.ndarray):
+                camera_flat = camera.flatten()
+                if len(camera_flat) >= 2 and (camera_flat[0] != 0 or camera_flat[1] != 0):
+                    active_keys.append('camera')
+            elif isinstance(camera, list) and len(camera) >= 2:
+                if camera[0] != 0 or camera[1] != 0:
+                    active_keys.append('camera')
+            
+            # 合成/装备
+            for key in ['craft', 'equip', 'place']:
+                val = action.get(key, 'none')
+                if val != 'none':
+                    active_keys.append(key)
+            
+            # 生成组合键
+            if not active_keys:
+                combo_key = 'noop'
+            else:
+                combo_key = '+'.join(sorted(active_keys))
+            
+            action_combo_stats[combo_key] = action_combo_stats.get(combo_key, 0) + 1
+        
+        # 按出现次数排序
+        sorted_combos = sorted(action_combo_stats.items(), key=lambda x: x[1], reverse=True)
+        
+        # 生成统计表格
+        stats_html = '<div class="stats-table">\n'
+        stats_html += '  <h3 style="margin-top: 0; color: #667eea;">📊 动作组合统计</h3>\n'
+        stats_html += '  <table>\n'
+        stats_html += '    <tr><th>动作组合</th><th>次数</th></tr>\n'
+        for combo, count in sorted_combos:
+            stats_html += f'    <tr><td>{combo}</td><td>{count}</td></tr>\n'
+        stats_html += '  </table>\n'
+        stats_html += '</div>'
+        
+        # 生成 HTML 头部
+        html = f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STEVE-1 详细报告 - {task_id}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{ 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            margin: 0; 
+            padding: 15px; 
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            font-size: 13px;
+            line-height: 1.6;
+        }}
+        .container {{
+            max-width: 1800px;
+            margin: 0 auto;
+        }}
+        .header {{ 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            padding: 20px 30px; 
+            margin-bottom: 15px; 
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }}
+        .header h1 {{
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }}
+        .header .meta {{
+            font-size: 14px;
+            opacity: 0.9;
+        }}
+        .stats-table {{
+            background: white;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }}
+        .stats-table h3 {{
+            color: #667eea;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }}
+        .stats-table table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }}
+        .stats-table th {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            border-radius: 5px 5px 0 0;
+        }}
+        .stats-table td {{
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }}
+        .stats-table td:last-child {{
+            text-align: right;
+            font-weight: 600;
+            color: #667eea;
+        }}
+        .stats-table tr:last-child td {{
+            border-bottom: none;
+        }}
+        .stats-table tr:hover {{
+            background: #f8f9ff;
+        }}
+        .step-row {{ 
+            display: flex;
+            background: white; 
+            margin-bottom: 10px; 
+            border-radius: 10px; 
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        .step-row:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }}
+        .step-left {{ 
+            flex: 0 0 50%;
+            padding: 10px;
+            border-right: 2px solid #667eea;
+            display: flex;
+            flex-direction: column;
+        }}
+        .step-right {{ 
+            flex: 0 0 50%;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }}
+        .step-right img {{ 
+            width: 100%;
+            height: auto;
+            display: block;
+        }}
+        .step-num {{ 
+            font-weight: 600; 
+            color: #667eea; 
+            font-size: 15px;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f0f0f0;
+        }}
+        .action-readable {{ 
+            background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%);
+            padding: 12px; 
+            border-radius: 8px; 
+            margin-bottom: 10px;
+            font-size: 13px;
+            line-height: 1.6;
+            border-left: 3px solid #667eea;
+        }}
+        .action-raw {{ 
+            background: #f8f9fa; 
+            padding: 12px; 
+            border-radius: 8px; 
+            font-size: 11px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            overflow-x: auto;
+            flex-grow: 1;
+            max-height: 180px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+        }}
+        .inventory {{ 
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            padding: 3px 8px; 
+            border-radius: 4px; 
+            color: #155724; 
+            font-weight: 600;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }}
+        .key {{ 
+            color: #667eea; 
+            font-weight: 600;
+            padding: 2px 4px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 3px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 STEVE-1 详细报告</h1>
+            <div class="meta">
+                任务: {task_id} | Trial: {trial_idx} | 总步数: {len(actions)} | 帧数: {num_frames}
+            </div>
+        </div>
+        
+        {stats_html}
+"""
+        
+        # 生成每一步的紧凑信息（左右分栏）
+        for i, action in enumerate(actions):
+            # 生成可读的动作描述
+            readable_action = self._format_action_readable(action)
+            
+            # 将原始动作转换为 JSON 字符串
+            action_json = self._action_to_json_str(action)
+            
+            html += f"""
+    <div class="step-row">
+        <div class="step-left">
+            <div class="step-num">Step {i}</div>
+            <div class="action-readable">{readable_action}</div>
+            <div class="action-raw">{action_json}</div>
+        </div>
+        <div class="step-right">
+            <img src="frames/step_{i:04d}.png" alt="Step {i}">
+        </div>
+    </div>
+"""
+        
+        html += """
+    </div>
+</body>
+</html>
+"""
+        
+        return html
+    
+    def _format_action_readable(self, action: Dict[str, Any]) -> str:
+        """
+        将动作格式化为可读的 HTML 字符串
+        
+        Args:
+            action: 动作字典
+            
+        Returns:
+            HTML 格式的可读字符串
+        """
+        parts = []
+        
+        # 移动
+        if action.get('forward', 0):
+            parts.append('<span class="key">forward</span>')
+        if action.get('back', 0):
+            parts.append('<span class="key">back</span>')
+        if action.get('left', 0):
+            parts.append('<span class="key">left</span>')
+        if action.get('right', 0):
+            parts.append('<span class="key">right</span>')
+        
+        # 功能
+        if action.get('jump', 0):
+            parts.append('<span class="key">jump</span>')
+        if action.get('sneak', 0):
+            parts.append('<span class="key">sneak</span>')
+        if action.get('sprint', 0):
+            parts.append('<span class="key">sprint</span>')
+        if action.get('attack', 0):
+            parts.append('<span class="key">attack</span>')
+        if action.get('use', 0):
+            parts.append('<span class="key">use</span>')
+        if action.get('drop', 0):
+            parts.append('<span class="key">drop</span>')
+        if action.get('inventory', 0):
+            parts.append('<span class="inventory">📦 INVENTORY</span>')
+        
+        # 合成/装备
+        if action.get('craft', 'none') != 'none':
+            parts.append(f'<span class="key">craft({action["craft"]})</span>')
+        if action.get('equip', 'none') != 'none':
+            parts.append(f'<span class="key">equip({action["equip"]})</span>')
+        if action.get('place', 'none') != 'none':
+            parts.append(f'<span class="key">place({action["place"]})</span>')
+        
+        # Camera
+        camera = action.get('camera', [0, 0])
+        if isinstance(camera, np.ndarray):
+            camera_flat = camera.flatten()
+            if len(camera_flat) >= 2:
+                camera_pitch = float(camera_flat[0])
+                camera_yaw = float(camera_flat[1])
+                if camera_pitch != 0 or camera_yaw != 0:
+                    parts.append(f'<span class="key">camera=({camera_pitch:.2f}, {camera_yaw:.2f})</span>')
+        
+        if not parts:
+            return '<span style="color: #999;">noop</span>'
+        
+        return ' + '.join(parts)
+    
+    def _action_to_json_str(self, action: Dict[str, Any]) -> str:
+        """
+        将动作转换为格式化的 JSON 字符串
+        
+        Args:
+            action: 动作字典
+            
+        Returns:
+            格式化的 JSON 字符串
+        """
+        import json
+        
+        # 转换为可序列化格式
+        action_serializable = {}
+        for key, value in action.items():
+            if isinstance(value, np.ndarray):
+                action_serializable[key] = value.tolist()
+            elif hasattr(value, 'item'):
+                action_serializable[key] = value.item()
+            else:
+                action_serializable[key] = value
+        
+        return json.dumps(action_serializable, indent=2, ensure_ascii=False)
         
         # 清理 CUDA 缓存（如果使用GPU）
         try:

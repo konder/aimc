@@ -29,6 +29,17 @@
          else:
              raise ValueError(f"Unknown value {fn_action} for function action")
          return noop, destroy_item
+--- minedojo/sim/Malmo/Minecraft/src/main/java/com/microsoft/Malmo/Client/FakeMouse.java.orig	2025-11-17 00:00:00.000000000 +0800
++++ minedojo/sim/Malmo/Minecraft/src/main/java/com/microsoft/Malmo/Client/FakeMouse.java	2025-11-17 00:00:00.000000000 +0800
+@@ -44,7 +44,7 @@
+     private static boolean grabbed = false;
+     private static boolean humanInput = true;
+ 
+-    // private static FakeMouseCursor cursor = new FakeMouseCursor();
++    private static FakeMouseCursor cursor = new FakeMouseCursor();
+ 
+ 
+     public static void setHumanInput(boolean humanInput) {
 --- minedojo/sim/Malmo/Minecraft/src/main/java/com/microsoft/Malmo/MissionHandlers/CommandForKey.java.orig	2025-11-17 00:00:00.000000000 +0800
 +++ minedojo/sim/Malmo/Minecraft/src/main/java/com/microsoft/Malmo/MissionHandlers/CommandForKey.java	2025-11-17 00:00:00.000000000 +0800
 @@ -20,6 +20,8 @@
