@@ -20,8 +20,9 @@ TASK_SET=""
 N_TRIALS=3
 MAX_STEPS=2000
 RENDER=""
-VIDEO_SIZE="128x128"  # 默认视频尺寸，设为空字符串则不录制
+ENABLE_VIDEO=""
 REPORT_NAME="evaluation_report"
+ENABLE_REPORT=""
 USE_X86=false
 DEBUG=false  # 添加调试模式
 
@@ -42,10 +43,9 @@ show_help() {
     echo "参数配置："
     echo "  --n-trials N                试验次数（默认: 3）"
     echo "  --max-steps N               最大步数（默认: 2000）"
-    echo "  --render                    启用渲染"
-    echo "  --video-size WxH            视频尺寸，格式: WIDTHxHEIGHT (如: 128x128，默认: 128x128)"
-    echo "                               设为空字符串则不录制视频"
-    echo "  --report-name NAME          报告名称（默认: evaluation_report）"
+    echo "  --render                    启用游戏窗口渲染（显示画面）"
+    echo "  --enable_video              启用视频录制（固定尺寸 640x360）"
+    echo "  --enable_report             启用 HTML 报告生成"
     echo ""
     echo "环境配置："
     echo "  --x86                       使用 x86 架构（M1/M2 Mac）"
@@ -102,13 +102,13 @@ while [[ $# -gt 0 ]]; do
             RENDER="--render"
             shift
             ;;
-        --video-size)
-            VIDEO_SIZE="$2"
-            shift 2
+        --enable_video)
+            ENABLE_VIDEO="--enable_video"
+            shift
             ;;
-        --report-name)
-            REPORT_NAME="$2"
-            shift 2
+        --enable_report)
+            ENABLE_REPORT="--enable_report"
+            shift
             ;;
         --x86)
             USE_X86=true
@@ -173,11 +173,13 @@ if [[ -n "$RENDER" ]]; then
     PYTHON_CMD="$PYTHON_CMD $RENDER"
 fi
 
-if [[ -n "$VIDEO_SIZE" ]]; then
-    PYTHON_CMD="$PYTHON_CMD --video-size $VIDEO_SIZE"
+if [[ -n "$ENABLE_VIDEO" ]]; then
+    PYTHON_CMD="$PYTHON_CMD $ENABLE_VIDEO"
 fi
 
-PYTHON_CMD="$PYTHON_CMD --report-name $REPORT_NAME"
+if [[ -n "$ENABLE_REPORT" ]]; then
+    PYTHON_CMD="$PYTHON_CMD $ENABLE_REPORT"
+fi
 
 # 显示配置信息
 echo -e "${BLUE}=========================================="
@@ -198,9 +200,9 @@ fi
 
 echo -e "${GREEN}试验次数:${NC} $N_TRIALS"
 echo -e "${GREEN}最大步数:${NC} $MAX_STEPS"
-echo -e "${GREEN}启用渲染:${NC} $([ -n "$RENDER" ] && echo "是" || echo "否")"
-echo -e "${GREEN}视频尺寸:${NC} $([ -n "$VIDEO_SIZE" ] && echo "$VIDEO_SIZE" || echo "不录制")"
-echo -e "${GREEN}报告名称:${NC} $REPORT_NAME"
+echo -e "${GREEN}显示窗口:${NC} $([ -n "$RENDER" ] && echo "是" || echo "否")"
+echo -e "${GREEN}录制视频:${NC} $([ -n "$ENABLE_VIDEO" ] && echo "是 (640x360)" || echo "否")"
+echo -e "${GREEN}生成报告:${NC} $([ -n "$ENABLE_REPORT" ] && echo "是" || echo "否")"
 echo -e "${GREEN}架构模式:${NC} $([ "$USE_X86" = true ] && echo "x86_64" || echo "原生")"
 echo -e "${BLUE}==========================================${NC}"
 echo ""

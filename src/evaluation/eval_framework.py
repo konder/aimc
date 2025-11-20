@@ -46,6 +46,7 @@ class EvaluationConfig:
     text_cond_scale: float = 6.0
     seed: int = 42
     enable_render: bool = False
+    enable_report: bool = False
     video_size: Optional[Tuple[int, int]] = None  # 视频尺寸 (width, height)，None 表示不录制
     
     # 评估配置
@@ -145,7 +146,7 @@ class EvaluationFramework:
         task_id: str,
         n_trials: Optional[int] = None,
         max_steps: Optional[int] = None,
-        parent_dir: Optional[Path] = None  # 父目录（用于 task-set）
+        parent_dir: Optional[Path] = None,  # 父目录（用于 task-set）
     ) -> Tuple[TaskResult, Optional[Path]]:
         """
         评估单个任务
@@ -187,6 +188,24 @@ class EvaluationFramework:
         # 将 max_steps 添加到 env_config 中（作为 max_episode_steps）
         env_config['max_episode_steps'] = max_steps
         
+        # 从全局配置读取 image_size（如果任务配置中没有指定）
+        if 'image_size' not in env_config:
+            global_config = self.task_loader.config.get('evaluation', {})
+            global_image_size = global_config.get('image_size')
+            if global_image_size:
+                # 转换为 tuple 格式 (height, width)
+                if isinstance(global_image_size, list) and len(global_image_size) == 2:
+                    env_config['image_size'] = tuple(global_image_size)
+                    logger.info(f"  使用全局 image_size: {env_config['image_size']}")
+                else:
+                    env_config['image_size'] = global_image_size
+                    logger.info(f"  使用全局 image_size: {env_config['image_size']}")
+        
+        # 获取动作序列文件路径（如果配置了）
+        replay_actions_file = task_config.get('replay_actions_file', None)
+        if replay_actions_file:
+            logger.info(f"  检测到动作序列文件: {replay_actions_file}")
+        
         # 为当前任务创建专用的 evaluator（确保环境配置正确）
         logger.info("创建任务专用评估器...")
         task_evaluator = STEVE1Evaluator(
@@ -198,7 +217,9 @@ class EvaluationFramework:
             enable_render=self.config.enable_render,
             video_size=self.config.video_size,  # 视频尺寸，None 表示不录制
             env_name=env_name,
-            env_config=env_config  # 传递环境配置（包含 max_episode_steps）
+            env_config=env_config,  # 传递环境配置（包含 max_episode_steps）
+            enable_report=self.config.enable_report,
+            replay_actions_file=replay_actions_file  # 传递动作序列文件路径
         )
         
         logger.info(f"{'='*30}")
@@ -211,6 +232,8 @@ class EvaluationFramework:
         logger.info(f"  语言: {language}")
         logger.info(f"  试验次数: {n_trials}")
         logger.info(f"  最大步数: {max_steps}")
+        if replay_actions_file:
+            logger.info(f"  🎬 回放模式: {replay_actions_file}")
         
         # 创建任务输出目录（总是创建，不管是否保存视频）
         from datetime import datetime
@@ -234,7 +257,7 @@ class EvaluationFramework:
                 n_trials=n_trials,
                 max_steps=max_steps,
                 instruction=instruction,
-                output_dir=output_dir  # 传递输出目录给evaluator
+                output_dir=output_dir,  # 传递输出目录给evaluator
             )
             
             # 保存任务结果到目录
@@ -284,7 +307,7 @@ class EvaluationFramework:
         json_path = output_dir / "result.json"
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(result_data, f, ensure_ascii=False, indent=2)
-        logger.info(f"  ✓ 结果已保存: {json_path.name}")
+        #logger.info(f"  ✓ 结果已保存: {json_path.name}")
         
         # 保存TXT（人类可读）
         txt_path = output_dir / "result.txt"
@@ -303,7 +326,7 @@ class EvaluationFramework:
                 status = "✅ 成功" if trial.success else "❌ 失败"
                 video_status = "🎬" if (output_dir / f"trial_{i}.mp4").exists() else ""
                 f.write(f"Trial {i}: {status} | 步数: {trial.steps:4d} | 时间: {trial.time_seconds:.1f}s {video_status}\n")
-        logger.info(f"  ✓ 报告已保存: {txt_path.name}")
+        #logger.info(f"  ✓ 报告已保存: {txt_path.name}")
     
     def evaluate_task_list(
         self,
@@ -534,7 +557,7 @@ class EvaluationFramework:
             )
             if matching_dirs:
                 json_path = matching_dirs[0] / json_filename
-                logger.info(f"  将报告保存到任务目录: {matching_dirs[0].name}")
+                #logger.info(f"  将报告保存到任务目录: {matching_dirs[0].name}")
             else:
                 json_path = Path(self.report_generator.output_dir) / json_filename
         else:
@@ -548,11 +571,11 @@ class EvaluationFramework:
         txt_path = json_path.with_suffix('.txt')
         self._generate_text_report(report_data, txt_path)
         
-        logger.info(f"\n{'='*80}")
-        logger.info(f"报告已生成:")
-        logger.info(f"  JSON: {json_path}")
-        logger.info(f"  TXT:  {txt_path}")
-        logger.info(f"{'='*80}\n")
+        #logger.info(f"\n{'='*80}")
+        #logger.info(f"报告已生成:")
+        #logger.info(f"  JSON: {json_path}")
+        #logger.info(f"  TXT:  {txt_path}")
+        #logger.info(f"{'='*80}\n")
         
         return str(json_path), str(txt_path)
     
@@ -693,45 +716,30 @@ if __name__ == "__main__":
     parser.add_argument(
         '--render',
         action='store_true',
-        help='启用渲染'
+        help='启用游戏窗口渲染（显示画面）'
     )
     parser.add_argument(
-        '--video-size',
-        type=str,
-        default=None,
-        help='视频尺寸，格式: WIDTHxHEIGHT 或 WIDTH,HEIGHT (如: 128x128)，默认不录制'
+        '--enable_video',
+        action='store_true',
+        help='启用视频录制（固定尺寸 640x360）'
     )
     parser.add_argument(
-        '--report-name',
-        type=str,
-        default='evaluation_report',
-        help='报告名称'
+        '--enable_report',
+        action='store_true',
+        help='生成 HTML 报告'
     )
     
     args = parser.parse_args()
     
-    # 解析 video_size 参数
-    video_size = None
-    if args.video_size:
-        try:
-            # 支持 "128x128" 或 "128,128" 格式
-            if 'x' in args.video_size:
-                width, height = map(int, args.video_size.split('x'))
-            elif ',' in args.video_size:
-                width, height = map(int, args.video_size.split(','))
-            else:
-                raise ValueError(f"无效的视频尺寸格式: {args.video_size}")
-            video_size = (width, height)
-            #logger.info(f"视频录制: {width}x{height}")
-        except Exception as e:
-            logger.warning(f"解析视频尺寸失败: {e}，将不录制视频")
-            video_size = None
+    # 视频录制：如果启用，使用固定尺寸 640x360
+    video_size = (640, 360) if args.enable_video else None
     
     # 创建配置
     config = EvaluationConfig(
         n_trials=args.n_trials,
         max_steps=args.max_steps,
         enable_render=args.render,
+        enable_report=args.enable_report,
         video_size=video_size
     )
     
@@ -764,7 +772,7 @@ if __name__ == "__main__":
         framework.print_summary(results)
         
         # 生成报告
-        framework.generate_report(results, args.report_name)
+        framework.generate_report(results)
         
         # 重置 task-set 目录（避免影响后续评估）
         framework.current_task_set_dir = None

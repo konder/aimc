@@ -155,6 +155,7 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
     def __init__(
         self, 
         resolution=(640, 320), 
+        image_size=None,  # 新增：支持 image_size 参数
         max_episode_steps=2000,
         time_condition: Optional[Dict] = None,
         spawning_condition: Optional[Dict] = None,
@@ -163,12 +164,24 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
     ):
         """
         Args:
-            resolution: 分辨率
+            resolution: 分辨率 (width, height) - 已弃用，使用 image_size
+            image_size: 图像尺寸 (height, width) - 优先使用此参数
             max_episode_steps: 最大步数
             time_condition: 时间条件 (如 {"allow_passage_of_time": False, "start_time": 6000})
             spawning_condition: 生成条件 (如 {"allow_spawning": True})
             initial_inventory: 初始物品 (如 [{"type": "bucket", "quantity": 1}])
         """
+        # 🔄 统一 image_size 和 resolution
+        # image_size 优先（格式: [height, width]）
+        # resolution 作为备选（格式: (width, height)）
+        if image_size is not None:
+            if isinstance(image_size, (list, tuple)) and len(image_size) == 2:
+                height, width = image_size
+                resolution = (width, height)  # 转换为 MineRL 格式
+                logger.info(f"🔄 MineRL 配置转换: image_size=[{height}, {width}] → resolution=({width}, {height})")
+        else:
+            logger.info(f"📺 MineRL 使用默认分辨率: resolution={resolution}")
+        
         # 设置环境名称
         if 'name' not in kwargs:
             kwargs['name'] = 'MineRLHarvestDefaultEnv-v0'
@@ -238,7 +251,7 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
         
         # 如果有初始物品配置，添加 SimpleInventoryAgentStart
         if self.initial_inventory:
-            logger.info(f"✓ 初始物品库存: {self.initial_inventory}")
+            #logger.info(f"✓ 初始物品库存: {self.initial_inventory}")
             agent_start_handlers.append(
                 handlers.SimpleInventoryAgentStart(self.initial_inventory)
             )
@@ -247,7 +260,7 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
     
     def create_server_world_generators(self) -> List[Handler]:
         """世界生成器 - 使用 DefaultWorldGenerator"""
-        logger.info(f"使用 DefaultWorldGenerator（默认世界）")
+        #logger.info(f"使用 DefaultWorldGenerator（默认世界）")
         
         return [
             handlers.DefaultWorldGenerator(

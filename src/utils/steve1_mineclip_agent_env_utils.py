@@ -58,12 +58,24 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
     
     if env_name in minerl_custom_envs and env_config:
         # MineRL 环境配置
+        from src.envs.item_name_mapper import convert_initial_inventory, convert_reward_config
+        
         reward_config = env_config.get('reward_config')
         reward_rule = env_config.get('reward_rule', 'any')
         time_condition = env_config.get('time_condition')
         spawning_condition = env_config.get('spawning_condition')
         initial_inventory = env_config.get('initial_inventory')
+        image_size = env_config.get('image_size')  # 新增：读取 image_size
         max_episode_steps = env_config.get('max_episode_steps', 2000)
+        
+        # 🔄 转换物品名称：MineDojo 格式 → MineRL 格式
+        if initial_inventory:
+            initial_inventory = convert_initial_inventory(initial_inventory, target_env='minerl')
+            logger.info(f"  🔄 initial_inventory 转换为 MineRL 格式")
+        
+        if reward_config:
+            reward_config = convert_reward_config(reward_config, target_env='minerl')
+            logger.info(f"  🔄 reward_config 转换为 MineRL 格式")
         
         logger.info(f"{'='*30}")
         logger.info(f"创建 MineRL Harvest 环境")
@@ -71,6 +83,8 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
         logger.info(f"  reward_config: {len(reward_config)} 项" if reward_config else "  reward_config: None")
         logger.info(f"  reward_rule: {reward_rule}")
         logger.info(f"  initial_inventory: {initial_inventory}" if initial_inventory else "  initial_inventory: None")
+        if image_size:
+            logger.info(f"  image_size: {image_size}")
         logger.info(f"  max_episode_steps: {max_episode_steps}")
         
         # 创建环境并传递所有配置
@@ -81,6 +95,7 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
             time_condition=time_condition,
             spawning_condition=spawning_condition,
             initial_inventory=initial_inventory,
+            image_size=image_size,  # 新增：传递 image_size
             max_episode_steps=max_episode_steps
         )
     elif env_name in minedojo_custom_envs and env_config:

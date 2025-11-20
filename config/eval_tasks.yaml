@@ -1,988 +1,777 @@
-# 中文AIMC Agent 评估任务配置
-# Chinese AIMC Agent Evaluation Tasks Configuration
+# ==============================================================================
+# AIMC Agent 评估任务配置
+# AIMC Agent Evaluation Tasks Configuration
 #
-# 版本: v1.0
-# 创建日期: 2025-11-06
-#
-# 说明:
-#   - 本配置文件定义了用于评估中文AIMC Agent的任务集
-#   - 支持3个评估维度:
-#     1. 自动翻译质量测试 (zh_instruction + 自动翻译)
-#     2. 语义等价性验证 (zh_manual_translation)
-#     3. 语义变体鲁棒性 (zh_variants)
+# 版本: v3.0
+# 最后更新: 2025-11-20
+# ==============================================================================
 
-# ============================================================================
-# 评估参数配置
-# ============================================================================
+# ==============================================================================
+# 全局评估参数配置
+# Global Evaluation Configuration
+# ==============================================================================
 evaluation:
-  n_trials: 10              # 每个任务运行次数（用于计算成功率）
-  max_steps: 6000           # 每个trial的最大步数
-  timeout_seconds: 600      # 超时时间（秒）
-  image_size: [160, 256]    # MineDojo图像尺寸 [height, width]
-  
-  # 翻译配置
-  translation:
-    method: "baidu"         # 翻译方法: baidu/openai/manual
-    use_term_dict: true     # 使用术语词典优化翻译
-    term_dict_path: "data/chinese_terms.json"
-  
-  # 结果保存
+  n_trials: 10
+  max_steps: 6000
+  image_size:
+  - 320
+  - 640
   output:
-    results_dir: "results/evaluation"
-    save_videos: false      # 是否保存视频
-    save_trajectories: true # 是否保存轨迹数据
+    results_dir: results/evaluation
+    enable_video: false
+    enable_report: false
 
-# ============================================================================
-# 任务集定义
-# ============================================================================# 基础任务 (Basic Tasks) - 简单、易完成、用于快速验证
+# ==============================================================================
+# harvest_tasks
+# ==============================================================================
 harvest_tasks:
-  
-  # 使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）
-  - task_id: "harvest_1_log"
-    category: "raw_resources"
-    difficulty: "easy"
-    description: "使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）"
-    env_name: "MineDojoHarvestEnv-v0"
-    
-    en_instruction: "chop tree"
-    
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_log
+  # 描述: 使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）
+  # 环境: MineDojoHarvestEnv-v0
+  # 指令: chop tree
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_log
+    category: raw_resources
+    difficulty: easy
+    description: 使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）
+    env_name: MineDojoHarvestEnv-v0
+    en_instruction: chop tree
     env_config:
-      # MineDojo 世界生成配置
-      generate_world_type: "specified_biome"
-      specified_biome: "forest"  # 森林 Biome - 树木密集
-      world_seed: "harvest_log_test"
-      task_id: "open-ended"
-      image_size: [160, 256]
-      
-      # 时间和生成设置
-      start_time: 6000  # 白天
-      allow_time_passage: false
+      initial_inventory:
+      - type: None
+        quantity: 1
+      specified_biome: forest
+      world_seed: harvest_log_test
+      task_id: open-ended
+      start_time: 6000
       allow_mob_spawn: false
-      
-      # 初始物品（给一把木斧）
-      initial_inventory:
-        - slot: 0
-          name: "wooden_axe"  # MineDojo 使用 name 而非 type
-          quantity: 1
-      
-      max_episode_steps: 500
-    
     max_steps: 500
-    n_trials: 3  # MineDojo 环境下可能效率更高
-  
-  # 使用英文指令获取1桶牛奶
-  - task_id: "harvest_1_milk"
-    category: "raw_resources"
-    difficulty: "easy"
-    description: "使用英文指令获取1桶牛奶（初始拥有桶）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get milk from cow"
-    
-    env_config:
-      reward_config:
-        - entity: "milk_bucket"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000  # 白天，有利于动物生成
-      spawning_condition:
-        allow_spawning: true  # 必须开启，否则不会生成动物
-      initial_inventory:
-        - type: "bucket"
-          quantity: 1  # 初始给予一个桶，避免需要制作桶
-    
-    max_steps: 2000  # 有桶后只需找牛并使用，步数可以减少
-  
-  # 使用英文指令挖掘1个泥土
-  - task_id: "harvest_1_dirt"
-    category: "raw_resources"
-    difficulty: "easy"
-    description: "使用英文指令挖掘1个泥土"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "dig dirt"
-    
-    env_config:
-      reward_config:
-        - entity: "dirt"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 500
-  
-  # 使用英文指令采集1个圆石（需要木镐）
-  - task_id: "harvest_1_cobblestone"
-    category: "raw_resources"
-    difficulty: "medium"
-    description: "使用英文指令采集1个圆石（提供木镐）"
-    env_name: "MineRLHarvestDefaultEnv-v0"
-    
-    en_instruction: "mine cobblestone"
-    
-    env_config:
-      world_file: "data/worlds/mountains"
-      reward_config:
-        - entity: "cobblestone"
-          amount: 3
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_pickaxe"
-          quantity: 1  # 提供木镐采集石头
-    
-    max_steps: 500
-  
-  # 使用英文指令采集1个煤炭（需要木镐）
-  - task_id: "harvest_1_coal"
-    category: "raw_resources"
-    difficulty: "medium"
-    description: "使用英文指令采集1个煤炭（提供木镐）"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "mine coal"
-    
-    env_config:
-      reward_config:
-        - entity: "coal"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_pickaxe"
-          quantity: 1
-    
-    max_steps: 500  # FlatWorld 地表就有煤矿，无需寻找
-  
-  # 使用英文指令采集1个铁矿石（需要石镐）
-  - task_id: "harvest_1_iron_ore"
-    category: "raw_resources"
-    difficulty: "hard"
-    description: "使用英文指令采集1个铁矿石（提供石镐）"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "mine iron ore"
-    
-    env_config:
-      reward_config:
-        - entity: "iron_ore"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "stone_pickaxe"
-          quantity: 1  # 铁矿需要石镐或更好的工具
-    
-    max_steps: 500  # FlatWorld 地表就有铁矿，无需挖掘
-  
-  # 使用英文指令采集1个沙子
-  - task_id: "harvest_1_sand"
-    category: "raw_resources"
-    difficulty: "easy"
-    description: "使用英文指令采集1个沙子"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "dig sand"
-    
-    env_config:
-      reward_config:
-        - entity: "sand"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 500
-  
-  # 使用英文指令采集1个沙砾
-  - task_id: "harvest_1_gravel"
-    category: "raw_resources"
-    difficulty: "easy"
-    description: "使用英文指令采集1个沙砾"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "dig gravel"
-    
-    env_config:
-      reward_config:
-        - entity: "gravel"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 500
+    n_trials: 3
 
-  # =========================================================================
-  # 动物掉落物任务 (Animal Drops)
-  # =========================================================================
-  
-  # 使用英文指令获取1个羊毛（从羊身上）
-  - task_id: "harvest_1_wool"
-    category: "animal_drops"
-    difficulty: "medium"
-    description: "使用英文指令获取1个羊毛（提供剪刀或击杀羊）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get wool from sheep"
-    
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_milk
+  # 描述: 使用英文指令获取1桶牛奶（初始拥有桶）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get milk from cow
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_milk
+    category: raw_resources
+    difficulty: easy
+    description: 使用英文指令获取1桶牛奶（初始拥有桶）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get milk from cow
     env_config:
-      reward_config:
-        - entity: "wool"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
       initial_inventory:
-        - type: "shears"
-          quantity: 1  # 提供剪刀（剪羊比击杀更高效）
-    
-    max_steps: 2000
-  
-  # 使用英文指令获取1个生牛肉（击杀牛）
-  - task_id: "harvest_1_beef"
-    category: "animal_drops"
-    difficulty: "medium"
-    description: "使用英文指令获取1个生牛肉（击杀牛）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get beef from cow"
-    
-    env_config:
+      - type: bucket
+        quantity: 1
       reward_config:
-        - entity: "beef"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_sword"
-          quantity: 1  # 提供木剑方便击杀
-    
-    max_steps: 2000
-  
-  # 使用英文指令获取1个生猪肉（击杀猪）
-  - task_id: "harvest_1_porkchop"
-    category: "animal_drops"
-    difficulty: "medium"
-    description: "使用英文指令获取1个生猪肉（击杀猪）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get porkchop from pig"
-    
-    env_config:
-      reward_config:
-        - entity: "porkchop"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_sword"
-          quantity: 1
-    
-    max_steps: 2000
-  
-  # 使用英文指令获取1个生鸡肉（击杀鸡）
-  - task_id: "harvest_1_chicken"
-    category: "animal_drops"
-    difficulty: "medium"
-    description: "使用英文指令获取1个生鸡肉（击杀鸡）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get chicken from chicken"
-    
-    env_config:
-      reward_config:
-        - entity: "chicken"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_sword"
-          quantity: 1
-    
+      - entity: milk_bucket
+        amount: 1
+        reward: 100
     max_steps: 2000
 
-  # =========================================================================
-  # 特殊掉落物任务 (Special Drops)
-  # =========================================================================
-  
-  # 使用英文指令获取1个皮革（击杀牛）
-  - task_id: "harvest_1_leather"
-    category: "special_drops"
-    difficulty: "medium"
-    description: "使用英文指令获取1个皮革（击杀牛掉落）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get leather from cow"
-    
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_dirt
+  # 描述: 使用英文指令挖掘1个泥土
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: dig dirt
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_dirt
+    category: raw_resources
+    difficulty: easy
+    description: 使用英文指令挖掘1个泥土
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: dig dirt
     env_config:
       reward_config:
-        - entity: "leather"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
+      - entity: dirt
+        amount: 1
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_cobblestone
+  # 描述: 使用英文指令采集1个圆石（提供木镐）
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: mine cobblestone
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_cobblestone
+    category: raw_resources
+    difficulty: medium
+    description: 使用英文指令采集1个圆石（提供木镐）
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: mine cobblestone
+    env_config:
       initial_inventory:
-        - type: "wooden_sword"
-          quantity: 1
-    
-    max_steps: 2000
-  
-  # 使用英文指令获取1个羽毛（击杀鸡）
-  - task_id: "harvest_1_feather"
-    category: "special_drops"
-    difficulty: "medium"
-    description: "使用英文指令获取1个羽毛（击杀鸡掉落）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get feather from chicken"
-    
+      - type: wooden_pickaxe
+        quantity: 1
+      reward_config:
+      - entity: cobblestone
+        amount: 3
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_coal
+  # 描述: 使用英文指令采集1个煤炭（提供木镐）
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: mine coal
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_coal
+    category: raw_resources
+    difficulty: medium
+    description: 使用英文指令采集1个煤炭（提供木镐）
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: mine coal
+    env_config:
+      initial_inventory:
+      - type: wooden_pickaxe
+        quantity: 1
+      reward_config:
+      - entity: coal
+        amount: 1
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_iron_ore
+  # 描述: 使用英文指令采集1个铁矿石（提供石镐）
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: mine iron ore
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_iron_ore
+    category: raw_resources
+    difficulty: hard
+    description: 使用英文指令采集1个铁矿石（提供石镐）
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: mine iron ore
+    env_config:
+      initial_inventory:
+      - type: stone_pickaxe
+        quantity: 1
+      reward_config:
+      - entity: iron_ore
+        amount: 1
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_sand
+  # 描述: 使用英文指令采集1个沙子
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: dig sand
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_sand
+    category: raw_resources
+    difficulty: easy
+    description: 使用英文指令采集1个沙子
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: dig sand
     env_config:
       reward_config:
-        - entity: "feather"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
+      - entity: sand
+        amount: 1
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_gravel
+  # 描述: 使用英文指令采集1个沙砾
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: dig gravel
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_gravel
+    category: raw_resources
+    difficulty: easy
+    description: 使用英文指令采集1个沙砾
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: dig gravel
+    env_config:
+      reward_config:
+      - entity: gravel
+        amount: 1
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_wool
+  # 描述: 使用英文指令获取1个羊毛（提供剪刀或击杀羊）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get wool from sheep
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_wool
+    category: animal_drops
+    difficulty: medium
+    description: 使用英文指令获取1个羊毛（提供剪刀或击杀羊）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get wool from sheep
+    env_config:
       initial_inventory:
-        - type: "wooden_sword"
-          quantity: 1
-    
+      - type: shears
+        quantity: 1
+      reward_config:
+      - entity: wool
+        amount: 1
+        reward: 100
     max_steps: 2000
 
-  # =========================================================================
-  # 植物类任务 (Plants)
-  # =========================================================================
-  
-  # 使用英文指令采集1朵花
-  - task_id: "harvest_1_flower"
-    category: "plants"
-    difficulty: "easy"
-    description: "使用英文指令采集1朵花（任意种类）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "pick flower"
-    
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_beef
+  # 描述: 使用英文指令获取1个生牛肉（击杀牛）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get beef from cow
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_beef
+    category: animal_drops
+    difficulty: medium
+    description: 使用英文指令获取1个生牛肉（击杀牛）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get beef from cow
+    env_config:
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - entity: beef
+        amount: 1
+        reward: 100
+    max_steps: 2000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_porkchop
+  # 描述: 使用英文指令获取1个生猪肉（击杀猪）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get porkchop from pig
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_porkchop
+    category: animal_drops
+    difficulty: medium
+    description: 使用英文指令获取1个生猪肉（击杀猪）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get porkchop from pig
+    env_config:
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - entity: porkchop
+        amount: 1
+        reward: 100
+    max_steps: 2000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_chicken
+  # 描述: 使用英文指令获取1个生鸡肉（击杀鸡）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get chicken from chicken
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_chicken
+    category: animal_drops
+    difficulty: medium
+    description: 使用英文指令获取1个生鸡肉（击杀鸡）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get chicken from chicken
+    env_config:
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - entity: chicken
+        amount: 1
+        reward: 100
+    max_steps: 2000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_leather
+  # 描述: 使用英文指令获取1个皮革（击杀牛掉落）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get leather from cow
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_leather
+    category: special_drops
+    difficulty: medium
+    description: 使用英文指令获取1个皮革（击杀牛掉落）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get leather from cow
+    env_config:
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - entity: leather
+        amount: 1
+        reward: 100
+    max_steps: 2000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_feather
+  # 描述: 使用英文指令获取1个羽毛（击杀鸡掉落）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get feather from chicken
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_feather
+    category: special_drops
+    difficulty: medium
+    description: 使用英文指令获取1个羽毛（击杀鸡掉落）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get feather from chicken
+    env_config:
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - entity: feather
+        amount: 1
+        reward: 100
+    max_steps: 2000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_flower
+  # 描述: 使用英文指令采集1朵花（任意种类）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: pick flower
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_flower
+    category: plants
+    difficulty: easy
+    description: 使用英文指令采集1朵花（任意种类）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: pick flower
     env_config:
       reward_config:
-        - entity: "yellow_flower"  # 蒲公英
-          amount: 1
-          reward: 100
-        - entity: "red_flower"  # 罂粟
-          amount: 1
-          reward: 100
-      reward_rule: "any"  # 任意一种花都行
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
+      - entity: yellow_flower
+        amount: 1
+        reward: 100
+      - entity: red_flower
+        amount: 1
+        reward: 100
     max_steps: 1000
-  
-  # 使用英文指令获取1个树苗（破坏树叶）
-  - task_id: "harvest_1_sapling"
-    category: "plants"
-    difficulty: "easy"
-    description: "使用英文指令获取1个树苗（破坏树叶掉落）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get sapling from tree"
-    
-    env_config:
-      reward_config:
-        - entity: "sapling"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 1500  # 需要破坏树叶，概率掉落
-  
-  # 使用英文指令采集1个蘑菇
-  - task_id: "harvest_1_mushroom"
-    category: "plants"
-    difficulty: "medium"
-    description: "使用英文指令采集1个蘑菇（红色或棕色）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "pick mushroom"
-    
-    env_config:
-      reward_config:
-        - entity: "red_mushroom"
-          amount: 1
-          reward: 100
-        - entity: "brown_mushroom"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 2000  # 蘑菇生成较少，需要找
 
-  # =========================================================================
-  # 特殊方块任务 (Special Blocks)
-  # =========================================================================
-  
-  # 使用英文指令采集1个粘土块
-  - task_id: "harvest_1_clay"
-    category: "special_blocks"
-    difficulty: "medium"
-    description: "使用英文指令采集1个粘土块"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "dig clay"
-    
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_sapling
+  # 描述: 使用英文指令获取1个树苗（破坏树叶掉落）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get sapling from tree
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_sapling
+    category: plants
+    difficulty: easy
+    description: 使用英文指令获取1个树苗（破坏树叶掉落）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get sapling from tree
     env_config:
       reward_config:
-        - entity: "clay"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 500  # FlatWorld 地表就有粘土，无需潜水
-  
-  # 使用英文指令采集1个雪块
-  - task_id: "harvest_1_snow"
-    category: "special_blocks"
-    difficulty: "easy"
-    description: "使用英文指令采集1个雪块"
-    env_name: "MineRLHarvestDefaultEnv-v0"  # 使用 FlatWorld 环境
-    
-    en_instruction: "dig snow"
-    
+      - entity: sapling
+        amount: 1
+        reward: 100
+    max_steps: 1500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_mushroom
+  # 描述: 使用英文指令采集1个蘑菇（红色或棕色）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: pick mushroom
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_mushroom
+    category: plants
+    difficulty: medium
+    description: 使用英文指令采集1个蘑菇（红色或棕色）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: pick mushroom
     env_config:
       reward_config:
-        - entity: "snow"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "wooden_shovel"
-          quantity: 1  # 雪需要铲子采集
-    
+      - entity: red_mushroom
+        amount: 1
+        reward: 100
+      - entity: brown_mushroom
+        amount: 1
+        reward: 100
+    max_steps: 2000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_clay
+  # 描述: 使用英文指令采集1个粘土块
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: dig clay
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_clay
+    category: special_blocks
+    difficulty: medium
+    description: 使用英文指令采集1个粘土块
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: dig clay
+    env_config:
+      reward_config:
+      - entity: clay
+        amount: 1
+        reward: 100
     max_steps: 500
 
-  # =========================================================================
-  # 矿石扩展任务 (Extended Ores)
-  # =========================================================================
-  
-  # 使用英文指令采集1个金矿石
-  - task_id: "harvest_1_gold_ore"
-    category: "extended_ores"
-    difficulty: "hard"
-    description: "使用英文指令采集1个金矿石（需要铁镐）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "mine gold ore"
-    
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_snow
+  # 描述: 使用英文指令采集1个雪块
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: dig snow
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_snow
+    category: special_blocks
+    difficulty: easy
+    description: 使用英文指令采集1个雪块
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: dig snow
     env_config:
-      reward_config:
-        - entity: "gold_ore"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
       initial_inventory:
-        - type: "iron_pickaxe"
-          quantity: 1  # 金矿需要铁镐
-    
-    max_steps: 4000  # 金矿较深，需要挖掘
-  
-  # 使用英文指令采集1个青金石矿石
-  - task_id: "harvest_1_lapis_ore"
-    category: "extended_ores"
-    difficulty: "medium"
-    description: "使用英文指令采集1个青金石矿石"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "mine lapis lazuli ore"
-    
+      - type: wooden_shovel
+        quantity: 1
+      reward_config:
+      - entity: snow
+        amount: 1
+        reward: 100
+    max_steps: 500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_gold_ore
+  # 描述: 使用英文指令采集1个金矿石（需要铁镐）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: mine gold ore
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_gold_ore
+    category: extended_ores
+    difficulty: hard
+    description: 使用英文指令采集1个金矿石（需要铁镐）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: mine gold ore
     env_config:
-      reward_config:
-        - entity: "lapis_ore"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
       initial_inventory:
-        - type: "stone_pickaxe"
-          quantity: 1  # 青金石需要石镐
-    
+      - type: iron_pickaxe
+        quantity: 1
+      reward_config:
+      - entity: gold_ore
+        amount: 1
+        reward: 100
+    max_steps: 4000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_lapis_ore
+  # 描述: 使用英文指令采集1个青金石矿石
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: mine lapis lazuli ore
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_lapis_ore
+    category: extended_ores
+    difficulty: medium
+    description: 使用英文指令采集1个青金石矿石
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: mine lapis lazuli ore
+    env_config:
+      initial_inventory:
+      - type: stone_pickaxe
+        quantity: 1
+      reward_config:
+      - entity: lapis_ore
+        amount: 1
+        reward: 100
     max_steps: 3000
 
-  # =========================================================================
-  # 食物类任务 (Food Tasks)
-  # =========================================================================
-  
-  # 使用英文指令获取1个苹果（从橡树树叶）
-  - task_id: "harvest_1_apple"
-    category: "food"
-    difficulty: "medium"
-    description: "使用英文指令获取1个苹果（从橡树树叶掉落）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "get apple from oak tree"
-    
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_apple
+  # 描述: 使用英文指令获取1个苹果（从橡树树叶掉落）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: get apple from oak tree
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_apple
+    category: food
+    difficulty: medium
+    description: 使用英文指令获取1个苹果（从橡树树叶掉落）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: get apple from oak tree
     env_config:
       reward_config:
-        - entity: "apple"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 1500  # 需要找树并破坏树叶
-  
-  # =========================================================================
-  # 农作物类任务 (Crops Tasks)
-  # 注意：这些任务提供初始种子和工具，因为自然生成的农作物很少
-  # =========================================================================
-  
-  # 使用英文指令种植并收获1个小麦
-  - task_id: "harvest_1_wheat"
-    category: "crops"
-    difficulty: "hard"
-    description: "使用英文指令种植并收获1个小麦（提供种子和锄头）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "plant and harvest wheat"
-    
+      - entity: apple
+        amount: 1
+        reward: 100
+    max_steps: 1500
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_wheat
+  # 描述: 使用英文指令种植并收获1个小麦（提供种子和锄头）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: plant and harvest wheat
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_wheat
+    category: crops
+    difficulty: hard
+    description: 使用英文指令种植并收获1个小麦（提供种子和锄头）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: plant and harvest wheat
     env_config:
-      reward_config:
-        - entity: "wheat"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
       initial_inventory:
-        - type: "wheat_seeds"
-          quantity: 4  # 给4个种子
-        - type: "wooden_hoe"
-          quantity: 1  # 给一个木锄
-        - type: "water_bucket"
-          quantity: 1  # 给一个水桶（用于灌溉）
-    
-    max_steps: 6000  # 需要找地、耕地、种植、等待生长、收获（步数多）
-  
-  # 使用英文指令种植并收获1个胡萝卜
-  - task_id: "harvest_1_carrot"
-    category: "crops"
-    difficulty: "hard"
-    description: "使用英文指令种植并收获1个胡萝卜（提供胡萝卜和锄头）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "plant and harvest carrot"
-    
-    env_config:
+      - type: wheat_seeds
+        quantity: 4
+      - type: wooden_hoe
+        quantity: 1
+      - type: water_bucket
+        quantity: 1
       reward_config:
-        - entity: "carrot"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-      initial_inventory:
-        - type: "carrot"
-          quantity: 4  # 胡萝卜既是食物也是种子
-        - type: "wooden_hoe"
-          quantity: 1
-        - type: "water_bucket"
-          quantity: 1
-    
+      - entity: wheat
+        amount: 1
+        reward: 100
     max_steps: 6000
-  
-  # 使用英文指令种植并收获1个土豆
-  - task_id: "harvest_1_potato"
-    category: "crops"
-    difficulty: "hard"
-    description: "使用英文指令种植并收获1个土豆（提供土豆和锄头）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "plant and harvest potato"
-    
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_carrot
+  # 描述: 使用英文指令种植并收获1个胡萝卜（提供胡萝卜和锄头）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: plant and harvest carrot
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_carrot
+    category: crops
+    difficulty: hard
+    description: 使用英文指令种植并收获1个胡萝卜（提供胡萝卜和锄头）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: plant and harvest carrot
     env_config:
-      reward_config:
-        - entity: "potato"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
       initial_inventory:
-        - type: "potato"
-          quantity: 4  # 土豆既是食物也是种子
-        - type: "wooden_hoe"
-          quantity: 1
-        - type: "water_bucket"
-          quantity: 1
-    
-    max_steps: 6000
-  
-  # 使用英文指令种植并收获1个甜菜根
-  - task_id: "harvest_1_beetroot"
-    category: "crops"
-    difficulty: "hard"
-    description: "使用英文指令种植并收获1个甜菜根（提供种子和锄头）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "plant and harvest beetroot"
-    
-    env_config:
+      - type: carrot
+        quantity: 4
+      - type: wooden_hoe
+        quantity: 1
+      - type: water_bucket
+        quantity: 1
       reward_config:
-        - entity: "beetroot"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
+      - entity: carrot
+        amount: 1
+        reward: 100
+    max_steps: 6000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_potato
+  # 描述: 使用英文指令种植并收获1个土豆（提供土豆和锄头）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: plant and harvest potato
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_potato
+    category: crops
+    difficulty: hard
+    description: 使用英文指令种植并收获1个土豆（提供土豆和锄头）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: plant and harvest potato
+    env_config:
       initial_inventory:
-        - type: "beetroot_seeds"
-          quantity: 4
-        - type: "wooden_hoe"
-          quantity: 1
-        - type: "water_bucket"
-          quantity: 1
-    
-    max_steps: 6000
-  
-  # 使用英文指令收获1个南瓜（简化版：提供南瓜种子）
-  - task_id: "harvest_1_pumpkin"
-    category: "crops"
-    difficulty: "hard"
-    description: "使用英文指令种植并收获1个南瓜（提供种子和锄头）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "plant and harvest pumpkin"
-    
-    env_config:
+      - type: potato
+        quantity: 4
+      - type: wooden_hoe
+        quantity: 1
+      - type: water_bucket
+        quantity: 1
       reward_config:
-        - entity: "pumpkin"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
+      - entity: potato
+        amount: 1
+        reward: 100
+    max_steps: 6000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_beetroot
+  # 描述: 使用英文指令种植并收获1个甜菜根（提供种子和锄头）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: plant and harvest beetroot
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_beetroot
+    category: crops
+    difficulty: hard
+    description: 使用英文指令种植并收获1个甜菜根（提供种子和锄头）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: plant and harvest beetroot
+    env_config:
       initial_inventory:
-        - type: "pumpkin_seeds"
-          quantity: 4
-        - type: "wooden_hoe"
-          quantity: 1
-        - type: "water_bucket"
-          quantity: 1
-    
+      - type: beetroot_seeds
+        quantity: 4
+      - type: wooden_hoe
+        quantity: 1
+      - type: water_bucket
+        quantity: 1
+      reward_config:
+      - entity: beetroot
+        amount: 1
+        reward: 100
     max_steps: 6000
-  
-  # 使用英文指令收获1个甘蔗
-  - task_id: "harvest_1_reeds"
-    category: "crops"
-    difficulty: "medium"
-    description: "使用英文指令收获1个甘蔗（甘蔗自然生成在水边）"
-    env_name: "MineRLHarvestEnv-v0"
-    
-    en_instruction: "harvest sugar cane"
-    
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_pumpkin
+  # 描述: 使用英文指令种植并收获1个南瓜（提供种子和锄头）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: plant and harvest pumpkin
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_pumpkin
+    category: crops
+    difficulty: hard
+    description: 使用英文指令种植并收获1个南瓜（提供种子和锄头）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: plant and harvest pumpkin
+    env_config:
+      initial_inventory:
+      - type: pumpkin_seeds
+        quantity: 4
+      - type: wooden_hoe
+        quantity: 1
+      - type: water_bucket
+        quantity: 1
+      reward_config:
+      - entity: pumpkin
+        amount: 1
+        reward: 100
+    max_steps: 6000
+
+  # ----------------------------------------------------------------------------
+  # 任务: harvest_1_reeds
+  # 描述: 使用英文指令收获1个甘蔗（甘蔗自然生成在水边）
+  # 环境: MineRLHarvestEnv-v0
+  # 指令: harvest sugar cane
+  # ----------------------------------------------------------------------------
+  - task_id: harvest_1_reeds
+    category: crops
+    difficulty: medium
+    description: 使用英文指令收获1个甘蔗（甘蔗自然生成在水边）
+    env_name: MineRLHarvestEnv-v0
+    en_instruction: harvest sugar cane
     env_config:
       reward_config:
-        - entity: "reeds"
-          amount: 1
-          reward: 100
-      reward_rule: "any"
-      world_generator:
-        force_reset: true
-      time_condition:
-        allow_passage_of_time: false
-        start_time: 6000
-      spawning_condition:
-        allow_spawning: true
-    
-    max_steps: 2000  # 只需找到并收获，不需要种植
+      - entity: reeds
+        amount: 1
+        reward: 100
+    max_steps: 2000
 
+  # ----------------------------------------------------------------------------
+  # 任务: minedojo_craft_sticks
+  # 描述: 观察 STEVE-1 在 MineDOJO 环境中制作木棍的行为模式（2x2 个人合成界面）
+  # 环境: MineDojoHarvestEnv-v0
+  # 指令: craft and get stick
+  # ----------------------------------------------------------------------------
+  - task_id: minedojo_craft_sticks
+    category: steve1_observation
+    difficulty: very_easy
+    description: 观察 STEVE-1 在 MineRL 环境中制作木棍的行为模式（2x2 个人合成界面）
+    env_name: MineDojoHarvestEnv-v0
+    en_instruction: craft and get stick
+    env_config:
+      initial_inventory:
+      - type: planks
+        quantity: 2
+      reward_config:
+      - entity: stick
+        amount: 1
+        reward: 100
+      world_seed: steve1_sticks_obs
+      start_position: null
+      start_health: 20
+      start_food: 20
+    max_steps: 500
 
-# ============================================================================
-# 任务集定义 - 按功能和难度分类
-# ============================================================================
+  # ----------------------------------------------------------------------------
+  # 任务: minerl_craft_sticks
+  # 描述: 观察 STEVE-1 在 MineRL 环境中制作木棍的行为模式（2x2 个人合成界面）
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: craft and get stick
+  # ----------------------------------------------------------------------------
+  - task_id: minerl_craft_sticks
+    category: steve1_observation
+    difficulty: very_easy
+    description: 观察 STEVE-1 在 MineRL 环境中制作木棍的行为模式（2x2 个人合成界面）
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: craft and get stick
+    env_config:
+      initial_inventory:
+      - type: planks
+        quantity: 2
+      reward_config:
+      - entity: stick
+        amount: 1
+        reward: 100
+      world_seed: steve1_sticks_obs
+      start_position: null
+      start_health: 20
+      start_food: 20
+    max_steps: 500
 
-# 快速测试集 - 只包含简单快速的任务
-quick_harvest_tasks:
-  - harvest_1_log     # 1000 steps
+  # ----------------------------------------------------------------------------
+  # 任务: steve1_replay_craft_sticks
+  # 描述: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
+  # 环境: MineDojoHarvestEnv-v0
+  # 指令: craft and get stick (replay mode)
+  # ----------------------------------------------------------------------------
+  - task_id: minedojo_replay_craft_sticks
+    category: steve1_replay
+    difficulty: very_easy
+    description: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
+    env_name: MineDojoHarvestEnv-v0
+    en_instruction: craft and get stick (replay mode)
+    replay_actions_file: results/evaluation/minedojo_craft_sticks_en_20251120_143724/report_minedojo_craft_sticks_trial1/actions.json
+    env_config:
+      initial_inventory:
+      - type: planks
+        quantity: 2
+      reward_config:
+      - entity: stick
+        amount: 1
+        reward: 100
+      world_seed: steve1_sticks_replay
+      start_position: null
+      start_health: 20
+      start_food: 20
+    max_steps: 500
 
-# 所有采集任务（完整测试集）⭐推荐用于完整评估
-all_harvest_tasks:
-  - harvest_1_log
-  - harvest_1_milk
-  - harvest_1_dirt
-  - harvest_1_cobblestone
-  - harvest_1_coal
-  - harvest_1_iron_ore
-  - harvest_1_sand
-  - harvest_1_gravel
-  - harvest_1_wool
-  - harvest_1_beef
-  - harvest_1_porkchop
-  - harvest_1_chicken
-  - harvest_1_leather
-  - harvest_1_feather
-  - harvest_1_flower
-  - harvest_1_sapling
-  - harvest_1_mushroom
-  - harvest_1_clay
-  - harvest_1_snow
-  - harvest_1_gold_ore
-  - harvest_1_lapis_ore
-  - harvest_1_apple
-  - harvest_1_wheat
-  - harvest_1_carrot
-  - harvest_1_potato
-  - harvest_1_beetroot
-  - harvest_1_pumpkin
-  - harvest_1_reeds
-  - harvest_1_clay           # 粘土（新增）
-  - harvest_1_snow           # 雪块（新增）
+  # ----------------------------------------------------------------------------
+  # 任务: minerl_replay_craft_sticks
+  # 描述: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
+  # 环境: MineRLHarvestDefaultEnv-v0
+  # 指令: craft and get stick (replay mode)
+  # ----------------------------------------------------------------------------
+  - task_id: minerl_replay_craft_sticks
+    category: steve1_replay
+    difficulty: very_easy
+    description: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: craft and get stick (replay mode)
+    replay_actions_file: results/evaluation/minerl_craft_sticks_en_20251120_144153/report_minerl_craft_sticks_trial1/actions.json
+    env_config:
+      initial_inventory:
+      - type: planks
+        quantity: 2
+      reward_config:
+      - entity: stick
+        amount: 1
+        reward: 100
+      world_seed: steve1_sticks_replay
+      start_position: null
+      start_health: 20
+      start_food: 20
+    max_steps: 500
 
-# 原始资源测试集（无需工具）
-raw_resources_tasks:
-  - harvest_1_log       # 木头
-  - harvest_1_milk           # 牛奶
-  - harvest_1_dirt           # 泥土
-  - harvest_1_cobblestone    # 圆石
-  - harvest_1_coal           # 煤炭
-  - harvest_1_iron_ore       # 铁矿石
-  - harvest_1_sand           # 沙子
-  - harvest_1_gravel         # 沙砾
-
-# 原始资源测试集（需要工具）
-mining_tasks:
-  - harvest_1_cobblestone
-  - harvest_1_coal
-  - harvest_1_iron_ore
-  - harvest_1_gold_ore       # 金矿石（新增）
-  - harvest_1_lapis_ore      # 青金石（新增）
-
-# 植物动物掉落物测试集
-animal_drops_tasks:
-  - harvest_1_wool           # 羊毛（新增）
-  - harvest_1_beef           # 牛肉（新增）
-  - harvest_1_porkchop       # 猪肉（新增）
-  - harvest_1_chicken        # 鸡肉（新增）
-  - harvest_1_leather        # 皮革（新增）
-  - harvest_1_feather        # 羽毛（新增）
-  - harvest_1_flower         # 花朵（新增）
-  - harvest_1_sapling        # 树苗（新增）
-  - harvest_1_mushroom       # 蘑菇（新增）
-  - harvest_1_apple
-
-# 农作物测试集（需要较长时间）
-crops_tasks:
-  - harvest_1_wheat
-  - harvest_1_carrot
-  - harvest_1_potato
-  - harvest_1_beetroot
-  - harvest_1_pumpkin
-  - harvest_1_reeds
-
-# ============================================================================
-# 注释和说明
-# ============================================================================
-# 
-# 任务难度分级:
-#   easy:   完成时间 < 5分钟,   步数 < 500
-#   medium: 完成时间 5-10分钟,  步数 500-1000
-#   hard:   完成时间 > 10分钟,  步数 > 1000
-#
-# 成功条件类型:
-#   inventory_has_item: 检查物品栏中是否有指定物品
-#   kill_entity:        检查是否击杀了指定生物
-#   equipment_has_item: 检查装备栏中是否有指定物品
-#
-# 评估维度说明:
-#   维度1 (自动翻译质量): zh_instruction + 自动翻译API
-#   维度2 (语义等价性):   zh_manual_translation (应该 = en_instruction)
-#   维度3 (语义鲁棒性):   zh_variants (不同表述的成功率方差)
-#
-# 使用示例:
-#   # 完整评估（所有29个采集任务）⭐推荐
-#   scripts/run_evaluation.sh --task-set all_tasks --n-trials 1
-#
-#   # 快速测试（只测试简单任务）
-#   scripts/run_evaluation.sh --task-set quick_harvest_tasks --n-trials 3
-#   
-#   # 测试原始资源（包含矿石）
-#   scripts/run_evaluation.sh --task-set raw_resources_tasks --n-trials 3
-#   
-#   # 只测试矿石采集（含金矿、青金石）
-#   scripts/run_evaluation.sh --task-set mining_tasks --n-trials 3
-#   
-#   # 只测试动物掉落物
-#   scripts/run_evaluation.sh --task-set animal_drops_tasks --n-trials 3
-#   
-#   # 只测试特殊掉落物（皮革、羽毛）
-#   scripts/run_evaluation.sh --task-set special_drops_tasks --n-trials 3
-#   
-#   # 只测试植物类（花朵、树苗、蘑菇）
-#   scripts/run_evaluation.sh --task-set plants_tasks --n-trials 3
-#   
-#   # 只测试特殊方块（粘土、雪）
-#   scripts/run_evaluation.sh --task-set special_blocks_tasks --n-trials 3
-#   
-#   # 只测试农作物（时间很长，每个任务6000步）
-#   scripts/run_evaluation.sh --task-set crops_tasks --n-trials 1
-#   
-#   # 单个任务评估
-#   scripts/run_evaluation.sh --task harvest_1_flower --n-trials 10
-#
-# 任务集说明:
-#   all_harvest_tasks:       所有采集任务（29个，同all_tasks）
-#   quick_harvest_tasks:     快速测试集（1个简单任务）
-#   raw_resources_tasks:     原始资源（9个，包含矿石）
-#   mining_tasks:            矿石采集（5个，需要工具）
-#   animal_drops_tasks:      动物植物掉落物（4个）
-#   crops_tasks:             农作物（6个，需要长时间）
-#
-# 💡 资源管理优化:
-#   - 每个任务评估完成后立即关闭环境，释放内存
-#   - 批量任务不会累积内存占用
-#   - GPU内存在每个任务后自动清理
-#
-
+ # ----------------------------------------------------------------------------
+  # 任务: minedojo_minerl_replay_craft_sticks
+  # 描述: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
+  # 环境: MineDojoHarvestEnv-v0
+  # 指令: craft and get stick (replay mode)
+  # ----------------------------------------------------------------------------
+  - task_id: minedojo_minerl_replay_craft_sticks
+    category: steve1_replay
+    difficulty: very_easy
+    description: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
+    env_name: MineDojoHarvestEnv-v0
+    en_instruction: craft and get stick (replay mode)
+    replay_actions_file: results/evaluation/minerl_craft_sticks_en_20251120_154026/report_minerl_craft_sticks_trial1/actions.json
+    env_config:
+      initial_inventory:
+      - type: planks
+        quantity: 2
+      reward_config:
+      - entity: stick
+        amount: 1
+        reward: 100
+      world_seed: steve1_sticks_replay
+      start_position: null
+      start_health: 20
+      start_food: 20
+    max_steps: 500

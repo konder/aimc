@@ -5,6 +5,7 @@ STEVE-1 评估器 (基于 MineRL 环境)
 
 import time
 import logging
+import json
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
@@ -61,9 +62,11 @@ class STEVE1Evaluator:
         visual_cond_scale: float = 7.0,
         seed: int = 42,
         enable_render: bool = False,
+        enable_report: bool = False,
         video_size: Optional[Tuple[int, int]] = None,
         env_name: str = 'MineRLHarvestEnv-v0',
-        env_config: Optional[Dict] = None
+        env_config: Optional[Dict] = None,
+        replay_actions_file: Optional[str] = None
     ):
         """
         初始化 STEVE-1 评估器（执行器/Worker）
@@ -73,6 +76,7 @@ class STEVE1Evaluator:
         - 集成中文翻译器
         - 执行单个任务评估
         - 录制和保存视频（如果启用）
+        - 支持动作序列回放（跳过模型推理）
         
         Args:
             model_path: VPT 模型配置文件路径
@@ -82,9 +86,10 @@ class STEVE1Evaluator:
             visual_cond_scale: Visual classifier-free guidance scale
             seed: 随机种子
             enable_render: 是否启用渲染
-            video_size: 视频尺寸 (width, height)，None 表示不录制
+            video_size: 视频尺寸 (width, height)，None 表示不录制（已弃用，使用固定尺寸 640x360）
             env_name: 环境名称（支持自定义环境，如 'MineRLHarvestEnv-v0'）
             env_config: 环境配置（传递给环境的参数，如 reward_config 等）
+            replay_actions_file: 动作序列文件路径（JSON），如果提供则跳过模型推理
         """
         self.model_path = model_path
         self.weights_path = weights_path
@@ -93,9 +98,14 @@ class STEVE1Evaluator:
         self.visual_cond_scale = visual_cond_scale
         self.seed = seed
         self.enable_render = enable_render
-        self.video_size = video_size  # None 或 (width, height)
+        self.enable_report = enable_report
+        
+        self.video_size = (640, 360) if video_size is not None else None
+        
         self.env_name = env_name
         self.env_config = env_config
+        self.replay_actions_file = replay_actions_file
+        self.replay_actions = None  # 加载的动作序列
         
         # 延迟加载
         self._agent = None
@@ -111,7 +121,7 @@ class STEVE1Evaluator:
         
         logger.info("STEVE-1 评估器初始化完成")
         if self.video_size:
-            logger.info(f"  视频录制: 启用 (尺寸: {self.video_size[0]}x{self.video_size[1]})")
+            logger.info(f"  视频录制: 启用 (固定尺寸: {self.video_size[0]}x{self.video_size[1]})")
     
     def _load_components(self):
         """延迟加载 Agent, MineCLIP, Prior 和环境"""
@@ -174,7 +184,56 @@ class STEVE1Evaluator:
             self._prior = load_vae_model(prior_info)
             logger.info(f"  ✓ Prior 加载完成")
             
+            # 3. 加载动作序列（如果提供）
+            if self.replay_actions_file:
+                logger.info(f"  加载动作序列: {self.replay_actions_file}")
+                self.replay_actions = self._load_replay_actions(self.replay_actions_file)
+                logger.info(f"  ✓ 动作序列加载完成 ({len(self.replay_actions)} 个动作)")
+                logger.info(f"  ⚠️ 回放模式：将跳过 STEVE-1 模型推理")
+            
             logger.info(f"  ✓ STEVE-1 所有组件加载完成")
+    
+    def _load_replay_actions(self, actions_file: str) -> List[Dict]:
+        """
+        加载动作序列文件（JSON 格式）
+        
+        Args:
+            actions_file: 动作序列文件路径
+        
+        Returns:
+            List[Dict]: 动作列表
+        """
+        actions_path = Path(actions_file)
+        if not actions_path.exists():
+            raise FileNotFoundError(f"动作序列文件不存在: {actions_file}")
+        
+        with open(actions_path, 'r', encoding='utf-8') as f:
+            actions_data = json.load(f)
+        
+        # 提取动作列表
+        actions = []
+        for item in actions_data:
+            action = item['action']
+            
+            # 转换 camera 为 numpy 数组
+            if 'camera' in action and isinstance(action['camera'], list):
+                action['camera'] = np.array(action['camera'])
+            
+            # 处理所有可能是列表的动作字段（MineRL 格式）
+            for key in ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint',
+                        'attack', 'use', 'drop', 'inventory', 'swapHands', 'pickItem', 'ESC']:
+                if key in action and isinstance(action[key], list):
+                    action[key] = action[key][0] if len(action[key]) > 0 else 0
+            
+            # 处理 hotbar 动作
+            for i in range(1, 10):
+                hotbar_key = f'hotbar.{i}'
+                if hotbar_key in action and isinstance(action[hotbar_key], list):
+                    action[hotbar_key] = action[hotbar_key][0] if len(action[hotbar_key]) > 0 else 0
+            
+            actions.append(action)
+        
+        return actions
     
     def evaluate_task(
         self,
@@ -183,8 +242,7 @@ class STEVE1Evaluator:
         n_trials: int = 10,
         max_steps: int = 1000,
         instruction: Optional[str] = None,
-        output_dir: Optional[Path] = None,
-        enable_report: bool = False  # 启用详细报告（包含每步的动作和截图）
+        output_dir: Optional[Path] = None
     ) -> TaskResult:
         """
         评估单个任务
@@ -261,7 +319,6 @@ class STEVE1Evaluator:
                 trial_idx=trial_idx + 1,  # 1-based for display
                 n_trials=n_trials,  # 传递总试验数
                 output_dir=output_dir,  # 传递输出目录
-                enable_report=enable_report  # 传递报告模式
             )
             
             trials.append(trial_result)
@@ -290,7 +347,6 @@ class STEVE1Evaluator:
         trial_idx: int,
         n_trials: int,  # 总试验数
         output_dir: Optional[Path] = None,  # 输出目录
-        enable_report: bool = False  # 启用详细报告：保存动作和截图
     ) -> TrialResult:
         """
         运行单次试验，可选录制视频和生成详细报告
@@ -311,8 +367,8 @@ class STEVE1Evaluator:
         frames = [] if self.video_size else None  # 只在需要时收集帧
         
         # 报告模式：收集动作和帧
-        report_actions = [] if enable_report else None
-        report_frames = [] if enable_report else None
+        report_actions = [] if self.enable_report else None
+        report_frames = [] if self.enable_report else None
         
         try:
             # 使用 Prior 编码指令（官方方式）
@@ -355,20 +411,30 @@ class STEVE1Evaluator:
                 bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]'
             ) as pbar:
                 while not done and steps < max_steps:
-                    # 获取动作（使用 Prior 计算的嵌入）
-                    # wrapper已经处理了dtype和autocast，直接调用即可
-                    with th.no_grad():
-                        action = self._agent.get_action(obs, prompt_embed_np)
+                    # 获取动作
+                    if self.replay_actions:
+                        # 🎬 回放模式：从预加载的动作序列中获取动作
+                        if steps < len(self.replay_actions):
+                            action = self.replay_actions[steps]
+                        else:
+                            # 动作序列已用完，提前结束
+                            logger.info(f"  ⚠️ 动作序列已用完 (共 {len(self.replay_actions)} 个动作)")
+                            break
+                    else:
+                        # 🤖 正常模式：使用 STEVE-1 模型推理
+                        # wrapper已经处理了dtype和autocast，直接调用即可
+                        with th.no_grad():
+                            action = self._agent.get_action(obs, prompt_embed_np)
                     
                     # 📊 报告模式：收集动作
-                    if enable_report:
+                    if self.enable_report:
                         report_actions.append(action.copy() if isinstance(action, dict) else action)
                     
                     # 执行动作
                     obs, reward, done, info = self._env.step(action)
                     
                     # 📊 报告模式：保存帧
-                    if enable_report and 'pov' in obs:
+                    if self.enable_report and 'pov' in obs:
                         report_frames.append(obs['pov'].copy())
                     
                     # 累积奖励（环境自己计算奖励）
@@ -447,7 +513,7 @@ class STEVE1Evaluator:
                     from steve1.utils.video_utils import save_frames_as_video
                     output_dir.mkdir(parents=True, exist_ok=True)
                     video_path = output_dir / f"trial_{trial_idx}.mp4"
-                    logger.info(f"  保存视频: trial_{trial_idx}.mp4 ({len(frames)} 帧)")
+                   #logger.info(f"  保存视频: trial_{trial_idx}.mp4 ({len(frames)} 帧)")
                     save_frames_as_video(frames, str(video_path), 20, to_bgr=True)
                     logger.info(f"  ✓ 视频已保存: {video_path.name}")
                 except Exception as e:
@@ -457,7 +523,7 @@ class STEVE1Evaluator:
                     frames.clear()
             
             # 📊 报告模式：保存动作和帧，生成HTML报告
-            if enable_report and report_actions and report_frames:
+            if self.enable_report and report_actions and report_frames:
                 self._save_report_data(
                     report_actions, 
                     report_frames, 
@@ -595,7 +661,7 @@ class STEVE1Evaluator:
         report_dir = output_dir / f"report_{task_id}_trial{trial_idx}"
         report_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"  📊 保存报告数据到: {report_dir}")
+        #logger.info(f"  📊 保存报告数据到: {report_dir}")
         
         # 1. 保存动作序列为 JSON
         actions_file = report_dir / "actions.json"
@@ -619,7 +685,7 @@ class STEVE1Evaluator:
             with open(actions_file, 'w', encoding='utf-8') as f:
                 json.dump(actions_serializable, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"    ✓ 动作序列已保存: actions.json ({len(actions)} steps)")
+            logger.info(f"  ✓ 动作序列已保存: actions.json ({len(actions)} steps)")
         except Exception as e:
             logger.error(f"    ❌ 保存动作序列失败: {e}")
         
@@ -636,7 +702,7 @@ class STEVE1Evaluator:
                 img.save(img_path)
                 saved_count += 1
             
-            logger.info(f"    ✓ 帧图像已保存: frames/ ({saved_count} 张)")
+            logger.info(f"  ✓ 帧图像已保存: frames/ ({saved_count} 张)")
         except Exception as e:
             logger.error(f"    ❌ 保存帧图像失败: {e}")
         
@@ -647,8 +713,8 @@ class STEVE1Evaluator:
             with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(html_content)
             
-            logger.info(f"    ✓ HTML 报告已生成: report.html")
-            logger.info(f"    🌐 打开报告: open {html_file}")
+            logger.info(f"  ✓ HTML 报告已生成: report.html")
+            logger.info(f"  打开报告: open {html_file}")
         except Exception as e:
             logger.error(f"    ❌ 生成 HTML 报告失败: {e}")
     
@@ -660,7 +726,7 @@ class STEVE1Evaluator:
         trial_idx: int
     ) -> str:
         """
-        生成精美的 HTML 详细报告（左右分栏：动作 | 图像）
+        生成简洁大方的 HTML 详细报告（每行4图的网格布局）
         
         Args:
             actions: 动作列表
@@ -714,191 +780,145 @@ class STEVE1Evaluator:
         sorted_combos = sorted(action_combo_stats.items(), key=lambda x: x[1], reverse=True)
         
         # 生成统计表格
-        stats_html = '<div class="stats-table">\n'
-        stats_html += '  <h3 style="margin-top: 0; color: #667eea;">📊 动作组合统计</h3>\n'
+        stats_html = '<div class="stats">\n'
+        stats_html += '  <h3>📊 Action Statistics</h3>\n'
         stats_html += '  <table>\n'
-        stats_html += '    <tr><th>动作组合</th><th>次数</th></tr>\n'
+        stats_html += '    <tr><th>Action Combination</th><th>Count</th></tr>\n'
         for combo, count in sorted_combos:
             stats_html += f'    <tr><td>{combo}</td><td>{count}</td></tr>\n'
         stats_html += '  </table>\n'
         stats_html += '</div>'
         
-        # 生成 HTML 头部
+        # 生成 HTML 头部（简洁大方的网格布局）
         html = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>STEVE-1 详细报告 - {task_id}</title>
+    <title>STEVE-1 Report - {task_id}</title>
     <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-            margin: 0; 
-            padding: 15px; 
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            font-size: 13px;
-            line-height: 1.6;
-        }}
-        .container {{
-            max-width: 1800px;
-            margin: 0 auto;
-        }}
-        .header {{ 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; 
-            padding: 20px 30px; 
-            margin-bottom: 15px; 
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }}
-        .header h1 {{
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }}
-        .header .meta {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
             font-size: 14px;
-            opacity: 0.9;
+            color: #333;
         }}
-        .stats-table {{
+        .container {{ max-width: 1600px; margin: 0 auto; }}
+        .header {{ 
+            background: white;
+            padding: 24px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+        }}
+        .header h1 {{ font-size: 24px; margin-bottom: 8px; color: #1a1a1a; }}
+        .header .meta {{ color: #666; font-size: 14px; }}
+        .stats {{ 
             background: white;
             padding: 20px;
-            margin-bottom: 15px;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
         }}
-        .stats-table h3 {{
-            color: #667eea;
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 15px;
+        .stats h3 {{ font-size: 16px; margin-bottom: 12px; color: #1a1a1a; }}
+        .stats table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+        .stats th {{ background: #f8f9fa; padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e9ecef; }}
+        .stats td {{ padding: 6px 12px; border-bottom: 1px solid #f0f0f0; }}
+        .stats td:last-child {{ text-align: right; font-weight: 600; color: #667eea; }}
+        .stats tr:hover {{ background: #f8f9fa; }}
+        .grid {{ 
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
         }}
-        .stats-table table {{
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }}
-        .stats-table th {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            border-radius: 5px 5px 0 0;
-        }}
-        .stats-table td {{
-            padding: 10px 12px;
-            border-bottom: 1px solid #f0f0f0;
-        }}
-        .stats-table td:last-child {{
-            text-align: right;
-            font-weight: 600;
-            color: #667eea;
-        }}
-        .stats-table tr:last-child td {{
-            border-bottom: none;
-        }}
-        .stats-table tr:hover {{
-            background: #f8f9ff;
-        }}
-        .step-row {{ 
-            display: flex;
-            background: white; 
-            margin-bottom: 10px; 
-            border-radius: 10px; 
+        .step-card {{ 
+            background: white;
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
             transition: transform 0.2s, box-shadow 0.2s;
         }}
-        .step-row:hover {{
+        .step-card:hover {{ 
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }}
-        .step-left {{ 
-            flex: 0 0 50%;
-            padding: 10px;
-            border-right: 2px solid #667eea;
-            display: flex;
-            flex-direction: column;
-        }}
-        .step-right {{ 
-            flex: 0 0 50%;
-            padding: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #000;
-        }}
-        .step-right img {{ 
+        .step-img {{ 
             width: 100%;
             height: auto;
             display: block;
+            background: #000;
         }}
+        .step-info {{ padding: 12px; }}
         .step-num {{ 
-            font-weight: 600; 
-            color: #667eea; 
-            font-size: 15px;
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid #f0f0f0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 8px;
         }}
-        .action-readable {{ 
-            background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%);
-            padding: 12px; 
-            border-radius: 8px; 
-            margin-bottom: 10px;
-            font-size: 13px;
-            line-height: 1.6;
-            border-left: 3px solid #667eea;
+        .step-desc {{ 
+            font-size: 12px;
+            line-height: 1.5;
+            color: #555;
+            margin-bottom: 8px;
         }}
-        .action-raw {{ 
-            background: #f8f9fa; 
-            padding: 12px; 
-            border-radius: 8px; 
+        .step-toggle {{ 
             font-size: 11px;
-            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            color: #667eea;
+            cursor: pointer;
+            text-decoration: underline;
+            user-select: none;
+        }}
+        .step-toggle:hover {{ color: #764ba2; }}
+        .step-json {{ 
+            display: none;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: 'Monaco', 'Courier New', monospace;
             overflow-x: auto;
-            flex-grow: 1;
-            max-height: 180px;
+            max-height: 150px;
             overflow-y: auto;
-            border: 1px solid #e0e0e0;
+            border: 1px solid #e9ecef;
         }}
-        .inventory {{ 
-            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-            padding: 3px 8px; 
-            border-radius: 4px; 
-            color: #155724; 
-            font-weight: 600;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }}
-        .key {{ 
-            color: #667eea; 
-            font-weight: 600;
-            padding: 2px 4px;
-            background: rgba(102, 126, 234, 0.1);
+        .step-json.show {{ display: block; }}
+        .tag {{ 
+            display: inline-block;
+            padding: 2px 6px;
             border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 4px;
         }}
+        .tag-inv {{ background: #d4edda; color: #155724; }}
+        .tag-move {{ background: #d1ecf1; color: #0c5460; }}
+        .tag-cam {{ background: #fff3cd; color: #856404; }}
+        .tag-act {{ background: #f8d7da; color: #721c24; }}
     </style>
+    <script>
+        function toggleJson(id) {{
+            var el = document.getElementById('json-' + id);
+            el.classList.toggle('show');
+        }}
+    </script>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 STEVE-1 详细报告</h1>
-            <div class="meta">
-                任务: {task_id} | Trial: {trial_idx} | 总步数: {len(actions)} | 帧数: {num_frames}
-            </div>
+            <h1>📊 STEVE-1 Report</h1>
+            <div class="meta">Task: {task_id} | Trial: {trial_idx} | Steps: {len(actions)} | Frames: {num_frames}</div>
         </div>
         
         {stats_html}
+        
+        <div class="grid">
 """
         
-        # 生成每一步的紧凑信息（左右分栏）
+        # 生成每一步的网格卡片（每行4个）
         for i, action in enumerate(actions):
             # 生成可读的动作描述
             readable_action = self._format_action_readable(action)
@@ -907,19 +927,19 @@ class STEVE1Evaluator:
             action_json = self._action_to_json_str(action)
             
             html += f"""
-    <div class="step-row">
-        <div class="step-left">
-            <div class="step-num">Step {i}</div>
-            <div class="action-readable">{readable_action}</div>
-            <div class="action-raw">{action_json}</div>
-        </div>
-        <div class="step-right">
-            <img src="frames/step_{i:04d}.png" alt="Step {i}">
-        </div>
-    </div>
+            <div class="step-card">
+                <img src="frames/step_{i:04d}.png" alt="Step {i}" class="step-img">
+                <div class="step-info">
+                    <div class="step-num">Step {i}</div>
+                    <div class="step-desc">{readable_action}</div>
+                    <div class="step-toggle" onclick="toggleJson({i})">▼ Show JSON</div>
+                    <div class="step-json" id="json-{i}">{action_json}</div>
+                </div>
+            </div>
 """
         
         html += """
+        </div>
     </div>
 </body>
 </html>
