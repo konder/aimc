@@ -32,6 +32,8 @@ from src.evaluation.steve1_evaluator import STEVE1Evaluator
 from src.evaluation.metrics import TaskResult
 from src.evaluation.task_loader import TaskLoader
 from src.evaluation.report_generator import ReportGenerator
+from src.evaluation.matrix_analyzer import MatrixAnalyzer
+from src.evaluation.html_report_generator import HTMLReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +95,13 @@ class EvaluationFramework:
         
         # 加载任务配置
         self.task_loader = TaskLoader(self.config.task_config_path)
-        logger.info(f"加载任务配置: {len(self.task_loader.tasks)} 个任务")
+        logger.info(f"加载任务配置: {self.config.task_config_path}")
+        logger.info(f"  发现 {len(self.task_loader.tasks)} 个任务")
         
         # 初始化报告生成器
         self.report_generator = ReportGenerator(self.config.results_dir)
+        self.matrix_analyzer = MatrixAnalyzer()
+        self.html_generator = HTMLReportGenerator(self.config.results_dir)
 
         # 保留 evaluator 参数用于向后兼容，但不在初始化时创建
         # 每个任务会创建专用的 evaluator，避免环境配置冲突
@@ -573,13 +578,81 @@ class EvaluationFramework:
         txt_path = json_path.with_suffix('.txt')
         self._generate_text_report(report_data, txt_path)
         
+        # 生成三维能力矩阵分析和HTML报告
+        matrix_analysis, html_path = self._generate_matrix_report(results, json_path.parent)
+        
         #logger.info(f"\n{'='*80}")
         #logger.info(f"报告已生成:")
         #logger.info(f"  JSON: {json_path}")
         #logger.info(f"  TXT:  {txt_path}")
+        #if html_path:
+        #    logger.info(f"  HTML: {html_path}")
         #logger.info(f"{'='*80}\n")
         
         return str(json_path), str(txt_path)
+    
+    def _generate_matrix_report(
+        self, 
+        results: List[TaskResult], 
+        output_dir: Path
+    ) -> Tuple[Optional[Dict], Optional[Path]]:
+        """
+        生成三维能力矩阵分析报告和HTML可视化报告
+        
+        Args:
+            results: 任务结果列表
+            output_dir: 输出目录
+            
+        Returns:
+            (matrix_analysis, html_path): 矩阵分析结果和HTML路径
+        """
+        try:
+            # 将TaskResult转换为矩阵分析器需要的格式
+            analysis_data = []
+            for result in results:
+                # 从task_loader中获取原始任务配置
+                task_config = self.task_loader.get_task(result.task_id)
+                if not task_config:
+                    logger.warning(f"无法找到任务配置: {result.task_id}")
+                    continue
+                
+                task_data = {
+                    'task_config': task_config,
+                    'success_rate': result.success_rate,
+                    'avg_steps': result.avg_steps,
+                    'avg_time': result.avg_time,
+                }
+                analysis_data.append(task_data)
+            
+            if not analysis_data:
+                logger.warning("没有可分析的任务数据")
+                return None, None
+            
+            # 执行矩阵分析
+            matrix_analysis = self.matrix_analyzer.analyze_results(analysis_data)
+            
+            # 保存JSON分析结果
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            analysis_json_path = output_dir / f"matrix_analysis_{timestamp}.json"
+            self.matrix_analyzer.save_analysis(matrix_analysis, analysis_json_path)
+            logger.info(f"✓ 矩阵分析已保存: {analysis_json_path.name}")
+            
+            # 打印分析摘要
+            self.matrix_analyzer.print_summary(matrix_analysis)
+            
+            # 生成HTML报告
+            config_filename = Path(self.config.task_config_path).name
+            html_path = self.html_generator.generate(
+                analysis=matrix_analysis,
+                config_file=config_filename,
+                output_filename=f"evaluation_report_{timestamp}.html"
+            )
+            
+            return matrix_analysis, html_path
+            
+        except Exception as e:
+            logger.error(f"生成矩阵报告失败: {e}", exc_info=True)
+            return None, None
     
     def _generate_text_report(self, report_data: Dict[str, Any], output_path: Path):
         """生成人类可读的文本报告"""
@@ -688,6 +761,12 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='STEVE-1 评估框架')
     parser.add_argument(
+        '--config',
+        type=str,
+        default='config/eval_tasks.yaml',
+        help='任务配置文件路径（默认: config/eval_tasks.yaml）'
+    )
+    parser.add_argument(
         '--task',
         type=str,
         help='评估单个任务（任务ID）'
@@ -738,6 +817,7 @@ if __name__ == "__main__":
     
     # 创建配置
     config = EvaluationConfig(
+        task_config_path=args.config,
         n_trials=args.n_trials,
         max_steps=args.max_steps,
         enable_render=args.render,

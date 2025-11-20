@@ -57,7 +57,7 @@ harvest_tasks:
   # 任务: harvest_1_milk
   # 描述: 使用英文指令获取1桶牛奶（初始拥有桶）
   # 环境: MineRLHarvestEnv-v0
-  # 指令: get milk from cow
+  # 指令: milk cow
   # ----------------------------------------------------------------------------
   - task_id: harvest_1_milk
     category: raw_resources
@@ -66,16 +66,20 @@ harvest_tasks:
 
     env_name: MineRLHarvestDefaultEnv-v0
 
-    en_instruction: find cow and get milk
+    en_instruction: milk cow
 
     env_config:
+      specified_biome: plains
+
       initial_inventory:
       - type: bucket
         quantity: 1
+
       reward_config:
       - entity: milk_bucket
         amount: 1
         reward: 100
+        
     max_steps: 2000
 
   # ----------------------------------------------------------------------------

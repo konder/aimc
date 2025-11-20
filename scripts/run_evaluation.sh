@@ -17,6 +17,7 @@ NC='\033[0m' # No Color
 TASK=""
 TASK_LIST=""
 TASK_SET=""
+CONFIG="config/eval_tasks.yaml"  # 默认配置文件
 N_TRIALS=3
 MAX_STEPS=2000
 RENDER=""
@@ -40,12 +41,16 @@ show_help() {
     echo "  --task-list \"T1 T2 T3\"      评估任务列表（用空格分隔）"
     echo "  --task-set SET_NAME         评估任务集（harvest_tasks, quick_test, baseline_test）"
     echo ""
+    echo "配置文件："
+    echo "  --config FILE               指定配置文件（默认: config/eval_tasks.yaml）"
+    echo "                              示例: --config config/eval_tasks_comprehensive.yaml"
+    echo ""
     echo "参数配置："
     echo "  --n-trials N                试验次数（默认: 3）"
     echo "  --max-steps N               最大步数（默认: 2000）"
     echo "  --render                    启用游戏窗口渲染（显示画面）"
     echo "  --enable_video              启用视频录制（固定尺寸 640x360）"
-    echo "  --enable_report             启用 HTML 报告生成"
+    echo "  --enable_report             启用 HTML 报告生成（包含三维矩阵分析）"
     echo ""
     echo "环境配置："
     echo "  --x86                       使用 x86 架构（M1/M2 Mac）"
@@ -57,11 +62,14 @@ show_help() {
     echo "  # 评估单个任务"
     echo "  $0 --task harvest_1_milk --n-trials 3 --render"
     echo ""
+    echo "  # 使用综合配置文件评估完整任务集"
+    echo "  $0 --config config/eval_tasks_comprehensive.yaml --task-set harvest_tasks --enable_report"
+    echo ""
     echo "  # 批量评估多个任务"
     echo "  $0 --task-list \"harvest_1_milk harvest_1_dirt harvest_1_grass\" --n-trials 3"
     echo ""
-    echo "  # 评估任务集"
-    echo "  $0 --task-set harvest_tasks --n-trials 5"
+    echo "  # 评估任务集并生成HTML报告"
+    echo "  $0 --task-set harvest_tasks --n-trials 5 --enable_report"
     echo ""
     echo "  # 评估预定义测试集"
     echo "  $0 --task-set quick_test --n-trials 3"
@@ -88,6 +96,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --task-set)
             TASK_SET="$2"
+            shift 2
+            ;;
+        --config)
+            CONFIG="$2"
             shift 2
             ;;
         --n-trials)
@@ -159,6 +171,9 @@ fi
 # 构建 Python 命令
 PYTHON_CMD="python src/evaluation/eval_framework.py"
 
+# 添加配置文件参数
+PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
+
 if [[ -n "$TASK" ]]; then
     PYTHON_CMD="$PYTHON_CMD --task $TASK"
 elif [[ -n "$TASK_LIST" ]]; then
@@ -186,6 +201,7 @@ echo -e "${BLUE}=========================================="
 echo "STEVE-1 评估框架"
 echo -e "==========================================${NC}"
 echo -e "${GREEN}项目根目录:${NC} $PROJECT_ROOT"
+echo -e "${GREEN}配置文件:${NC} $CONFIG"
 
 if [[ -n "$TASK" ]]; then
     echo -e "${GREEN}评估模式:${NC} 单任务"
@@ -202,7 +218,7 @@ echo -e "${GREEN}试验次数:${NC} $N_TRIALS"
 echo -e "${GREEN}最大步数:${NC} $MAX_STEPS"
 echo -e "${GREEN}显示窗口:${NC} $([ -n "$RENDER" ] && echo "是" || echo "否")"
 echo -e "${GREEN}录制视频:${NC} $([ -n "$ENABLE_VIDEO" ] && echo "是 (640x360)" || echo "否")"
-echo -e "${GREEN}生成报告:${NC} $([ -n "$ENABLE_REPORT" ] && echo "是" || echo "否")"
+echo -e "${GREEN}生成报告:${NC} $([ -n "$ENABLE_REPORT" ] && echo "是 (含三维矩阵分析)" || echo "否")"
 echo -e "${GREEN}架构模式:${NC} $([ "$USE_X86" = true ] && echo "x86_64" || echo "原生")"
 echo -e "${BLUE}==========================================${NC}"
 echo ""
