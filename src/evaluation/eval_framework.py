@@ -232,6 +232,8 @@ class EvaluationFramework:
         logger.info(f"  语言: {language}")
         logger.info(f"  试验次数: {n_trials}")
         logger.info(f"  最大步数: {max_steps}")
+        if env_config.get('specified_biome'):
+            logger.info(f"  🌍 指定Biome: {env_config.get('specified_biome')}")
         if replay_actions_file:
             logger.info(f"  🎬 回放模式: {replay_actions_file}")
         

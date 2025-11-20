@@ -1,0 +1,147 @@
+--- src/main/java/com/minerl/multiagent/env/EnvServer.java.backup_20251120_175812	2025-11-20 17:58:12
++++ src/main/java/com/minerl/multiagent/env/EnvServer.java	2025-11-20 18:52:08
+@@ -32,6 +32,15 @@
+ import net.minecraft.world.GameType;
+ import net.minecraft.world.WorldSettings;
+ import net.minecraft.world.gen.settings.DimensionGeneratorSettings;
++import net.minecraft.world.biome.Biome;
++import net.minecraft.world.biome.Biomes;
++import net.minecraft.world.biome.provider.SingleBiomeProvider;
++import net.minecraft.util.registry.SimpleRegistry;
++import net.minecraft.world.Dimension;
++import net.minecraft.world.gen.NoiseChunkGenerator;
++import net.minecraft.world.gen.DimensionSettings;
++import net.minecraft.world.DimensionType;
++import net.minecraft.util.RegistryKey;
+ import org.apache.logging.log4j.Level;
+ import org.apache.logging.log4j.LogManager;
+ import org.apache.logging.log4j.Logger;
+@@ -418,12 +427,114 @@
+             MinecraftServer.setSpawnInVillage(true);
+         }
+ 
++        // ========== BiomeGenerator Support ==========
++        // Check if BiomeGenerator is specified in mission XML
++        BiomeGenerator biomeGen = getBiomeGenerator(missionInit);
++        DimensionGeneratorSettings dms;
++        
++        if (biomeGen != null && biomeGen.getBiome() != null && biomeGen.getBiome() >= 0) {
++            // Use BiomeGenerator to create a single-biome world
++            System.out.println("*** BiomeGenerator detected: Creating world with biome ID " + biomeGen.getBiome() + " ***");
++            dms = createBiomeDimensionSettings(
++                DynamicRegistries.getImpl(), 
++                seed, 
++                generateFeatures, 
++                bonusChest,
++                biomeGen.getBiome()
++            );
++        } else {
++            // Standard world generation
++            dms = DimensionGeneratorSettings.fromDynamicRegistries(
++                DynamicRegistries.getImpl(), 
++                seed, 
++                generateFeatures, 
++                bonusChest
++            );
++        }
++        // ========== End BiomeGenerator Support ==========
+ 
+         WorldSettings worldSettings = new WorldSettings(worldName, GameType.SURVIVAL, false, Difficulty.HARD, false, new GameRules(), DatapackCodec.VANILLA_CODEC);
+-        DimensionGeneratorSettings dms = DimensionGeneratorSettings.fromDynamicRegistries(DynamicRegistries.getImpl(), seed, generateFeatures, bonusChest);
+         mc.createWorld(worldName, worldSettings, DynamicRegistries.getImpl(), dms);
+     }
+ 
++    /**
++     * Get BiomeGenerator from MissionInit if present
++     * Added for BiomeGenerator support
++     */
++    private BiomeGenerator getBiomeGenerator(MissionInit missionInit) {
++        try {
++            ServerHandlers serverHandlers = missionInit.getMission().getServerSection().getServerHandlers();
++            if (serverHandlers == null) return null;
++            
++            Object worldGenerator = serverHandlers.getWorldGenerator();
++            if (worldGenerator instanceof BiomeGenerator) {
++                return (BiomeGenerator) worldGenerator;
++            }
++        } catch (Exception e) {
++            LOGGER.error("Error getting BiomeGenerator: ", e);
++        }
++        return null;
++    }
++
++    /**
++     * Create DimensionGeneratorSettings with a single biome
++     * Added for BiomeGenerator support
++     */
++    private DimensionGeneratorSettings createBiomeDimensionSettings(
++        DynamicRegistries dynamicRegistries,
++        long seed,
++        boolean generateFeatures, 
++        boolean bonusChest,
++        int biomeId
++    ) {
++        Registry<Biome> biomeRegistry = dynamicRegistries.getRegistry(Registry.BIOME_KEY);
++        Registry<DimensionType> dimensionTypeRegistry = dynamicRegistries.getRegistry(Registry.DIMENSION_TYPE_KEY);
++        Registry<DimensionSettings> dimensionSettingsRegistry = dynamicRegistries.getRegistry(Registry.NOISE_SETTINGS_KEY);
++        
++        // Get biome by ID - need to iterate through registry
++        Biome targetBiome = null;
++        int currentId = 0;
++        for (Biome biome : biomeRegistry) {
++            if (currentId == biomeId) {
++                targetBiome = biome;
++                break;
++            }
++            currentId++;
++        }
++        
++        if (targetBiome == null) {
++            LOGGER.warn("Biome ID {} not found, using PLAINS", biomeId);
++            targetBiome = biomeRegistry.getOrThrow(Biomes.PLAINS);
++        } else {
++            ResourceLocation biomeLoc = biomeRegistry.getKey(targetBiome);
++            LOGGER.info("Using biome: {} (ID: {})", biomeLoc, biomeId);
++        }
++        
++        // Create SingleBiomeProvider - KEY!
++        SingleBiomeProvider biomeProvider = new SingleBiomeProvider(targetBiome);
++        
++        // Create ChunkGenerator with SingleBiomeProvider
++        NoiseChunkGenerator chunkGenerator = new NoiseChunkGenerator(
++            biomeProvider,
++            seed,
++            () -> { return dimensionSettingsRegistry.getOrThrow(DimensionSettings.field_242734_c); }
++        );
++        
++        // Create dimension registry with our custom ChunkGenerator
++        SimpleRegistry<Dimension> dimensions = DimensionGeneratorSettings.func_242749_a(
++            dimensionTypeRegistry,
++            DimensionType.getDefaultSimpleRegistry(
++                dimensionTypeRegistry, 
++                biomeRegistry, 
++                dimensionSettingsRegistry, 
++                seed
++            ),
++            chunkGenerator
++        );
++        
++        return new DimensionGeneratorSettings(seed, generateFeatures, bonusChest, dimensions);
++    }
++
+     private void checkValidBiome(String spawnBiome) {
+         Set<String> biomeCategories = DynamicRegistries.getImpl().getRegistry(Registry.BIOME_KEY).getEntries().stream()
+                 .map(e -> e.getValue().getCategory().getName())
+--- src/main/java/net/minecraft/client/gui/toasts/ToastGui.java.backup_20251120_191001	2025-11-20 19:10:01
++++ src/main/java/net/minecraft/client/gui/toasts/ToastGui.java	2025-11-20 19:11:43
+@@ -62,7 +62,9 @@
+    }
+ 
+    public void add(IToast toastIn) {
+-      this.toastsQueue.add(toastIn);
++      // Disabled toast notifications for headless mode
++      // this.toastsQueue.add(toastIn);
++      return;
+    }
+ 
+    public Minecraft getMinecraft() {

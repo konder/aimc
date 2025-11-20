@@ -160,6 +160,7 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
         time_condition: Optional[Dict] = None,
         spawning_condition: Optional[Dict] = None,
         initial_inventory: Optional[List[Dict]] = None,
+        specified_biome: Optional[str] = None,  # 新增：指定 biome
         **kwargs
     ):
         """
@@ -170,6 +171,7 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
             time_condition: 时间条件 (如 {"allow_passage_of_time": False, "start_time": 6000})
             spawning_condition: 生成条件 (如 {"allow_spawning": True})
             initial_inventory: 初始物品 (如 [{"type": "bucket", "quantity": 1}])
+            specified_biome: 指定 biome (如 "desert", "jungle", "forest" 等)
         """
         # 🔄 统一 image_size 和 resolution
         # image_size 优先（格式: [height, width]）
@@ -203,6 +205,7 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
             "allow_spawning": True  # 默认允许生成动物
         }
         self.initial_inventory = initial_inventory or []  # 默认空手
+        self.specified_biome = specified_biome  # 保存 biome 配置
         
         # 调用父类初始化
         super().__init__(
@@ -259,9 +262,46 @@ class MineRLHarvestDefaultEnvSpec(HumanControlEnvSpec):
         return agent_start_handlers
     
     def create_server_world_generators(self) -> List[Handler]:
-        """世界生成器 - 使用 DefaultWorldGenerator"""
-        #logger.info(f"使用 DefaultWorldGenerator（默认世界）")
+        """世界生成器 - 根据配置使用 BiomeGenerator 或 DefaultWorldGenerator"""
         
+        # Biome ID 映射表 (Minecraft 1.16)
+        BIOME_ID_MAP = {
+            # 温暖
+            "desert": 2, "savanna": 35, "badlands": 37,
+            # 温带
+            "plains": 1, "forest": 4, "flower_forest": 132,
+            "birch_forest": 27, "dark_forest": 29, "swamp": 6,
+            # 寒冷
+            "taiga": 5, "snowy_taiga": 30, "snowy_tundra": 12,
+            # 海洋
+            "ocean": 0, "deep_ocean": 24, "frozen_ocean": 10,
+            "warm_ocean": 44, "lukewarm_ocean": 45, "cold_ocean": 46,
+            # 丛林
+            "jungle": 21, "bamboo_jungle": 168,
+            # 山地
+            "mountains": 3, "snowy_mountains": 13, "wooded_mountains": 34,
+            # 其他
+            "beach": 16, "snowy_beach": 26, "mushroom_fields": 14,
+            "river": 7, "frozen_river": 11,
+        }
+        
+        if self.specified_biome:
+            # 使用 BiomeGenerator 创建单一 biome 世界
+            biome_id = BIOME_ID_MAP.get(self.specified_biome.lower())
+            
+            if biome_id is not None:
+                logger.info(f"🌍 使用 BiomeGenerator: {self.specified_biome} (ID: {biome_id})")
+                return [
+                    handlers.BiomeGenerator(
+                        biome_id=biome_id,
+                        force_reset=True
+                    )
+                ]
+            else:
+                logger.warning(f"⚠️ 未知的 biome: {self.specified_biome}，使用默认世界")
+        
+        # 使用 DefaultWorldGenerator（默认世界）
+        logger.info(f"🌍 使用 DefaultWorldGenerator（默认世界）")
         return [
             handlers.DefaultWorldGenerator(
                 force_reset=True,
@@ -319,6 +359,7 @@ def _minerl_harvest_default_env_entrypoint(
     time_condition: Optional[Dict] = None,
     spawning_condition: Optional[Dict] = None,
     initial_inventory: Optional[List[Dict]] = None,
+    specified_biome: Optional[str] = None,
     max_episode_steps: int = 2000,
     **kwargs
 ):
@@ -331,6 +372,7 @@ def _minerl_harvest_default_env_entrypoint(
         time_condition: 时间条件
         spawning_condition: 生成条件
         initial_inventory: 初始物品配置
+        specified_biome: 指定 biome
         max_episode_steps: 最大步数
     """
     # 创建 env_spec
@@ -339,6 +381,7 @@ def _minerl_harvest_default_env_entrypoint(
         time_condition=time_condition,
         spawning_condition=spawning_condition,
         initial_inventory=initial_inventory,
+        specified_biome=specified_biome,
         **kwargs
     )
     

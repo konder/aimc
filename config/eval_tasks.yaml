@@ -35,18 +35,18 @@ harvest_tasks:
   - task_id: harvest_1_log
     category: raw_resources
     difficulty: easy
-    description: 使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）
-    env_name: MineDojoHarvestEnv-v0
-    en_instruction: chop tree
+    description: 使用英文指令砍任意树木获取一块木头
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+
+    en_instruction: chop tree and get a log
+
     env_config:
-      initial_inventory:
-      - type: None
-        quantity: 1
       specified_biome: forest
-      world_seed: harvest_log_test
-      task_id: open-ended
+      
       start_time: 6000
       allow_mob_spawn: false
+      
     max_steps: 500
     n_trials: 3
 
@@ -60,8 +60,11 @@ harvest_tasks:
     category: raw_resources
     difficulty: easy
     description: 使用英文指令获取1桶牛奶（初始拥有桶）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get milk from cow
+
+    env_name: MineRLHarvestDefaultEnv-v0
+
+    en_instruction: find cow and get milk
+
     env_config:
       initial_inventory:
       - type: bucket
@@ -101,16 +104,24 @@ harvest_tasks:
     category: raw_resources
     difficulty: medium
     description: 使用英文指令采集1个圆石（提供木镐）
+    
     env_name: MineRLHarvestDefaultEnv-v0
+    
     en_instruction: mine cobblestone
+
     env_config:
       initial_inventory:
       - type: wooden_pickaxe
         quantity: 1
       reward_config:
       - entity: cobblestone
-        amount: 3
+        amount: 1
         reward: 100
+      
+      specified_biome: mountains
+      start_time: 6000
+      allow_mob_spawn: false
+
     max_steps: 500
 
   # ----------------------------------------------------------------------------
@@ -642,136 +653,3 @@ harvest_tasks:
         amount: 1
         reward: 100
     max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: minedojo_craft_sticks
-  # 描述: 观察 STEVE-1 在 MineDOJO 环境中制作木棍的行为模式（2x2 个人合成界面）
-  # 环境: MineDojoHarvestEnv-v0
-  # 指令: craft and get stick
-  # ----------------------------------------------------------------------------
-  - task_id: minedojo_craft_sticks
-    category: steve1_observation
-    difficulty: very_easy
-    description: 观察 STEVE-1 在 MineRL 环境中制作木棍的行为模式（2x2 个人合成界面）
-    env_name: MineDojoHarvestEnv-v0
-    en_instruction: craft and get stick
-    env_config:
-      initial_inventory:
-      - type: planks
-        quantity: 2
-      reward_config:
-      - entity: stick
-        amount: 1
-        reward: 100
-      world_seed: steve1_sticks_obs
-      start_position: null
-      start_health: 20
-      start_food: 20
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: minerl_craft_sticks
-  # 描述: 观察 STEVE-1 在 MineRL 环境中制作木棍的行为模式（2x2 个人合成界面）
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: craft and get stick
-  # ----------------------------------------------------------------------------
-  - task_id: minerl_craft_sticks
-    category: steve1_observation
-    difficulty: very_easy
-    description: 观察 STEVE-1 在 MineRL 环境中制作木棍的行为模式（2x2 个人合成界面）
-    env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: craft and get stick
-    env_config:
-      initial_inventory:
-      - type: planks
-        quantity: 2
-      reward_config:
-      - entity: stick
-        amount: 1
-        reward: 100
-      world_seed: steve1_sticks_obs
-      start_position: null
-      start_health: 20
-      start_food: 20
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: steve1_replay_craft_sticks
-  # 描述: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
-  # 环境: MineDojoHarvestEnv-v0
-  # 指令: craft and get stick (replay mode)
-  # ----------------------------------------------------------------------------
-  - task_id: minedojo_replay_craft_sticks
-    category: steve1_replay
-    difficulty: very_easy
-    description: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
-    env_name: MineDojoHarvestEnv-v0
-    en_instruction: craft and get stick (replay mode)
-    replay_actions_file: results/evaluation/minedojo_craft_sticks_en_20251120_143724/report_minedojo_craft_sticks_trial1/actions.json
-    env_config:
-      initial_inventory:
-      - type: planks
-        quantity: 2
-      reward_config:
-      - entity: stick
-        amount: 1
-        reward: 100
-      world_seed: steve1_sticks_replay
-      start_position: null
-      start_health: 20
-      start_food: 20
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: minerl_replay_craft_sticks
-  # 描述: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: craft and get stick (replay mode)
-  # ----------------------------------------------------------------------------
-  - task_id: minerl_replay_craft_sticks
-    category: steve1_replay
-    difficulty: very_easy
-    description: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
-    env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: craft and get stick (replay mode)
-    replay_actions_file: results/evaluation/minerl_craft_sticks_en_20251120_144153/report_minerl_craft_sticks_trial1/actions.json
-    env_config:
-      initial_inventory:
-      - type: planks
-        quantity: 2
-      reward_config:
-      - entity: stick
-        amount: 1
-        reward: 100
-      world_seed: steve1_sticks_replay
-      start_position: null
-      start_health: 20
-      start_food: 20
-    max_steps: 500
-
- # ----------------------------------------------------------------------------
-  # 任务: minedojo_minerl_replay_craft_sticks
-  # 描述: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
-  # 环境: MineDojoHarvestEnv-v0
-  # 指令: craft and get stick (replay mode)
-  # ----------------------------------------------------------------------------
-  - task_id: minedojo_minerl_replay_craft_sticks
-    category: steve1_replay
-    difficulty: very_easy
-    description: 回放 STEVE-1 成功合成木棍的动作序列，验证环境兼容性
-    env_name: MineDojoHarvestEnv-v0
-    en_instruction: craft and get stick (replay mode)
-    replay_actions_file: results/evaluation/minerl_craft_sticks_en_20251120_154026/report_minerl_craft_sticks_trial1/actions.json
-    env_config:
-      initial_inventory:
-      - type: planks
-        quantity: 2
-      reward_config:
-      - entity: stick
-        amount: 1
-        reward: 100
-      world_seed: steve1_sticks_replay
-      start_position: null
-      start_health: 20
-      start_food: 20
-    max_steps: 500
