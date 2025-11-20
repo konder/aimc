@@ -62,30 +62,8 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
         
         reward_config = env_config.get('reward_config')
         reward_rule = env_config.get('reward_rule', 'any')
-        
-        # 🔄 处理时间配置：支持两种格式
-        # 格式1: time_condition = {"allow_passage_of_time": False, "start_time": 6000}
-        # 格式2: start_time = 6000, allow_time_passage = False (单独字段)
         time_condition = env_config.get('time_condition')
-        if time_condition is None and 'start_time' in env_config:
-            # 从单独字段构建 time_condition
-            time_condition = {
-                "start_time": env_config.get('start_time', 6000),
-                "allow_passage_of_time": env_config.get('allow_time_passage', False)
-            }
-            logger.info(f"  🔄 构建 time_condition: {time_condition}")
-        
-        # 🔄 处理生成配置：支持两种格式
-        # 格式1: spawning_condition = {"allow_spawning": True}
-        # 格式2: allow_mob_spawn = False (单独字段)
         spawning_condition = env_config.get('spawning_condition')
-        if spawning_condition is None and 'allow_mob_spawn' in env_config:
-            # 从单独字段构建 spawning_condition
-            spawning_condition = {
-                "allow_spawning": env_config.get('allow_mob_spawn', True)
-            }
-            logger.info(f"  🔄 构建 spawning_condition: {spawning_condition}")
-        
         initial_inventory = env_config.get('initial_inventory')
         specified_biome = env_config.get('specified_biome')  # 新增：读取 specified_biome
         image_size = env_config.get('image_size')  # 新增：读取 image_size
@@ -108,10 +86,6 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
         logger.info(f"  initial_inventory: {initial_inventory}" if initial_inventory else "  initial_inventory: None")
         if specified_biome:
             logger.info(f"  specified_biome: {specified_biome}")
-        if time_condition:
-            logger.info(f"  time_condition: {time_condition}")
-        if spawning_condition:
-            logger.info(f"  spawning_condition: {spawning_condition}")
         if image_size:
             logger.info(f"  image_size: {image_size}")
         logger.info(f"  max_episode_steps: {max_episode_steps}")

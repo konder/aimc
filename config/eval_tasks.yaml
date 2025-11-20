@@ -43,10 +43,13 @@ harvest_tasks:
 
     env_config:
       specified_biome: forest
-      
-      start_time: 6000
-      allow_mob_spawn: false
-      
+
+      time_condition:
+        start_time: 6000                # 起始时间（游戏刻）
+        allow_passage_of_time: false    # 是否允许时间流逝
+      spawning_condition:
+        allow_spawning: true    # 是否允许生物生成
+        
     max_steps: 500
     n_trials: 3
 
