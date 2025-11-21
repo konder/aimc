@@ -467,9 +467,29 @@ class STEVE1Evaluator:
                        f"步数: {trial_result.steps}, "
                        f"时间: {trial_result.time_seconds:.1f}s")
             
-            # 定期保存检查点
+            # 保存检查点策略
             if self.checkpoint_manager and self.checkpoint_config.enabled:
-                if (trial_idx + 1) % self.checkpoint_config.save_interval == 0 or (trial_idx + 1) == n_trials:
+                # 计算实际完成的trial数（考虑恢复的情况）
+                completed_count = len(trials)
+                should_save = False
+                
+                # 情况1: 定期保存（每N个trial）
+                if completed_count % self.checkpoint_config.save_interval == 0:
+                    should_save = True
+                    logger.debug(f"  [检查点] 达到保存间隔: {completed_count} % {self.checkpoint_config.save_interval} == 0")
+                
+                # 情况2: 最后一个trial
+                if trial_idx + 1 == n_trials:
+                    should_save = True
+                    logger.debug(f"  [检查点] 最后一个trial: {trial_idx + 1} == {n_trials}")
+                
+                # 情况3: 保险策略 - 每个trial都保存（防止Ctrl+C丢失进度）
+                # 虽然增加了I/O开销，但对于长时间评估更安全
+                # 检查点文件很小（每个trial约100-200字节），影响可忽略
+                should_save = True
+                
+                if should_save:
+                    logger.debug(f"  [检查点] 保存条件满足，已完成: {completed_count}/{n_trials}")
                     self.checkpoint_manager.save_checkpoint(
                         task_id=task_id,
                         completed_trials=trials,
