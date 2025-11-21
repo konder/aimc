@@ -26,31 +26,67 @@ class MineRLHarvestWrapper(gym.Wrapper):
         """
         Args:
             env: MineRL 环境实例
-            reward_config: 奖励配置列表，格式：[{"entity": "oak_log", "amount": 1, "reward": 100}, ...]
+            reward_config: 奖励配置列表，支持两种格式：
+                - Harvest/TechTree: [{"entity": "oak_log", "amount": 1, "reward": 100}, ...]
+                - Combat: [{"event": "kill_entity", "entity_type": "chicken", "reward": 100}, ...]
             reward_rule: 完成规则 ("any", "all", "none")
         """
         super().__init__(env)
         self.reward_config = reward_config
         self.reward_rule = reward_rule
         
-        # 初始化追踪变量
-        self.prev_inventory = {cfg["entity"]: 0 for cfg in reward_config}
-        self.item_targets = {cfg["entity"]: cfg["amount"] for cfg in reward_config}
-        self.item_rewards = {cfg["entity"]: cfg["reward"] for cfg in reward_config}
-        self.item_completed = {cfg["entity"]: False for cfg in reward_config}
-        self.task_done = False
+        # 检测任务类型并初始化追踪变量
+        self.task_type = self._detect_task_type(reward_config)
         
-        logger.info(f"MineRLHarvestWrapper 初始化")
-        logger.info(f"  监控物品: {[cfg['entity'] for cfg in reward_config]}")
+        if self.task_type == "inventory":
+            # Harvest/TechTree任务：追踪物品数量
+            self.prev_inventory = {cfg["entity"]: 0 for cfg in reward_config}
+            self.item_targets = {cfg["entity"]: cfg.get("amount", 1) for cfg in reward_config}
+            self.item_rewards = {cfg["entity"]: cfg["reward"] for cfg in reward_config}
+            self.item_completed = {cfg["entity"]: False for cfg in reward_config}
+            logger.info(f"MineRLHarvestWrapper 初始化 (Inventory模式)")
+            logger.info(f"  监控物品: {[cfg['entity'] for cfg in reward_config]}")
+        else:
+            # Combat任务：追踪事件
+            self.event_targets = {cfg.get("entity_type", cfg.get("event")): cfg for cfg in reward_config}
+            self.event_completed = {key: False for key in self.event_targets.keys()}
+            self.prev_stats = {}
+            logger.info(f"MineRLHarvestWrapper 初始化 (Event模式)")
+            logger.info(f"  监控事件: {list(self.event_targets.keys())}")
+        
+        self.task_done = False
         logger.info(f"  完成规则: {reward_rule}")
+    
+    def _detect_task_type(self, reward_config: List[Dict]) -> str:
+        """
+        检测任务类型
+        
+        Returns:
+            "inventory": 基于物品数量的任务 (harvest/techtree)
+            "event": 基于事件的任务 (combat)
+        """
+        if not reward_config:
+            return "inventory"
+        
+        # 检查第一个配置项
+        first_cfg = reward_config[0]
+        if "event" in first_cfg or "entity_type" in first_cfg:
+            return "event"
+        else:
+            return "inventory"
     
     def reset(self, **kwargs):
         """重置环境和追踪状态"""
         obs = self.env.reset(**kwargs)
         
-        # 重置追踪状态
-        self.prev_inventory = {cfg["entity"]: 0 for cfg in self.reward_config}
-        self.item_completed = {cfg["entity"]: False for cfg in self.reward_config}
+        # 根据任务类型重置追踪状态
+        if self.task_type == "inventory":
+            self.prev_inventory = {cfg["entity"]: 0 for cfg in self.reward_config}
+            self.item_completed = {cfg["entity"]: False for cfg in self.reward_config}
+        else:
+            self.event_completed = {key: False for key in self.event_targets.keys()}
+            self.prev_stats = {}
+        
         self.task_done = False
         
         return obs
@@ -70,6 +106,7 @@ class MineRLHarvestWrapper(gym.Wrapper):
     def _calculate_reward(self, obs) -> float:
         """
         根据 reward_config 计算增量奖励
+        支持两种模式：inventory（物品数量）和event（事件触发）
         
         Returns:
             float: 本步的奖励值
@@ -78,13 +115,25 @@ class MineRLHarvestWrapper(gym.Wrapper):
             # 任务已完成，不再给予奖励
             return 0.0
         
+        if self.task_type == "inventory":
+            return self._calculate_inventory_reward(obs)
+        else:
+            return self._calculate_event_reward(obs)
+    
+    def _calculate_inventory_reward(self, obs) -> float:
+        """
+        基于物品数量计算奖励 (Harvest/TechTree任务)
+        
+        Returns:
+            float: 本步的奖励值
+        """
         current_inventory = obs.get('inventory', {})
         total_reward = 0.0
         
         # 遍历奖励配置，计算增量奖励
         for config in self.reward_config:
             entity = config["entity"]
-            target_amount = config["amount"]
+            target_amount = config.get("amount", 1)
             reward_per_item = config["reward"]
             
             # 获取当前和之前的数量
@@ -116,9 +165,44 @@ class MineRLHarvestWrapper(gym.Wrapper):
         
         return total_reward
     
+    def _calculate_event_reward(self, obs) -> float:
+        """
+        基于事件触发计算奖励 (Combat任务)
+        
+        Returns:
+            float: 本步的奖励值
+        """
+        total_reward = 0.0
+        
+        # 遍历配置的事件
+        for entity_type, cfg in self.event_targets.items():
+            if self.event_completed[entity_type]:
+                continue
+            
+            event_type = cfg.get("event", "kill_entity")
+            reward_value = cfg["reward"]
+            
+            # 检查对应的观察空间
+            if event_type == "kill_entity":
+                # 检查kill_entity统计
+                kill_stats = obs.get('kill_entity', {})
+                current_kills = kill_stats.get(entity_type, 0)
+                prev_kills = self.prev_stats.get(f"kill_{entity_type}", 0)
+                
+                if current_kills > prev_kills:
+                    logger.info(f"💰 击杀 {entity_type}: {prev_kills} → {current_kills}")
+                    total_reward += reward_value
+                    self.event_completed[entity_type] = True
+                    logger.info(f"✅ 击杀 {entity_type} 目标达成! 获得奖励: {reward_value}")
+                
+                self.prev_stats[f"kill_{entity_type}"] = current_kills
+        
+        return total_reward
+    
     def _check_task_done(self) -> bool:
         """
         检查任务是否完成
+        支持inventory和event两种模式
         
         Returns:
             bool: 任务是否完成
@@ -126,17 +210,23 @@ class MineRLHarvestWrapper(gym.Wrapper):
         if self.task_done:
             return True
         
+        # 根据任务类型选择完成检查的字典
+        if self.task_type == "inventory":
+            completed_dict = self.item_completed
+        else:
+            completed_dict = self.event_completed
+        
         if self.reward_rule == "any":
             # 任意一个目标完成即可
-            if any(self.item_completed.values()):
+            if any(completed_dict.values()):
                 self.task_done = True
-                completed_items = [k for k, v in self.item_completed.items() if v]
+                completed_items = [k for k, v in completed_dict.items() if v]
                 logger.info(f"任务完成！(reward_rule=any, 完成: {completed_items})")
                 return True
         
         elif self.reward_rule == "all":
             # 所有目标都要完成
-            if all(self.item_completed.values()):
+            if all(completed_dict.values()):
                 self.task_done = True
                 logger.info(f"任务完成！(reward_rule=all)")
                 return True
