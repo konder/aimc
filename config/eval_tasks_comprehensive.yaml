@@ -1147,6 +1147,55 @@ special_tasks:
     n_trials: 10
 
 # ==============================================================================
+# 全量任务集 - 运行所有评估任务
+# All Tasks - Run Complete Evaluation Suite
+# 
+# 使用方式: 
+#   bash scripts/run_evaluation.sh \
+#     --config config/eval_tasks_comprehensive.yaml \
+#     --task-set all_tasks \
+#     --n-trials 10 \
+#     --enable_report
+# ==============================================================================
+all_tasks:
+- harvest_1_log
+- harvest_1_dirt
+- harvest_1_sand
+- harvest_1_milk
+- harvest_1_wool
+- harvest_1_beef
+- harvest_1_cobblestone
+- harvest_1_coal
+- harvest_1_iron_ore
+- harvest_1_flower
+- harvest_1_sapling
+- harvest_1_apple
+- combat_chicken
+- combat_pig
+- combat_cow
+- combat_zombie_leather_armor
+- combat_zombie_with_shield
+- combat_spider
+- combat_skeleton
+- combat_creeper
+- techtree_craft_planks
+- techtree_craft_crafting_table
+- techtree_craft_sticks
+- techtree_craft_wooden_pickaxe
+- techtree_craft_wooden_sword
+- techtree_barehand_to_stone_pickaxe
+- techtree_craft_stone_sword
+- techtree_craft_furnace
+- techtree_smelt_iron_ingot
+- techtree_craft_iron_pickaxe
+- techtree_craft_iron_sword
+- techtree_stone_to_iron_pickaxe
+- techtree_iron_to_diamond_pickaxe
+- techtree_craft_diamond_sword
+- survival_1000_steps
+- multi_task_wood_and_food
+
+# ==============================================================================
 # 任务集统计
 # Task Set Statistics
 # ==============================================================================
@@ -1170,6 +1219,8 @@ special_tasks:
 #   - Level 4 (钻石):    2 个
 #
 # Special Tasks:    2 个任务
+#
+# All Tasks:        39 个任务（全量集）
 #
 # 总计: 39 个精选任务
 # ==============================================================================
