@@ -470,19 +470,20 @@ class STEVE1Evaluator:
             logger.info(f"总奖励: {total_reward}")
             logger.info(f"最后done: {done}")
             
-            # 打印所有非0库存
-            non_zero_items = {}
+            # 提取最终库存（用于报告）
+            final_inventory = {}
             if 'inventory' in obs:
                 for key, value in obs['inventory'].items():
                     # 处理 numpy array
                     if hasattr(value, 'item'):
                         value = value.item()
+                    value = int(value)  # 确保是整数
                     if value > 0:
-                        non_zero_items[key] = value
+                        final_inventory[key] = value
             
-            if non_zero_items:
-                logger.info("库存中的物品:")
-                for item, count in non_zero_items.items():
+            if final_inventory:
+                logger.info("最终库存:")
+                for item, count in final_inventory.items():
                     logger.info(f"  {item}: {count}")
             else:
                 logger.info("库存为空")            # 打印结束原因
@@ -538,7 +539,8 @@ class STEVE1Evaluator:
                 instruction=instruction,
                 success=success,
                 steps=steps,
-                time_seconds=time_seconds
+                time_seconds=time_seconds,
+                final_inventory=final_inventory
             )
             
         except Exception as e:
@@ -567,7 +569,8 @@ class STEVE1Evaluator:
                 instruction=instruction,
                 success=False,
                 steps=0,
-                time_seconds=time_seconds
+                time_seconds=time_seconds,
+                final_inventory={}
             )
     
     def _clean_minedojo_saves(self):

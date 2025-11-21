@@ -528,7 +528,8 @@ class EvaluationFramework:
                     {
                         "success": trial.success,
                         "steps": trial.steps,
-                        "time_seconds": trial.time_seconds
+                        "time_seconds": trial.time_seconds,
+                        "final_inventory": trial.final_inventory
                     }
                     for trial in result.trials
                 ]
@@ -720,7 +721,14 @@ class EvaluationFramework:
                 f.write(f"  试验详情:\n")
                 for i, trial in enumerate(task['trials'], 1):
                     status = "✅ 成功" if trial['success'] else "❌ 失败"
-                    f.write(f"    Trial {i}: {status} | 步数: {trial['steps']:4d} | 时间: {trial['time_seconds']:.1f}s\n")
+                    f.write(f"    Trial {i}: {status} | 步数: {trial['steps']:4d} | 时间: {trial['time_seconds']:.1f}s")
+                    
+                    # 添加最终库存信息
+                    if 'final_inventory' in trial and trial['final_inventory']:
+                        inventory_items = [f"{item}×{count}" for item, count in trial['final_inventory'].items()]
+                        f.write(f" | 库存: {', '.join(inventory_items)}")
+                    
+                    f.write("\n")
                 f.write("\n")
     
     def close(self):
