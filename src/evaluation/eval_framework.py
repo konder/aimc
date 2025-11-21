@@ -176,6 +176,11 @@ class EvaluationFramework:
         # 3. 过滤 STEVE-1 的 UserWarning
         warnings.filterwarnings('ignore', category=UserWarning, module='steve1')
         
+        # 4. 过滤 NumPy 和 MineRL 的 RuntimeWarning
+        warnings.filterwarnings('ignore', message='.*invalid value encountered in cast.*', category=RuntimeWarning)
+        warnings.filterwarnings('ignore', message='.*minerl.utils.process_watcher.*found in sys.modules.*', category=RuntimeWarning)
+        warnings.filterwarnings('ignore', category=RuntimeWarning, module='runpy')
+        
         logger.debug("日志系统已配置：缩短模块名、过滤不需要的日志")
     
     def evaluate_single_task(
@@ -312,7 +317,7 @@ class EvaluationFramework:
             # 保存结果
             self.results.append(result)
             
-            return result
+            return result, output_dir
         finally:
             # ⚠️ 重要：立即关闭任务评估器，释放资源
             logger.info(f"  关闭任务评估器，释放环境资源...")
