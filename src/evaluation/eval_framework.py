@@ -66,6 +66,9 @@ class EvaluationConfig:
     checkpoint_save_interval: int = 5  # 每N个trial保存一次检查点
     checkpoint_auto_resume: bool = True  # 自动恢复
     checkpoint_cleanup_on_complete: bool = True  # 完成后清理检查点
+    
+    # 环境重建策略配置
+    rebuild_interval: int = 15  # 每N个trial完全重建环境（0表示每次重建，-1表示从不重建）
 
 
 class EvaluationFramework:
@@ -123,6 +126,14 @@ class EvaluationFramework:
             logger.info(f"检查点功能已启用")
             logger.info(f"  保存间隔: 每{self.checkpoint_config.save_interval}个trial")
             logger.info(f"  自动恢复: {'是' if self.checkpoint_config.auto_resume else '否'}")
+        
+        # 环境重建策略
+        if self.config.rebuild_interval == 0:
+            logger.info(f"环境重建策略: 每次trial都重建（最稳定，最慢）")
+        elif self.config.rebuild_interval > 0:
+            logger.info(f"环境重建策略: 每{self.config.rebuild_interval}次trial重建（推荐）")
+        else:
+            logger.info(f"环境重建策略: 从不重建，只轻量清理（最快，可能不稳定）")
 
         # 保留 evaluator 参数用于向后兼容，但不在初始化时创建
         # 每个任务会创建专用的 evaluator，避免环境配置冲突
@@ -249,7 +260,8 @@ class EvaluationFramework:
             enable_report=self.config.enable_report,
             replay_actions_file=replay_actions_file,  # 传递动作序列文件路径
             checkpoint_manager=self.checkpoint_manager,  # 传递检查点管理器
-            checkpoint_config=self.checkpoint_config  # 传递检查点配置
+            checkpoint_config=self.checkpoint_config,  # 传递检查点配置
+            rebuild_interval=self.config.rebuild_interval  # 传递重建间隔配置
         )
         
         logger.info(f"{'='*30}")
