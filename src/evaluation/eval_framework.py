@@ -152,6 +152,8 @@ class EvaluationFramework:
         n_trials: Optional[int] = None,
         max_steps: Optional[int] = None,
         parent_dir: Optional[Path] = None,  # 父目录（用于 task-set）
+        task_index: Optional[int] = None,  # 任务索引（用于进度显示）
+        total_tasks: Optional[int] = None,  # 总任务数（用于进度显示）
     ) -> Tuple[TaskResult, Optional[Path]]:
         """
         评估单个任务
@@ -265,6 +267,8 @@ class EvaluationFramework:
                 max_steps=max_steps,
                 instruction=instruction,
                 output_dir=output_dir,  # 传递输出目录给evaluator
+                task_index=task_index,  # 传递任务索引
+                total_tasks=total_tasks,  # 传递总任务数
             )
             
             # 保存任务结果到目录
@@ -373,16 +377,19 @@ class EvaluationFramework:
         
         results = []
         
+        # 不使用tqdm进度条，改用简单的计数器，在step执行时显示
         for i, task_id in enumerate(task_ids, 1):
             logger.info(f"\n[{i}/{len(task_ids)}] 评估任务: {task_id}")
             
             try:
-                # evaluate_single_task 现在返回 tuple
-                result = self.evaluate_single_task(
+                # evaluate_single_task 返回 (TaskResult, output_dir)
+                result, _ = self.evaluate_single_task(
                     task_id=task_id,
                     n_trials=n_trials,
                     max_steps=max_steps,
-                    parent_dir=task_set_dir  # 传递 task-set 目录
+                    parent_dir=task_set_dir,  # 传递 task-set 目录
+                    task_index=i,  # 传递任务索引
+                    total_tasks=len(task_ids)  # 传递总任务数
                 )
                 results.append(result)  # 只保存 TaskResult
                 

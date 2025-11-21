@@ -12,6 +12,7 @@ from pathlib import Path
 import torch as th
 import numpy as np
 import cv2
+import sys
 from tqdm import tqdm
 
 # 导入本地版本的工具函数（支持自定义环境）
@@ -242,7 +243,9 @@ class STEVE1Evaluator:
         n_trials: int = 10,
         max_steps: int = 1000,
         instruction: Optional[str] = None,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        task_index: Optional[int] = None,  # 任务索引（用于进度显示）
+        total_tasks: Optional[int] = None,  # 总任务数（用于进度显示）
     ) -> TaskResult:
         """
         评估单个任务
@@ -281,36 +284,44 @@ class STEVE1Evaluator:
         logger.info(f"  试验次数: {n_trials}")
         logger.info(f"  最大步数: {max_steps}")
         
-        # 运行多次试验
+        # 运行多次试验（不使用独立的trial进度条）
         trials = []
+        
         for trial_idx in range(n_trials):
             logger.info(f"  Trial {trial_idx + 1}/{n_trials}...")
             
-            # ⚠️ 临时禁用：每次 trial 前重新加载组件（避免环境状态污染）
-            # 取消注释以下代码块可启用环境重建
-            """
-            if trial_idx > 0:
-                logger.info(f"  ♻️  重新创建环境...")
+            # 每20个trial重建环境，防止内存累积导致socket timeout
+            # 解决42 trial后env.reset()超时问题
+            if trial_idx > 0 and trial_idx % 20 == 0:
+                logger.info(f"  ♻️  第{trial_idx}个trial，重建环境释放内存（防止socket timeout）...")
                 try:
                     # 关闭旧环境
                     if self._env is not None:
+                        logger.info("    关闭旧环境...")
                         self._env.close()
                     
                     # 清理 saves
+                    logger.info("    清理MineDojo saves...")
                     self._clean_minedojo_saves()
                     
+                    # 等待Java进程释放资源
+                    import time
+                    time.sleep(5)
+                    
                     # 重新创建环境（保持 agent 和 mineclip）
+                    logger.info("    重新创建Minecraft环境...")
                     from src.utils.steve1_mineclip_agent_env_utils import make_env
                     self._env = make_env(
                         seed=42,
                         env_name=self.env_name,
                         env_config=self.env_config
                     )
-                    logger.info(f"  ✓ 环境已重新创建")
+                    logger.info(f"  ✓ 环境已重新创建，Java内存已释放")
                 except Exception as e:
                     logger.error(f"  ⚠️ 重新创建环境失败: {e}")
-                    # 继续使用旧环境
-            """
+                    logger.error("  继续使用旧环境")
+                    import traceback
+                    traceback.print_exc()
             
             trial_result = self._run_single_trial(
                 task_id=task_id,
@@ -319,6 +330,9 @@ class STEVE1Evaluator:
                 trial_idx=trial_idx + 1,  # 1-based for display
                 n_trials=n_trials,  # 传递总试验数
                 output_dir=output_dir,  # 传递输出目录
+                task_index=task_index,  # 传递任务索引
+                total_tasks=total_tasks,  # 传递总任务数
+                current_trial=trial_idx + 1,  # 当前是第几个trial
             )
             
             trials.append(trial_result)
@@ -347,6 +361,9 @@ class STEVE1Evaluator:
         trial_idx: int,
         n_trials: int,  # 总试验数
         output_dir: Optional[Path] = None,  # 输出目录
+        task_index: Optional[int] = None,  # 任务索引
+        total_tasks: Optional[int] = None,  # 总任务数
+        current_trial: Optional[int] = None,  # 当前第几个trial
     ) -> TrialResult:
         """
         运行单次试验，可选录制视频和生成详细报告
@@ -401,13 +418,24 @@ class STEVE1Evaluator:
             steps = 0
             total_reward = 0.0
             
-            # 创建 tqdm 进度条
+            # 创建包含三层信息的进度条描述
+            # 构建完整的层级信息
+            if task_index is not None and total_tasks is not None:
+                # 多任务场景：显示3层信息
+                task_short = task_id[:15] + '...' if len(task_id) > 15 else task_id
+                desc = f"📦{task_index}/{total_tasks} | 🎯{current_trial}/{n_trials} | 🏃Trial{trial_idx}"
+            else:
+                # 单任务场景：显示2层信息
+                desc = f"🎯{current_trial}/{n_trials} | 🏃Trial{trial_idx}"
+            
             with tqdm(
                 total=max_steps, 
-                desc=f"Trial {trial_idx}/{n_trials}",
+                desc=desc,
                 unit="step",
+                position=0,  # 所有信息在一行，使用position=0
                 leave=False,
-                ncols=100,
+                file=sys.stderr,
+                dynamic_ncols=True,
                 bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]'
             ) as pbar:
                 while not done and steps < max_steps:

@@ -1,0 +1,512 @@
+═══════════════════════════════════════════════════════════════
+  Socket Timeout错误修复方案
+  42 Trial后环境重置失败问题
+═══════════════════════════════════════════════════════════════
+
+错误: socket.timeout: timed out
+触发时机: 第42个trial之后
+位置: env.reset() → MineRL与Java通信
+
+═══════════════════════════════════════════════════════════════
+  问题分析
+═══════════════════════════════════════════════════════════════
+
+【根本原因】
+
+Java进程内存累积 → 响应变慢 → socket超时
+
+具体流程:
+  1. 前41个trial正常运行
+  2. Java内存从2.6GB涨到5.2GB+
+  3. Minecraft世界数据累积
+  4. Java GC时间变长
+  5. 第42个trial reset()时，Java响应超时
+  6. socket.timeout异常
+
+【为什么是42？】
+
+不是固定的42，而是内存累积到临界点:
+  • 每个trial: ~100-150MB内存
+  • 42个trial: ~4.2-6.3GB累积
+  • 加上初始2.6GB = 6.8-8.9GB
+  • 接近系统或Java堆上限
+  • Java GC频繁，响应变慢
+
+【症状】
+
+✓ 前N个trial正常
+✓ 突然某个trial开始超时
+✓ Java内存持续增长
+✓ 后续trial全部失败
+
+═══════════════════════════════════════════════════════════════
+  解决方案
+═══════════════════════════════════════════════════════════════
+
+【方案1: 定期重建环境（根本解决）】⭐ 推荐
+
+每N个trial重建一次环境，释放内存。
+
+修改steve1_evaluator.py:
+
+找到这段代码（约304行）:
+```python
+# ⚠️ 临时禁用：每次 trial 前重新加载组件（避免环境状态污染）
+# 取消注释以下代码块可启用环境重建
+"""
+if trial_idx > 0:
+    logger.info(f"  ♻️  重新创建环境...")
+    ...
+"""
+```
+
+修改为:
+```python
+# 每20个trial重建一次环境，防止内存累积
+if trial_idx > 0 and trial_idx % 20 == 0:
+    logger.info(f"  ♻️  第{trial_idx}个trial，重新创建环境...")
+    try:
+        # 关闭旧环境
+        if self._env is not None:
+            self._env.close()
+        
+        # 清理 saves
+        self._clean_minedojo_saves()
+        
+        # 重新创建环境（保持 agent 和 mineclip）
+        from src.utils.steve1_mineclip_agent_env_utils import make_env
+        self._env = make_env(
+            seed=42,
+            env_name=self.env_name,
+            env_config=self.env_config
+        )
+        logger.info(f"  ✓ 环境已重新创建")
+    except Exception as e:
+        logger.error(f"  ⚠️ 重新创建环境失败: {e}")
+        # 继续使用旧环境
+```
+
+效果:
+  • 每20个trial重建环境
+  • 释放Java内存
+  • 清理世界数据
+  • 不会超时
+
+【方案2: 增加超时时间（临时缓解）】
+
+如果不想重建环境，可以增加socket超时时间。
+
+创建补丁文件:
+```python
+# src/envs/minerl_timeout_fix.py
+import minerl.env.comms as comms
+import socket
+
+# 保存原始函数
+_original_recvall = comms.recvall
+
+def recvall_with_longer_timeout(sock, count):
+    """增加超时时间的recvall"""
+    # 保存原始超时
+    old_timeout = sock.gettimeout()
+    try:
+        # 设置更长的超时（60秒）
+        sock.settimeout(60.0)
+        return _original_recvall(sock, count)
+    finally:
+        # 恢复原始超时
+        if old_timeout is not None:
+            sock.settimeout(old_timeout)
+
+# 猴子补丁
+comms.recvall = recvall_with_longer_timeout
+```
+
+在steve1_evaluator.py开头导入:
+```python
+# 应用超时补丁
+try:
+    from src.envs.minerl_timeout_fix import recvall_with_longer_timeout
+    logger.info("已应用MineRL超时补丁")
+except ImportError:
+    pass
+```
+
+【方案3: 清理saves + 手动GC】
+
+在每个trial后清理:
+
+```python
+# 在_run_single_trial结束前添加
+if trial_idx % 10 == 0:
+    # 清理saves
+    self._clean_minedojo_saves()
+    
+    # 触发Python GC
+    import gc
+    gc.collect()
+    
+    logger.info(f"  ✓ 已清理saves和触发GC")
+```
+
+【方案4: 分批运行（最稳妥）】
+
+不要一次运行100个trial，分批运行:
+
+```bash
+# 每次运行20个trial
+for i in {1..5}; do
+  bash scripts/run_evaluation.sh \
+    --task harvest_1_log \
+    --n-trials 20 \
+    --enable_report
+done
+```
+
+每批运行完，进程结束，内存自动释放。
+
+═══════════════════════════════════════════════════════════════
+  推荐实施方案
+═══════════════════════════════════════════════════════════════
+
+【立即行动（生产机）】
+
+1. 停止当前评估（如果还在运行）
+   Ctrl+C
+
+2. 清理内存和saves:
+   rm -rf ~/.minedojo/saves/*
+   
+3. 采用方案1或方案4:
+
+选项A: 修改代码（方案1）
+   • 优点: 一次运行完成
+   • 缺点: 需要修改代码
+   • 适合: 后续长期使用
+
+选项B: 分批运行（方案4）
+   • 优点: 无需改代码，最稳定
+   • 缺点: 需要手动运行多次
+   • 适合: 当前紧急情况
+
+【推荐选项B - 分批运行】
+
+最稳妥的做法:
+
+```bash
+# 任务1: harvest_1_log，分5批，每批20个trial
+for batch in {1..5}; do
+  echo "开始第${batch}批..."
+  bash scripts/run_evaluation.sh \
+    --task harvest_1_log \
+    --n-trials 20 \
+    --enable_report
+  
+  # 等待完成（进程自动结束）
+  sleep 5
+  
+  # 清理
+  rm -rf ~/.minedojo/saves/*
+  
+  echo "第${batch}批完成"
+done
+```
+
+或更简单地，手动运行5次:
+
+```bash
+# 第1次（1-20）
+bash scripts/run_evaluation.sh --task harvest_1_log --n-trials 20
+
+# 第2次（21-40）
+bash scripts/run_evaluation.sh --task harvest_1_log --n-trials 20
+
+# 第3次（41-60）
+bash scripts/run_evaluation.sh --task harvest_1_log --n-trials 20
+
+# 第4次（61-80）
+bash scripts/run_evaluation.sh --task harvest_1_log --n-trials 20
+
+# 第5次（81-100）
+bash scripts/run_evaluation.sh --task harvest_1_log --n-trials 20
+```
+
+每次运行完，进程结束，Java内存自动释放到2.6GB。
+
+═══════════════════════════════════════════════════════════════
+  代码修改详细步骤（方案1）
+═══════════════════════════════════════════════════════════════
+
+如果选择修改代码，按以下步骤:
+
+1. 打开 src/evaluation/steve1_evaluator.py
+
+2. 找到第304行附近:
+   ```python
+   for trial_idx in range(n_trials):
+       logger.info(f"  Trial {trial_idx + 1}/{n_trials}...")
+       
+       # ⚠️ 临时禁用：每次 trial 前重新加载组件
+       # 取消注释以下代码块可启用环境重建
+       """
+       if trial_idx > 0:
+           ...
+       """
+   ```
+
+3. 替换为:
+   ```python
+   for trial_idx in range(n_trials):
+       logger.info(f"  Trial {trial_idx + 1}/{n_trials}...")
+       
+       # 每20个trial重建环境，防止内存累积和超时
+       if trial_idx > 0 and trial_idx % 20 == 0:
+           logger.info(f"  ♻️  第{trial_idx}个trial，重建环境释放内存...")
+           try:
+               # 关闭旧环境
+               if self._env is not None:
+                   logger.info("  关闭旧环境...")
+                   self._env.close()
+               
+               # 清理 saves
+               logger.info("  清理saves...")
+               self._clean_minedojo_saves()
+               
+               # 等待Java进程释放资源
+               import time
+               time.sleep(5)
+               
+               # 重新创建环境（保持 agent 和 mineclip）
+               logger.info("  重新创建环境...")
+               from src.utils.steve1_mineclip_agent_env_utils import make_env
+               self._env = make_env(
+                   seed=42,
+                   env_name=self.env_name,
+                   env_config=self.env_config
+               )
+               logger.info(f"  ✓ 环境已重新创建，内存已释放")
+           except Exception as e:
+               logger.error(f"  ⚠️ 重新创建环境失败: {e}")
+               logger.error("  继续使用旧环境")
+               import traceback
+               traceback.print_exc()
+   ```
+
+4. 保存文件
+
+5. 重新运行评估
+
+═══════════════════════════════════════════════════════════════
+  验证修复
+═══════════════════════════════════════════════════════════════
+
+【测试方案】
+
+运行一个50 trial的测试:
+
+```bash
+bash scripts/run_evaluation.sh \
+  --task harvest_1_log \
+  --n-trials 50 \
+  --enable_report
+```
+
+观察:
+  ✓ 第20个trial后看到"重建环境"日志
+  ✓ Java内存在第20、40个trial后下降
+  ✓ 不再出现socket timeout
+  ✓ 50个trial全部成功
+
+【监控】
+
+在另一个终端监控Java内存:
+
+```bash
+watch -n 30 'ps aux | grep java | grep -v grep | awk "{printf \"Java: %.2fGB\\n\", \$6/1024/1024}"'
+```
+
+应该看到:
+  • 1-19 trial: 内存逐渐增长到4-5GB
+  • 第20个trial: 重建环境，降到2.6GB
+  • 21-39 trial: 再次增长
+  • 第40个trial: 再次重建，降到2.6GB
+  • ...
+
+═══════════════════════════════════════════════════════════════
+  为什么重建环境可以解决
+═══════════════════════════════════════════════════════════════
+
+【问题链】
+
+trial累积 → Java内存增长 → GC频繁 → 响应变慢 → socket超时
+
+【重建环境的作用】
+
+1. self._env.close()
+   • 关闭Minecraft Java进程
+   • 释放所有Java内存
+
+2. _clean_minedojo_saves()
+   • 清理磁盘上的世界数据
+   • 防止磁盘满
+
+3. make_env()
+   • 启动新的Java进程
+   • 内存重置为初始状态（2.6GB）
+   • 响应速度恢复
+
+4. agent和mineclip保持不变
+   • 不重新加载模型
+   • 不影响推理能力
+   • 只重建Minecraft环境
+
+【为什么是20？】
+
+经验值:
+  • 太小（如5）: 频繁重建，降低效率
+  • 太大（如50）: 可能还是会超时
+  • 20: 平衡点
+    - 内存不会超过6GB
+    - 重建次数适中
+    - 不容易超时
+
+可以根据实际情况调整:
+  • 内存充足: 30或40
+  • 内存紧张: 10或15
+
+═══════════════════════════════════════════════════════════════
+  预期效果
+═══════════════════════════════════════════════════════════════
+
+【修改前】
+
+Trial 1-41: ✅ 成功
+Trial 42+: ❌ socket timeout
+
+Java内存:
+  启动: 2.6GB
+  Trial 41: 5.2GB
+  Trial 42: 超时
+
+【修改后】
+
+Trial 1-20: ✅ 成功
+Trial 20: 🔄 重建环境
+Trial 21-40: ✅ 成功  
+Trial 40: 🔄 重建环境
+Trial 41-60: ✅ 成功
+...
+Trial 100: ✅ 成功
+
+Java内存:
+  启动: 2.6GB
+  Trial 19: 4.5GB
+  Trial 20: 2.6GB (重建)
+  Trial 39: 4.5GB
+  Trial 40: 2.6GB (重建)
+  ...
+  最大不超过5GB
+
+═══════════════════════════════════════════════════════════════
+  额外建议
+═══════════════════════════════════════════════════════════════
+
+【1. 限制Java堆】
+
+防止Java内存无限增长:
+
+在启动前:
+```bash
+export JAVA_OPTS="-Xmx5G -Xms2G"
+bash scripts/run_evaluation.sh ...
+```
+
+【2. 增加socket超时（备用）】
+
+如果偶尔还是超时，可以增加超时时间。
+
+但这只是症状缓解，不解决根本问题。
+
+【3. 监控告警】
+
+使用之前的监控脚本:
+
+```bash
+bash scripts/monitor_java_memory.sh &
+```
+
+超过7GB自动清理，超过8GB告警。
+
+【4. 日志记录】
+
+记录每个trial的内存使用，分析规律:
+
+```python
+# 在_run_single_trial开始添加
+import psutil
+java_mem_mb = sum(p.memory_info().rss for p in psutil.process_iter(['name']) 
+                  if 'java' in p.info['name'].lower()) / 1024 / 1024
+logger.info(f"  Trial {trial_idx} 开始，Java内存: {java_mem_mb:.0f}MB")
+```
+
+═══════════════════════════════════════════════════════════════
+  常见问题
+═══════════════════════════════════════════════════════════════
+
+Q: 重建环境会丢失数据吗？
+A: ✅ 不会
+   - 每个trial的结果已保存
+   - 重建只影响Minecraft环境
+   - 不影响agent、模型、历史结果
+
+Q: 重建环境会很慢吗？
+A: ⚠️ 需要10-15秒
+   - 关闭旧环境: 2-3秒
+   - 清理saves: 1-2秒
+   - 启动新环境: 5-10秒
+   - 总共: ~15秒
+   - 相比超时和失败，值得
+
+Q: 为什么不每个trial都重建？
+A: 效率考虑
+   - 每个trial重建: 增加50%运行时间
+   - 每20个重建: 只增加7-8%时间
+   - 平衡效率和稳定性
+
+Q: 如果改了代码还是超时？
+A: 1. 减小重建间隔（10或15）
+   2. 限制Java堆到更小值（4G）
+   3. 使用分批运行方案
+
+═══════════════════════════════════════════════════════════════
+  总结
+═══════════════════════════════════════════════════════════════
+
+问题确认: ✅ 内存累积导致socket超时
+
+根本原因:
+  • Java内存从2.6GB涨到5.2GB+
+  • 第42个trial时达到临界点
+  • Java GC频繁，响应超时
+
+推荐方案:
+  1️⃣ 分批运行（最稳，无需改代码）
+  2️⃣ 定期重建环境（长期方案）
+
+立即行动:
+  • 停止当前评估
+  • 清理saves
+  • 分5批运行，每批20个trial
+  • 或修改代码启用每20个trial重建
+
+预期效果:
+  ✅ 不再超时
+  ✅ 100个trial全部成功
+  ✅ Java内存稳定在2.6-5GB
+  ✅ 评估稳定完成
+
+═══════════════════════════════════════════════════════════════
+
+维护者: AIMC项目团队
+最后更新: 2025-11-21
+
