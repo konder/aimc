@@ -34,6 +34,7 @@ from src.evaluation.task_loader import TaskLoader
 from src.evaluation.report_generator import ReportGenerator
 from src.evaluation.matrix_analyzer import MatrixAnalyzer
 from src.evaluation.html_report_generator import HTMLReportGenerator
+from src.evaluation.checkpoint import CheckpointManager, CheckpointConfig
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,13 @@ class EvaluationConfig:
     # 路径配置
     task_config_path: str = "config/eval_tasks.yaml"
     results_dir: str = "results/evaluation"
+    checkpoint_dir: str = "results/evaluation/checkpoints"  # 检查点目录
+    
+    # 检查点配置
+    enable_checkpoint: bool = True  # 启用检查点
+    checkpoint_save_interval: int = 5  # 每N个trial保存一次检查点
+    checkpoint_auto_resume: bool = True  # 自动恢复
+    checkpoint_cleanup_on_complete: bool = True  # 完成后清理检查点
 
 
 class EvaluationFramework:
@@ -102,6 +110,19 @@ class EvaluationFramework:
         self.report_generator = ReportGenerator(self.config.results_dir)
         self.matrix_analyzer = MatrixAnalyzer()
         self.html_generator = HTMLReportGenerator(self.config.results_dir)
+        
+        # 初始化检查点管理器
+        self.checkpoint_manager = CheckpointManager(Path(self.config.checkpoint_dir))
+        self.checkpoint_config = CheckpointConfig(
+            enabled=self.config.enable_checkpoint,
+            save_interval=self.config.checkpoint_save_interval,
+            auto_resume=self.config.checkpoint_auto_resume,
+            cleanup_on_complete=self.config.checkpoint_cleanup_on_complete
+        )
+        if self.config.enable_checkpoint:
+            logger.info(f"检查点功能已启用")
+            logger.info(f"  保存间隔: 每{self.checkpoint_config.save_interval}个trial")
+            logger.info(f"  自动恢复: {'是' if self.checkpoint_config.auto_resume else '否'}")
 
         # 保留 evaluator 参数用于向后兼容，但不在初始化时创建
         # 每个任务会创建专用的 evaluator，避免环境配置冲突
@@ -226,7 +247,9 @@ class EvaluationFramework:
             env_name=env_name,
             env_config=env_config,  # 传递环境配置（包含 max_episode_steps）
             enable_report=self.config.enable_report,
-            replay_actions_file=replay_actions_file  # 传递动作序列文件路径
+            replay_actions_file=replay_actions_file,  # 传递动作序列文件路径
+            checkpoint_manager=self.checkpoint_manager,  # 传递检查点管理器
+            checkpoint_config=self.checkpoint_config  # 传递检查点配置
         )
         
         logger.info(f"{'='*30}")

@@ -29,6 +29,7 @@ from steve1.utils.embed_utils import get_prior_embed
 from steve1.config import PRIOR_INFO
 
 from .metrics import TrialResult, TaskResult
+from .checkpoint import CheckpointManager, CheckpointConfig
 from ..translation.translator import ChineseTranslator
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,9 @@ class STEVE1Evaluator:
         video_size: Optional[Tuple[int, int]] = None,
         env_name: str = 'MineRLHarvestEnv-v0',
         env_config: Optional[Dict] = None,
-        replay_actions_file: Optional[str] = None
+        replay_actions_file: Optional[str] = None,
+        checkpoint_manager: Optional[CheckpointManager] = None,
+        checkpoint_config: Optional[CheckpointConfig] = None
     ):
         """
         初始化 STEVE-1 评估器（执行器/Worker）
@@ -78,6 +81,7 @@ class STEVE1Evaluator:
         - 执行单个任务评估
         - 录制和保存视频（如果启用）
         - 支持动作序列回放（跳过模型推理）
+        - 支持检查点恢复（中断继续）
         
         Args:
             model_path: VPT 模型配置文件路径
@@ -91,6 +95,8 @@ class STEVE1Evaluator:
             env_name: 环境名称（支持自定义环境，如 'MineRLHarvestEnv-v0'）
             env_config: 环境配置（传递给环境的参数，如 reward_config 等）
             replay_actions_file: 动作序列文件路径（JSON），如果提供则跳过模型推理
+            checkpoint_manager: 检查点管理器（可选）
+            checkpoint_config: 检查点配置（可选）
         """
         self.model_path = model_path
         self.weights_path = weights_path
@@ -107,6 +113,10 @@ class STEVE1Evaluator:
         self.env_config = env_config
         self.replay_actions_file = replay_actions_file
         self.replay_actions = None  # 加载的动作序列
+        
+        # 检查点支持
+        self.checkpoint_manager = checkpoint_manager
+        self.checkpoint_config = checkpoint_config or CheckpointConfig()
         
         # 延迟加载
         self._agent = None
@@ -236,6 +246,60 @@ class STEVE1Evaluator:
         
         return actions
     
+    def _rebuild_environment(self):
+        """
+        重建Minecraft环境，释放内存
+        
+        每次trial前重建环境可以：
+        - 释放Java内存（重置到2.6GB）
+        - 清理世界数据
+        - 避免socket timeout
+        - 保证每个trial状态独立
+        """
+        logger.info("  ♻️  重建环境...")
+        try:
+            # 关闭旧环境
+            if self._env is not None:
+                logger.info("    关闭旧环境...")
+                self._env.close()
+            
+            # 清理saves
+            logger.info("    清理MineDojo saves...")
+            self._clean_minedojo_saves()
+            
+            # 等待Java进程释放资源（优化为2秒）
+            import time
+            time.sleep(2)
+            
+            # 重新创建环境（保持agent和mineclip不变）
+            logger.info("    重新创建Minecraft环境...")
+            self._env = make_env(
+                seed=self.seed,
+                env_name=self.env_name,
+                env_config=self.env_config
+            )
+            logger.info("  ✓ 环境已重建，内存已释放")
+        except Exception as e:
+            logger.error(f"  ⚠️ 重建环境失败: {e}")
+            import traceback
+            traceback.print_exc()
+            raise  # 重建失败则停止，不继续使用脏环境
+    
+    def _clean_minedojo_saves(self):
+        """清理MineDojo saves目录"""
+        import shutil
+        saves_path = Path.home() / ".minedojo" / "saves"
+        if saves_path.exists():
+            try:
+                for item in saves_path.iterdir():
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                logger.debug("    ✓ saves目录已清理")
+            except Exception as e:
+                logger.warning(f"    ⚠️ 清理saves失败: {e}")
+    
     def evaluate_task(
         self,
         task_id: str,
@@ -284,44 +348,36 @@ class STEVE1Evaluator:
         logger.info(f"  试验次数: {n_trials}")
         logger.info(f"  最大步数: {max_steps}")
         
-        # 运行多次试验（不使用独立的trial进度条）
+        # 检查点恢复支持
+        start_trial_idx = 0
         trials = []
         
-        for trial_idx in range(n_trials):
+        if (self.checkpoint_manager and 
+            self.checkpoint_config.enabled and 
+            self.checkpoint_config.auto_resume):
+            checkpoint_data = self.checkpoint_manager.load_checkpoint(task_id)
+            if checkpoint_data and checkpoint_data['total_trials'] == n_trials:
+                logger.info("📥 发现检查点，恢复进度...")
+                trials = self.checkpoint_manager.restore_trials(checkpoint_data)
+                start_trial_idx = len(trials)
+                logger.info(f"  已完成: {start_trial_idx}/{n_trials} trials")
+                if start_trial_idx >= n_trials:
+                    logger.info("✅ 所有trial已完成，无需继续")
+                    return TaskResult(
+                        task_id=task_id,
+                        language=language,
+                        instruction=instruction,
+                        trials=trials
+                    )
+        
+        # 运行多次试验（不使用独立的trial进度条）
+        for trial_idx in range(start_trial_idx, n_trials):
             logger.info(f"  Trial {trial_idx + 1}/{n_trials}...")
             
-            # 每20个trial重建环境，防止内存累积导致socket timeout
-            # 解决42 trial后env.reset()超时问题
-            if trial_idx > 0 and trial_idx % 20 == 0:
-                logger.info(f"  ♻️  第{trial_idx}个trial，重建环境释放内存（防止socket timeout）...")
-                try:
-                    # 关闭旧环境
-                    if self._env is not None:
-                        logger.info("    关闭旧环境...")
-                        self._env.close()
-                    
-                    # 清理 saves
-                    logger.info("    清理MineDojo saves...")
-                    self._clean_minedojo_saves()
-                    
-                    # 等待Java进程释放资源
-                    import time
-                    time.sleep(5)
-                    
-                    # 重新创建环境（保持 agent 和 mineclip）
-                    logger.info("    重新创建Minecraft环境...")
-                    from src.utils.steve1_mineclip_agent_env_utils import make_env
-                    self._env = make_env(
-                        seed=42,
-                        env_name=self.env_name,
-                        env_config=self.env_config
-                    )
-                    logger.info(f"  ✓ 环境已重新创建，Java内存已释放")
-                except Exception as e:
-                    logger.error(f"  ⚠️ 重新创建环境失败: {e}")
-                    logger.error("  继续使用旧环境")
-                    import traceback
-                    traceback.print_exc()
+            # 每次trial前重建环境（第一次或恢复后的第一次除外）
+            # 优势: 代码优雅、内存稳定(2.6GB)、每个trial完全独立
+            if trial_idx > start_trial_idx:
+                self._rebuild_environment()
             
             trial_result = self._run_single_trial(
                 task_id=task_id,
@@ -340,6 +396,20 @@ class STEVE1Evaluator:
             logger.info(f"    结果: {'✅ 成功' if trial_result.success else '❌ 失败'}, "
                        f"步数: {trial_result.steps}, "
                        f"时间: {trial_result.time_seconds:.1f}s")
+            
+            # 定期保存检查点
+            if self.checkpoint_manager and self.checkpoint_config.enabled:
+                if (trial_idx + 1) % self.checkpoint_config.save_interval == 0 or (trial_idx + 1) == n_trials:
+                    self.checkpoint_manager.save_checkpoint(
+                        task_id=task_id,
+                        completed_trials=trials,
+                        total_trials=n_trials,
+                        metadata={
+                            "language": language,
+                            "instruction": instruction,
+                            "max_steps": max_steps
+                        }
+                    )
 
         # 构建任务结果
         task_result = TaskResult(
@@ -350,6 +420,12 @@ class STEVE1Evaluator:
         )
         
         logger.info(f"任务评估完成: 成功率 {task_result.success_rate*100:.1f}%")
+        
+        # 清理检查点（如果配置为完成后清理）
+        if (self.checkpoint_manager and 
+            self.checkpoint_config.enabled and 
+            self.checkpoint_config.cleanup_on_complete):
+            self.checkpoint_manager.delete_checkpoint(task_id)
         
         return task_result
     
