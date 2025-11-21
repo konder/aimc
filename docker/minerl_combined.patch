@@ -1,4 +1,4 @@
---- src/main/java/com/minerl/multiagent/env/EnvServer.java.backup_20251120_175812	2025-11-20 17:58:12
+--- src/main/java/com/minerl/multiagent/env/EnvServer.java.backup	2025-11-20 17:58:12
 +++ src/main/java/com/minerl/multiagent/env/EnvServer.java	2025-11-20 18:52:08
 @@ -32,6 +32,15 @@
  import net.minecraft.world.GameType;
@@ -16,10 +16,10 @@
  import org.apache.logging.log4j.Level;
  import org.apache.logging.log4j.LogManager;
  import org.apache.logging.log4j.Logger;
-@@ -418,12 +427,114 @@
+@@ -418,9 +427,111 @@
              MinecraftServer.setSpawnInVillage(true);
          }
- 
+
 +        // ========== BiomeGenerator Support ==========
 +        // Check if BiomeGenerator is specified in mission XML
 +        BiomeGenerator biomeGen = getBiomeGenerator(missionInit);
@@ -50,7 +50,7 @@
 -        DimensionGeneratorSettings dms = DimensionGeneratorSettings.fromDynamicRegistries(DynamicRegistries.getImpl(), seed, generateFeatures, bonusChest);
          mc.createWorld(worldName, worldSettings, DynamicRegistries.getImpl(), dms);
      }
- 
+
 +    /**
 +     * Get BiomeGenerator from MissionInit if present
 +     * Added for BiomeGenerator support
@@ -132,7 +132,7 @@
      private void checkValidBiome(String spawnBiome) {
          Set<String> biomeCategories = DynamicRegistries.getImpl().getRegistry(Registry.BIOME_KEY).getEntries().stream()
                  .map(e -> e.getValue().getCategory().getName())
---- src/main/java/net/minecraft/client/gui/toasts/ToastGui.java.backup_20251120_191001	2025-11-20 19:10:01
+--- src/main/java/net/minecraft/client/gui/toasts/ToastGui.java.backup	2025-11-20 19:10:01
 +++ src/main/java/net/minecraft/client/gui/toasts/ToastGui.java	2025-11-20 19:11:43
 @@ -62,7 +62,9 @@
     }
@@ -145,3 +145,4 @@
     }
  
     public Minecraft getMinecraft() {
+
