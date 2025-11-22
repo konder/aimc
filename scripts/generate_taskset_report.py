@@ -167,35 +167,265 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
         traceback.print_exc()
         matrix_analysis = None
     
-    # 3. 生成HTML报告
+    # 3. 生成简单HTML报告（不依赖MatrixAnalyzer的复杂结构）
     try:
-        if matrix_analysis is None:
-            # 如果矩阵分析失败，创建简单的分析数据
-            matrix_analysis = {
-                "overall": {
-                    "total_tasks": len(results),
-                    "success_rate": sum(r.success_rate for r in results) / len(results),
-                    "avg_steps": sum(r.avg_steps for r in results if r.avg_steps > 0) / len([r for r in results if r.avg_steps > 0]) if any(r.avg_steps > 0 for r in results) else 0
-                },
-                "dimensions": {},
-                "tasks": [
-                    {
-                        "task_id": r.task_id,
-                        "success_rate": r.success_rate,
-                        "avg_steps": r.avg_steps
+        # 直接生成一个简化的HTML报告
+        html_path = task_set_dir / "task_set_report.html"
+        
+        # 准备任务数据
+        task_data = []
+        for result in results:
+            success_count = sum(1 for t in result.trials if t.success)
+            task_data.append({
+                'task_id': result.task_id,
+                'instruction': result.instruction,
+                'success_rate': result.success_rate,
+                'avg_steps': result.avg_steps,
+                'success_count': success_count,
+                'total_trials': len(result.trials)
+            })
+        
+        # 排序：成功率从高到低
+        task_data_sorted = sorted(task_data, key=lambda x: (-x['success_rate'], x['task_id']))
+        
+        # 生成HTML
+        html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task-Set 评估报告 - {task_set_dir.name}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            color: #333;
+        }}
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }}
+        .header h1 {{ font-size: 2.5em; margin-bottom: 10px; }}
+        .header .subtitle {{ font-size: 1.1em; opacity: 0.9; }}
+        .content {{ padding: 40px; }}
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }}
+        .stat-card {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }}
+        .stat-card h3 {{ font-size: 0.9em; opacity: 0.9; margin-bottom: 10px; }}
+        .stat-card .value {{ font-size: 2em; font-weight: 700; }}
+        .chart-container {{
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            margin-bottom: 30px;
+        }}
+        .chart-container h2 {{ margin-bottom: 20px; color: #667eea; }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }}
+        th, td {{
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }}
+        th {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+        }}
+        tr:hover {{ background: #f8f9fa; }}
+        .success-high {{ color: #28a745; font-weight: 600; }}
+        .success-medium {{ color: #ffc107; font-weight: 600; }}
+        .success-low {{ color: #dc3545; font-weight: 600; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 Steve1 评估报告</h1>
+            <div class="subtitle">{task_set_dir.name}</div>
+        </div>
+        
+        <div class="content">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>总任务数</h3>
+                    <div class="value">{len(results)}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>总试验次数</h3>
+                    <div class="value">{sum(len(r.trials) for r in results)}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>平均成功率</h3>
+                    <div class="value">{sum(r.success_rate for r in results) / len(results) * 100:.1f}%</div>
+                </div>
+                <div class="stat-card">
+                    <h3>总评估时间</h3>
+                    <div class="value">{sum(sum(t.time_seconds for t in r.trials) for r in results) / 60:.0f}min</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h2>📊 各任务成功率</h2>
+                <canvas id="successChart" height="400"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>🏃 各任务平均步数（仅成功任务）</h2>
+                <canvas id="stepsChart" height="400"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>📋 任务详细列表</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>任务ID</th>
+                            <th>指令</th>
+                            <th>成功率</th>
+                            <th>成功数/总数</th>
+                            <th>平均步数</th>
+                        </tr>
+                    </thead>
+                    <tbody>"""
+        
+        for task in task_data_sorted:
+            success_class = 'success-high' if task['success_rate'] >= 0.7 else ('success-medium' if task['success_rate'] >= 0.3 else 'success-low')
+            html_content += f"""
+                        <tr>
+                            <td>{task['task_id']}</td>
+                            <td>{task['instruction']}</td>
+                            <td class="{success_class}">{task['success_rate']*100:.1f}%</td>
+                            <td>{task['success_count']}/{task['total_trials']}</td>
+                            <td>{task['avg_steps']:.0f}</td>
+                        </tr>"""
+        
+        html_content += """
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 成功率图表
+        const successCtx = document.getElementById('successChart').getContext('2d');
+        new Chart(successCtx, {
+            type: 'bar',
+            data: {
+                labels: """ + json.dumps([t['task_id'] for t in task_data_sorted[:20]]) + """,
+                datasets: [{
+                    label: '成功率',
+                    data: """ + json.dumps([t['success_rate'] for t in task_data_sorted[:20]]) + """,
+                    backgroundColor: function(context) {
+                        const value = context.parsed.y;
+                        if (value >= 0.7) return 'rgba(40, 167, 69, 0.8)';
+                        if (value >= 0.3) return 'rgba(255, 193, 7, 0.8)';
+                        return 'rgba(220, 53, 69, 0.8)';
+                    },
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        max: 1.0,
+                        ticks: {
+                            callback: function(value) {
+                                return (value * 100).toFixed(0) + '%';
+                            }
+                        }
                     }
-                    for r in results
-                ]
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return '成功率: ' + (context.parsed.x * 100).toFixed(1) + '%';
+                            }
+                        }
+                    }
+                }
             }
+        });
         
-        html_generator = HTMLReportGenerator(str(task_set_dir))
+        // 步数图表（只显示有成功的任务）
+        const stepsData = """ + json.dumps([{'task_id': t['task_id'], 'steps': t['avg_steps']} for t in task_data_sorted if t['avg_steps'] > 0][:20]) + """;
+        const stepsCtx = document.getElementById('stepsChart').getContext('2d');
+        new Chart(stepsCtx, {
+            type: 'bar',
+            data: {
+                labels: stepsData.map(d => d.task_id),
+                datasets: [{
+                    label: '平均步数',
+                    data: stepsData.map(d => d.steps),
+                    backgroundColor: 'rgba(102, 126, 234, 0.8)',
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return '平均步数: ' + context.parsed.x.toFixed(0);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+"""
         
-        # 生成HTML报告
-        html_path = html_generator.generate(
-            analysis=matrix_analysis,
-            config_file=task_set_dir.name,
-            output_filename="task_set_report.html"
-        )
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
         
         logger.info(f"✓ HTML报告已生成: {html_path}")
         logger.info(f"  在浏览器中打开: file://{html_path.absolute()}")
