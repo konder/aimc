@@ -193,6 +193,90 @@ class CheckpointManager:
                 logger.info(f"🗑️ 清理旧检查点: {old_checkpoint.name}")
             except Exception as e:
                 logger.error(f"⚠️ 清理检查点失败: {e}")
+    
+    def get_taskset_checkpoint_path(self, task_set_name: str) -> Path:
+        """获取task-set的检查点文件路径"""
+        return self.checkpoint_dir / f"taskset_{task_set_name}.json"
+    
+    def save_taskset_checkpoint(
+        self,
+        task_set_name: str,
+        all_task_ids: List[str],
+        completed_task_ids: List[str],
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        保存task-set检查点（记录已完成的任务）
+        
+        Args:
+            task_set_name: 任务集名称
+            all_task_ids: 所有任务ID列表
+            completed_task_ids: 已完成的任务ID列表
+            metadata: 额外的元数据
+        """
+        checkpoint_path = self.get_taskset_checkpoint_path(task_set_name)
+        
+        checkpoint_data = {
+            "task_set_name": task_set_name,
+            "all_task_ids": all_task_ids,
+            "completed_task_ids": completed_task_ids,
+            "total_tasks": len(all_task_ids),
+            "completed_tasks_count": len(completed_task_ids),
+            "timestamp": datetime.now().isoformat(),
+            "metadata": metadata or {}
+        }
+        
+        try:
+            with open(checkpoint_path, 'w', encoding='utf-8') as f:
+                json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
+            logger.info(f"💾 Task-set检查点已保存: {checkpoint_path}")
+            logger.info(f"   进度: {len(completed_task_ids)}/{len(all_task_ids)} tasks")
+        except Exception as e:
+            logger.error(f"⚠️ 保存task-set检查点失败: {e}")
+    
+    def load_taskset_checkpoint(self, task_set_name: str) -> Optional[Dict[str, Any]]:
+        """
+        加载task-set检查点
+        
+        Args:
+            task_set_name: 任务集名称
+            
+        Returns:
+            检查点数据，如果不存在则返回None
+        """
+        checkpoint_path = self.get_taskset_checkpoint_path(task_set_name)
+        
+        if not checkpoint_path.exists():
+            return None
+        
+        try:
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                checkpoint_data = json.load(f)
+            
+            logger.info(f"📥 Task-set检查点已加载: {checkpoint_path}")
+            logger.info(f"   进度: {checkpoint_data['completed_tasks_count']}/{checkpoint_data['total_tasks']} tasks")
+            logger.info(f"   时间: {checkpoint_data['timestamp']}")
+            
+            return checkpoint_data
+        except Exception as e:
+            logger.error(f"⚠️ 加载task-set检查点失败: {e}")
+            return None
+    
+    def delete_taskset_checkpoint(self, task_set_name: str):
+        """
+        删除task-set检查点文件
+        
+        Args:
+            task_set_name: 任务集名称
+        """
+        checkpoint_path = self.get_taskset_checkpoint_path(task_set_name)
+        
+        if checkpoint_path.exists():
+            try:
+                checkpoint_path.unlink()
+                logger.info(f"🗑️ Task-set检查点已删除: {checkpoint_path}")
+            except Exception as e:
+                logger.error(f"⚠️ 删除task-set检查点失败: {e}")
 
 
 class CheckpointConfig:

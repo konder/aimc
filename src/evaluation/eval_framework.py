@@ -415,10 +415,33 @@ class EvaluationFramework:
             # 保存 task_set_dir 供后续 generate_report 使用
             self.current_task_set_dir = task_set_dir
         
+        # Task-set级别的检查点恢复
+        completed_task_ids = []
+        remaining_task_ids = task_ids.copy()
+        
+        if task_set_name and self.checkpoint_manager and self.checkpoint_config.enabled and self.checkpoint_config.auto_resume:
+            taskset_checkpoint = self.checkpoint_manager.load_taskset_checkpoint(task_set_name)
+            if taskset_checkpoint:
+                # 检查任务列表是否匹配
+                if taskset_checkpoint['all_task_ids'] == task_ids:
+                    completed_task_ids = taskset_checkpoint['completed_task_ids']
+                    remaining_task_ids = [tid for tid in task_ids if tid not in completed_task_ids]
+                    logger.info(f"📥 发现task-set检查点，恢复进度...")
+                    logger.info(f"   已完成: {len(completed_task_ids)}/{len(task_ids)} tasks")
+                    logger.info(f"   剩余: {len(remaining_task_ids)} tasks")
+                    logger.info(f"   将从第{len(completed_task_ids)+1}个任务继续\n")
+                else:
+                    logger.warning(f"⚠️ Task-set检查点的任务列表不匹配，忽略检查点")
+        
         results = []
         
-        # 不使用tqdm进度条，改用简单的计数器，在step执行时显示
+        # 只评估剩余的任务
         for i, task_id in enumerate(task_ids, 1):
+            # 检查是否已完成
+            if task_id in completed_task_ids:
+                logger.info(f"\n[{i}/{len(task_ids)}] ⏭️  跳过已完成任务: {task_id}")
+                continue
+            
             logger.info(f"\n[{i}/{len(task_ids)}] 评估任务: {task_id}")
             
             try:
@@ -437,6 +460,19 @@ class EvaluationFramework:
                 logger.info(f"  ✅ 完成: 成功率 {result.success_rate*100:.1f}%, "
                            f"平均步数 {result.avg_steps:.1f}")
                 
+                # 保存task-set检查点（每完成一个任务就保存）
+                if task_set_name and self.checkpoint_manager and self.checkpoint_config.enabled:
+                    completed_task_ids.append(task_id)
+                    self.checkpoint_manager.save_taskset_checkpoint(
+                        task_set_name=task_set_name,
+                        all_task_ids=task_ids,
+                        completed_task_ids=completed_task_ids,
+                        metadata={
+                            "n_trials": n_trials,
+                            "max_steps": max_steps
+                        }
+                    )
+                
             except Exception as e:
                 logger.error(f"  ❌ 任务失败: {e}")
                 import traceback
@@ -445,6 +481,12 @@ class EvaluationFramework:
         logger.info(f"\n{'='*80}")
         logger.info(f"批量评估完成: {len(results)}/{len(task_ids)} 个任务成功")
         logger.info(f"{'='*80}\n")
+        
+        # 完成后清理task-set检查点
+        if task_set_name and self.checkpoint_manager and self.checkpoint_config.enabled and self.checkpoint_config.cleanup_on_complete:
+            if len(completed_task_ids) == len(task_ids):  # 所有任务都完成了
+                self.checkpoint_manager.delete_taskset_checkpoint(task_set_name)
+                logger.info(f"🗑️ Task-set已全部完成，检查点已清理")
         
         # 注意：不要在这里重置 current_task_set_dir，因为 generate_report 还需要用它
         
