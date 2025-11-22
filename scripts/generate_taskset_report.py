@@ -195,7 +195,6 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task-Set 评估报告 - {task_set_dir.name}</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
@@ -210,13 +209,13 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
             background: white;
             border-radius: 16px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
         }}
         .header {{
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 40px;
             text-align: center;
+            border-radius: 16px 16px 0 0;
         }}
         .header h1 {{ font-size: 2.5em; margin-bottom: 10px; }}
         .header .subtitle {{ font-size: 1.1em; opacity: 0.9; }}
@@ -236,24 +235,68 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
         }}
         .stat-card h3 {{ font-size: 0.9em; opacity: 0.9; margin-bottom: 10px; }}
         .stat-card .value {{ font-size: 2em; font-weight: 700; }}
-        .chart-container {{
+        .section {{
             background: white;
             padding: 30px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
             margin-bottom: 30px;
         }}
-        .chart-container h2 {{ margin-bottom: 20px; color: #667eea; }}
+        .section h2 {{ 
+            margin-bottom: 25px; 
+            color: #667eea; 
+            font-size: 1.5em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }}
+        .bar-chart {{
+            width: 100%;
+        }}
+        .bar-item {{
+            margin-bottom: 15px;
+        }}
+        .bar-label {{
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }}
+        .bar-label-text {{
+            font-weight: 500;
+            color: #333;
+        }}
+        .bar-label-value {{
+            font-weight: 600;
+            color: #667eea;
+        }}
+        .bar-track {{
+            width: 100%;
+            height: 24px;
+            background: #f0f0f0;
+            border-radius: 12px;
+            overflow: hidden;
+        }}
+        .bar-fill {{
+            height: 100%;
+            border-radius: 12px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            padding-left: 10px;
+            color: white;
+            font-size: 0.85em;
+            font-weight: 600;
+        }}
+        .bar-fill.high {{ background: linear-gradient(90deg, #28a745, #20c997); }}
+        .bar-fill.medium {{ background: linear-gradient(90deg, #ffc107, #ff9800); }}
+        .bar-fill.low {{ background: linear-gradient(90deg, #dc3545, #c82333); }}
         table {{
             width: 100%;
             border-collapse: collapse;
             background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
         }}
         th, td {{
-            padding: 15px;
+            padding: 12px 15px;
             text-align: left;
             border-bottom: 1px solid #eee;
         }}
@@ -261,6 +304,8 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             font-weight: 600;
+            position: sticky;
+            top: 0;
         }}
         tr:hover {{ background: #f8f9fa; }}
         .success-high {{ color: #28a745; font-weight: 600; }}
@@ -295,17 +340,58 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
                 </div>
             </div>
             
-            <div class="chart-container">
-                <h2>📊 各任务成功率</h2>
-                <canvas id="successChart" height="400"></canvas>
+            <div class="section">
+                <h2>📊 各任务成功率 TOP 20</h2>
+                <div class="bar-chart">"""
+        
+        # 添加成功率条形图
+        for task in task_data_sorted[:20]:
+            success_pct = task['success_rate'] * 100
+            bar_class = 'high' if task['success_rate'] >= 0.7 else ('medium' if task['success_rate'] >= 0.3 else 'low')
+            html_content += f"""
+                    <div class="bar-item">
+                        <div class="bar-label">
+                            <span class="bar-label-text">{task['task_id']}</span>
+                            <span class="bar-label-value">{success_pct:.1f}%</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill {bar_class}" style="width: {success_pct}%">
+                                {task['success_count']}/{task['total_trials']}
+                            </div>
+                        </div>
+                    </div>"""
+        
+        html_content += """
+                </div>
             </div>
             
-            <div class="chart-container">
-                <h2>🏃 各任务平均步数（仅成功任务）</h2>
-                <canvas id="stepsChart" height="400"></canvas>
+            <div class="section">
+                <h2>🏃 各任务平均步数（成功任务）</h2>
+                <div class="bar-chart">"""
+        
+        # 添加步数条形图（只显示成功的任务）
+        steps_tasks = [t for t in task_data_sorted if t['avg_steps'] > 0][:15]
+        max_steps = max([t['avg_steps'] for t in steps_tasks]) if steps_tasks else 1
+        
+        for task in steps_tasks:
+            steps_pct = (task['avg_steps'] / max_steps) * 100
+            html_content += f"""
+                    <div class="bar-item">
+                        <div class="bar-label">
+                            <span class="bar-label-text">{task['task_id']}</span>
+                            <span class="bar-label-value">{task['avg_steps']:.0f} 步</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width: {steps_pct}%; background: linear-gradient(90deg, #667eea, #764ba2);">
+                            </div>
+                        </div>
+                    </div>"""
+        
+        html_content += """
+                </div>
             </div>
             
-            <div class="chart-container">
+            <div class="section">
                 <h2>📋 任务详细列表</h2>
                 <table>
                     <thead>
@@ -336,90 +422,6 @@ def generate_reports(task_set_dir: Path, results: List[TaskResult]):
             </div>
         </div>
     </div>
-    
-    <script>
-        // 成功率图表
-        const successCtx = document.getElementById('successChart').getContext('2d');
-        new Chart(successCtx, {
-            type: 'bar',
-            data: {
-                labels: """ + json.dumps([t['task_id'] for t in task_data_sorted[:20]]) + """,
-                datasets: [{
-                    label: '成功率',
-                    data: """ + json.dumps([t['success_rate'] for t in task_data_sorted[:20]]) + """,
-                    backgroundColor: function(context) {
-                        const value = context.parsed.y;
-                        if (value >= 0.7) return 'rgba(40, 167, 69, 0.8)';
-                        if (value >= 0.3) return 'rgba(255, 193, 7, 0.8)';
-                        return 'rgba(220, 53, 69, 0.8)';
-                    },
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        max: 1.0,
-                        ticks: {
-                            callback: function(value) {
-                                return (value * 100).toFixed(0) + '%';
-                            }
-                        }
-                    }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return '成功率: ' + (context.parsed.x * 100).toFixed(1) + '%';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        
-        // 步数图表（只显示有成功的任务）
-        const stepsData = """ + json.dumps([{'task_id': t['task_id'], 'steps': t['avg_steps']} for t in task_data_sorted if t['avg_steps'] > 0][:20]) + """;
-        const stepsCtx = document.getElementById('stepsChart').getContext('2d');
-        new Chart(stepsCtx, {
-            type: 'bar',
-            data: {
-                labels: stepsData.map(d => d.task_id),
-                datasets: [{
-                    label: '平均步数',
-                    data: stepsData.map(d => d.steps),
-                    backgroundColor: 'rgba(102, 126, 234, 0.8)',
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        beginAtZero: true
-                    }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return '平均步数: ' + context.parsed.x.toFixed(0);
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    </script>
 </body>
 </html>
 """
