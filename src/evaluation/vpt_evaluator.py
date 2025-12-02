@@ -17,7 +17,7 @@ from steve1.VPT.agent import MineRLAgent, resize_image, AGENT_RESOLUTION
 
 from .task_loader import TaskLoader
 from .metrics import TrialResult, TaskResult
-from .report_generator import ReportGenerator
+# from .report_generator import ReportGenerator  # 模块不存在，已注释
 
 logger = logging.getLogger(__name__)
 

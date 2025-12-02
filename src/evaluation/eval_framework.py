@@ -31,7 +31,7 @@ import src.envs
 from src.evaluation.steve1_evaluator import STEVE1Evaluator
 from src.evaluation.metrics import TaskResult
 from src.evaluation.task_loader import TaskLoader
-from src.evaluation.report_generator import ReportGenerator
+# from src.evaluation.report_generator import ReportGenerator  # 模块不存在，已注释
 from src.evaluation.matrix_analyzer import MatrixAnalyzer
 from src.evaluation.html_report_generator import HTMLReportGenerator
 from src.evaluation.checkpoint import CheckpointManager, CheckpointConfig
@@ -110,7 +110,7 @@ class EvaluationFramework:
         logger.info(f"  发现 {len(self.task_loader.tasks)} 个任务")
         
         # 初始化报告生成器
-        self.report_generator = ReportGenerator(self.config.results_dir)
+        # self.report_generator = ReportGenerator(self.config.results_dir)  # 模块不存在，已注释
         self.matrix_analyzer = MatrixAnalyzer()
         self.html_generator = HTMLReportGenerator(self.config.results_dir)
         

@@ -12,6 +12,7 @@ from .steve1_mineclip_agent_env_utils import (
 )
 from .minerl_cleanup import clean_minerl_saves
 from .logging_config import setup_evaluation_logging
+from .prior_html_generator import PriorHTMLGenerator
 
 __all__ = [
     'DEVICE',
@@ -20,4 +21,5 @@ __all__ = [
     'load_vae_model',
     'clean_minerl_saves',
     'setup_evaluation_logging',
+    'PriorHTMLGenerator',
 ]
