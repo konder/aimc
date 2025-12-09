@@ -12,14 +12,14 @@ class ShortModuleFormatter(logging.Formatter):
     自定义日志格式化器，缩短模块名
     
     例如:
-    - src.evaluation.steve1_evaluator → s.e.steve1_ev
+    - src.evaluation.policy_evaluator → s.ev.policy
     - src.envs.minerl_harvest_flatworld → s.en.m_flat
     - __main__ → main
     """
     
     # 模块名缩写映射
     MODULE_ABBREV = {
-        'src.evaluation.steve1_evaluator': 's.ev.steve1',
+        'src.evaluation.policy_evaluator': 's.ev.policy',
         'src.evaluation.eval_framework': 's.ev.framework',
         'src.evaluation.task_loader': 's.ev.task_ld',
         'src.evaluation.report_generator': 's.ev.report',

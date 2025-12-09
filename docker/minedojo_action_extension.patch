@@ -492,32 +492,15 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 --- sim/Malmo/Minecraft/src/main/resources/mixins.overclocking.malmomod.json.orig
 +++ sim/Malmo/Minecraft/src/main/resources/mixins.overclocking.malmomod.json
-@@ -9,7 +9,7 @@
-     "MixinRandomSkinTexture",
-     "MixinWorldProviderSpawn",
-     "MixinKeyboard",
--    "MixinMouse", 
-+    "MixinMouse",
-     "MixinDisplay",
-     "MixinSyncClientStats",
-     "MixinWorldProviderSpawn",
 @@ -17,7 +17,8 @@
      "MixinForgeHookStatsFix",
      "MixinItemFood",
      "MixinItemBucketMilk",
--    "MixinVec3d"
 +    "MixinMinecraftGuiIdempotent",
 +    "MixinGuiAchievementDisable"
    ],
    "server": [],
    "client": [
-@@ -26,4 +27,4 @@
-   "compatibilityLevel": "JAVA_8",
-   "minVersion": "0.6.11",
-   "refmap": "mixins.malmo.refmap.json"
--}
-+}
-\ No newline at end of file
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 文件: minedojo/sim/Malmo/Minecraft/run/options.txt

@@ -7,21 +7,21 @@
 使用MineCLIP的encode_video生成视觉嵌入，保存为pkl文件。
 
 目录结构:
-    data/success_visuals/
+    data/train_samples/
       task_id/
         trial1/
-          frame_000.png
-          ...
-          frame_015.png
+          frames/
+            step_0000.png
+            ...
+          visual_embeds.pkl
         trial2/
-          frame_000.png
+          frames/
           ...
-        visual_embeds.pkl
 
 用法:
     python src/utils/generate_visual_embeds_from_frames.py \
-        --frames-dir data/success_visuals \
-        --output-report data/success_visuals/generation_report.txt
+        --frames-dir data/train_samples \
+        --output-report data/train_samples/generation_report.txt
 
 作者: AI Assistant
 日期: 2025-12-02
@@ -104,7 +104,9 @@ class VisualEmbedGenerator:
     
     def group_frames_by_trial(self, task_dir: Path) -> Dict[int, List[Path]]:
         """
-        按trial分组帧文件（新结构：每个trial一个目录）
+        按trial分组帧文件
+        
+        目录结构: task_id/trial{N}/frames/*.png
         
         Args:
             task_dir: 任务目录
@@ -126,10 +128,17 @@ class VisualEmbedGenerator:
                 logger.warning(f"  无法解析trial编号: {trial_dir.name}")
                 continue
             
-            # 获取该trial的所有帧（文件命名：frame_000.png）
-            frames = sorted(trial_dir.glob("frame_*.png"))
+            # 标准目录结构: trial{N}/frames/*.png
+            frames = []
+            frames_dir = trial_dir / "frames"
+            if frames_dir.exists():
+                # 支持多种命名: step_*.png, frame_*.png, *.png
+                frames = sorted(frames_dir.glob("*.png"))
             
             if frames:
+                # 如果帧数超过16，取最后16帧
+                if len(frames) > 16:
+                    frames = frames[-16:]
                 trial_frames[trial_num] = frames
         
         return trial_frames
@@ -156,7 +165,9 @@ class VisualEmbedGenerator:
             # 调整大小
             img = img.resize((256, 160), Image.Resampling.LANCZOS)
             
-            # 转换为numpy数组
+            # 转换为numpy数组，保持 [0, 255] 范围
+            # 注意：MineCLIP 官方代码使用 [0, 255] 值范围，不需要归一化！
+            # 参考: https://github.com/MineDojo/MineCLIP/blob/main/main/mineclip/run.py
             img_array = np.array(img).astype(np.float32)
             
             # 验证形状
@@ -164,8 +175,8 @@ class VisualEmbedGenerator:
                 logger.error(f"图像形状异常 {image_path}: {img_array.shape}，期望 (160, 256, 3)")
                 return None
             
-            # 归一化到 [0, 1]
-            img_array = img_array / 255.0
+            # 不归一化！保持 [0, 255] 范围
+            # img_array = img_array / 255.0  # 移除归一化
             
             # 转换为 CHW 格式 [3, 160, 256]
             img_array = np.transpose(img_array, (2, 0, 1))
@@ -347,7 +358,7 @@ def main():
         '--frames-dir',
         type=str,
         required=True,
-        help='成功帧根目录（如 data/success_visuals）'
+        help='训练样本根目录（如 data/train_samples）'
     )
     parser.add_argument(
         '--output-report',

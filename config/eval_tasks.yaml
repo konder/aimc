@@ -1,9 +1,12 @@
 # ==============================================================================
-# AIMC Agent 评估任务配置
-# AIMC Agent Evaluation Tasks Configuration
+# AIMC 统一评估任务配置 - 24任务核心集
+# AIMC Unified Evaluation Tasks Configuration - Core 24 Tasks
 #
-# 版本: v3.0
-# 最后更新: 2025-11-20
+# 版本: v4.0
+# 最后更新: 2025-12-02
+# 说明: 统一的任务配置，支持 Prior 和 Policy 评估
+#       - Prior 评估：使用 instruction_variants、success_visuals_path
+#       - Policy 评估：使用 env_config、max_steps、n_trials
 # ==============================================================================
 
 # ==============================================================================
@@ -11,112 +14,801 @@
 # Global Evaluation Configuration
 # ==============================================================================
 evaluation:
+  # Policy 评估参数
   n_trials: 10
   max_steps: 6000
   image_size:
-  - 320
-  - 640
+  - 320  # 高度
+  - 640  # 宽度
   output:
-    results_dir: results/evaluation
+    results_dir: data/evaluation
     enable_video: false
-    enable_report: false
+    enable_report: true
 
 # ==============================================================================
-# harvest_tasks
+# Prior 评估配置
+# Prior Evaluation Configuration
 # ==============================================================================
-harvest_tasks:
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_log
-  # 描述: 使用英文指令砍任意树木获取一块木头（MineDojo 环境 - 森林 Biome）
-  # 环境: MineDojoHarvestEnv-v0
-  # 指令: chop tree
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_log
-    category: raw_resources
-    difficulty: easy
-    description: 使用英文指令砍任意树木获取一块木头
+prior_evaluation:
+  # 模型路径
+  prior_weights: "data/weights/steve1/steve1_prior.pt"
+  mineclip_config: "data/weights/mineclip"
+  
+  # Policy 样本目录（用于目标接近度评估）
+  policy_samples_dir: "data/policy_samples"
+  
+  # 随机种子
+  seed: 42
+  
+  # 输出配置
+  output_dir: "data/evaluation/prior_evaluation/official"
+  
+  # 报告生成
+  report:
+    generate_html: true
+    generate_json: true
+    generate_plots: true
+  
+  # 评估维度
+  dimensions:
+    # 维度1: 内在质量
+    intrinsic_quality:
+      enabled: true
+      consistency:
+        enabled: true
+        n_samples: 10
+      semantic_robustness:
+        enabled: true
+      output_diversity:
+        enabled: true
+      discriminability_preservation:
+        enabled: true
     
-    env_name: MineRLHarvestDefaultEnv-v0
+    # 维度2: 输出质量
+    output_quality:
+      enabled: true
+      goal_alignment:
+        enabled: true
+        use_reward_head: true
+      prior_gain:
+        enabled: true
+      cross_modal_consistency:
+        enabled: true
+    
+    # 维度3: 可控性（禁用）
+    controllability:
+      enabled: false
+  
+  # 阈值配置
+  thresholds:
+    consistency:
+      excellent: 0.95
+      good: 0.85
+      poor: 0.85
+    semantic_robustness:
+      excellent: 0.90
+      good: 0.70
+      poor: 0.70
+    output_diversity:
+      excellent: 0.0001
+      poor: 0.0001
+    discriminability:
+      excellent: 1.0
+      good: 0.5
+      poor: 0.5
+    goal_alignment:
+      excellent: 0.60
+      good: 0.40
+      poor: 0.40
+    prior_gain:
+      excellent: 0.05
+      good: 0.0
+      poor: 0.0
 
-    en_instruction: chop tree and get a log
+# ==============================================================================
+# 任务集定义
+# Task Sets
+# ==============================================================================
+task_sets:
+  # 快速测试（3个任务）
+  quick_test:
+    name: "Quick Test"
+    description: "快速测试任务集"
+    tasks:
+      - combat_pig
+      - harvest_1_flower
+  
+  # 基线测试（11个Tier1任务）
+  # tair 1:
+  #   基础采集，基础科技，对普通生物战斗
+  # tair 2
+  #   有一定难度的采集和科技，对敌对生物战斗
+  # tair 3
+  #   复杂需要基础任务链完成的挑战任务，制作砖石镐
+  baseline:
+    name: "Baseline"
+    description: "Tier 1/2/3 - 包含结构化变体任务"
+    tasks:
+      - harvest_1_log
+      - combat_pig
+      - techtree_craft_planks
+      - harvest_1_coal
+      - combat_zombie
+      - techtree_craft_wooden_pickaxe
+      #- techtree_craft_diamond_pickaxe
+      
+  
+  # Harvest 任务集（9个）
+  harvest:
+    name: "Harvest Tasks"
+    description: "采集任务"
+    tasks:
+      - harvest_1_dirt
+      - harvest_1_sand
+      - harvest_1_log
+      - harvest_1_gravel
+      - harvest_1_flower
+      - harvest_1_cobblestone
+      - harvest_1_coal
+      - harvest_1_sapling
+      - harvest_1_wool
+  
+  # Combat 任务集（6个）
+  combat:
+    name: "Combat Tasks"
+    description: "战斗任务"
+    tasks:
+      - combat_pig
+      - combat_chicken
+      - combat_cow
+      - combat_spider
+      - combat_zombie
+      - combat_skeleton
+  
+  # Techtree 任务集（10个）
+  techtree:
+    name: "Techtree Tasks"
+    description: "科技树任务"
+    tasks:
+      - techtree_craft_planks
+      - techtree_craft_sticks
+      - techtree_craft_crafting_table
+      - techtree_craft_wooden_pickaxe
+      - techtree_craft_wooden_sword
+      - techtree_craft_furnace
+      - techtree_craft_stone_sword
+      - techtree_smelt_iron_ingot
+      - techtree_craft_iron_pickaxe
+      - techtree_craft_diamond_pickaxe
+  
+  # 完整评估（25个任务）
+  full_evaluation:
+    name: "Full Evaluation"
+    description: "完整评估任务集"
+    tasks:
+      - harvest_1_dirt
+      - harvest_1_sand
+      - harvest_1_log
+      - harvest_1_gravel
+      - harvest_1_flower
+      - harvest_1_cobblestone
+      - harvest_1_coal
+      - harvest_1_sapling
+      - harvest_1_wool
+      - combat_pig
+      - combat_chicken
+      - combat_cow
+      - combat_spider
+      - combat_zombie
+      - combat_skeleton
+      - techtree_craft_planks
+      - techtree_craft_sticks
+      - techtree_craft_crafting_table
+      - techtree_craft_wooden_pickaxe
+      - techtree_craft_wooden_sword
+      - techtree_craft_furnace
+      - techtree_craft_stone_sword
+      - techtree_smelt_iron_ingot
+      - techtree_craft_iron_pickaxe
+      #- techtree_craft_diamond_pickaxe
 
-    env_config:
-      specified_biome: forest
-
-      time_condition:
-        start_time: 6000                # 起始时间（游戏刻）
-        allow_passage_of_time: false    # 是否允许时间流逝
-      spawning_condition:
-        allow_spawning: true    # 是否允许生物生成
-        
-    max_steps: 500
-    n_trials: 3
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_milk
-  # 描述: 使用英文指令获取1桶牛奶（初始拥有桶）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: milk cow
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_milk
+# ==============================================================================
+# 任务详细配置
+# Task Definitions
+# ==============================================================================
+tasks:
+  
+  # ==========================================================================
+  # Harvest Tasks - 采集任务 (9个)
+  # ==========================================================================
+  
+  # --------------------------------------------------------------------------
+  # Tier 1 - Easy (5个)
+  # --------------------------------------------------------------------------
+  
+  harvest_1_dirt:
+    # 基础信息
     category: raw_resources
     difficulty: easy
-    description: 使用英文指令获取1桶牛奶（初始拥有桶）
-
+    description: "挖掘1个泥土（最基础）"
+    
+    # Policy 评估配置
     env_name: MineRLHarvestDefaultEnv-v0
-
-    en_instruction: milk cow
-
+    en_instruction: "dig dirt"
+    max_steps: 300
+    n_trials: 3
+    
     env_config:
       specified_biome: plains
-
-      initial_inventory:
-      - type: bucket
-        quantity: 1
-
-      reward_config:
-      - entity: milk_bucket
-        amount: 1
-        reward: 100
-        
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_dirt
-  # 描述: 使用英文指令挖掘1个泥土
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: dig dirt
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_dirt
-    category: raw_resources
-    difficulty: easy
-    description: 使用英文指令挖掘1个泥土
-    env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: dig dirt
-    env_config:
       reward_config:
       - entity: dirt
         amount: 1
         reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_cobblestone
-  # 描述: 使用英文指令采集1个圆石（提供木镐）
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: mine cobblestone
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_cobblestone
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "dig some dirt"
+          - "get dirt"
+          - "grab some dirt"
+          - "collect dirt"
+          - "mine dirt"
+          - "break dirt"
+          - "punch dirt"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just dig up some dirt real quick"
+          - "bro just get some dirt"
+          - "go grab some dirt blocks"
+          - "need some dirt here"
+          - "can someone get me dirt"
+          - "yo dig up that dirt"
+          - "quick dirt run"
+      
+      building_purpose:
+        name: "建筑用途"
+        description: "强调用于建筑的目的"
+        variants:
+          - "need dirt for my build"
+          - "get dirt to fill in this hole"
+          - "grab dirt for the foundation"
+          - "collecting dirt for terraforming"
+          - "need dirt blocks for leveling"
+          - "get some dirt to patch up the ground"
+          - "dirt for scaffolding"
+      
+      farming_context:
+        name: "农业背景"
+        description: "与农业相关的表达"
+        variants:
+          - "dig dirt for the farm"
+          - "need dirt to make farmland"
+          - "get dirt for planting"
+          - "collect dirt for the garden"
+          - "gonna need dirt for crops"
+          - "dirt for my wheat farm"
+          - "grab dirt to expand the farm"
+      
+      noob_questions:
+        name: "新手问题风格"
+        description: "新手玩家的常见问题表达"
+        variants:
+          - "how do I get dirt in minecraft"
+          - "where can I find dirt blocks"
+          - "whats the easiest way to get dirt"
+          - "just punch dirt right?"
+          - "do I need a shovel for dirt"
+          - "dirt is everywhere just dig it"
+          - "literally just punch the ground lol"
+      
+      speedrun_efficiency:
+        name: "效率/速通风格"
+        description: "追求效率的玩家表达"
+        variants:
+          - "fastest way to get dirt"
+          - "efficient dirt collection"
+          - "speedrun strat: dirt first"
+          - "grab dirt on the way"
+          - "dont waste time just get dirt"
+          - "quick dirt pickup"
+          - "dirt is free real estate"
+      
+      meme_humor:
+        name: "梗/幽默风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "dirt is the most important block"
+          - "reject cobble embrace dirt"
+          - "dirt gaming lets go"
+          - "average dirt enjoyer"
+          - "dirt block supremacy"
+          - "broke: diamonds, woke: dirt"
+          - "we doing a dirt only challenge?"
+    success_visuals_path: "data/success_visuals/harvest_1_dirt"
+  
+  harvest_1_sand:
     category: raw_resources
-    difficulty: medium
-    description: 使用英文指令采集1个圆石（提供木镐）
+    difficulty: easy
+    description: "挖掘1个沙子"
     
     env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "dig sand"
+    max_steps: 300
+    n_trials: 3
     
-    en_instruction: mine cobblestone
-
     env_config:
+      specified_biome: desert
+      reward_config:
+      - entity: sand
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "dig sand"
+          - "get sand"
+          - "collect sand"
+          - "grab some sand"
+          - "mine sand"
+          - "break sand"
+          - "pick up sand"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just dig up some sand real quick"
+          - "bro go get some sand"
+          - "need sand blocks here"
+          - "yo grab that sand"
+          - "quick sand run to the beach"
+          - "anyone got sand?"
+          - "sand farming time"
+      
+      glass_crafting:
+        name: "玻璃制作目的"
+        description: "用于制作玻璃的常见表达"
+        variants:
+          - "need sand to make glass"
+          - "get sand for glass windows"
+          - "sand for the glass factory"
+          - "collecting sand to smelt into glass"
+          - "gonna need sand for glass panes"
+          - "sand -> furnace -> glass"
+          - "more sand for more glass"
+      
+      concrete_building:
+        name: "混凝土建筑"
+        description: "用于混凝土的表达"
+        variants:
+          - "need sand for concrete"
+          - "get sand to make concrete powder"
+          - "sand plus gravel equals concrete"
+          - "collecting sand for my concrete build"
+          - "sand for the concrete mixer"
+          - "concrete needs lots of sand"
+          - "grinding sand for concrete production"
+      
+      location_biome:
+        name: "地点/生物群系"
+        description: "与沙漠/海滩相关的表达"
+        variants:
+          - "dig sand from the desert"
+          - "get sand at the beach"
+          - "found a desert gonna grab sand"
+          - "beach sand is the same right"
+          - "desert biome = infinite sand"
+          - "sand collecting in the dunes"
+          - "hit up the beach for sand"
+      
+      gravity_warning:
+        name: "重力提醒"
+        description: "关于沙子会掉落的提醒"
+        variants:
+          - "careful sand falls when you mine it"
+          - "watch out sand has gravity"
+          - "dont dig under sand itll fall on you"
+          - "sand drops just like gravel"
+          - "pro tip: sand obeys gravity"
+          - "suffocation warning: sand falls"
+          - "dig from side not under"
+      
+      meme_humor:
+        name: "梗/幽默风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "i hate sand its coarse and gets everywhere"
+          - "sand gaming"
+          - "reject glass return to sand"
+          - "sand block appreciation post"
+          - "desert = free sand real estate"
+          - "virgin gravel vs chad sand"
+          - "sand is just dry water"
+    success_visuals_path: "data/success_visuals/harvest_1_sand"
+  
+  harvest_1_log:
+    category: raw_resources
+    difficulty: easy
+    description: "砍伐树木获取原木"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "chop tree and get a log"
+    max_steps: 500
+    n_trials: 3
+    
+    env_config:
+      specified_biome: forest
+      reward_config:
+      - entity: log
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库 (340K+ r/Minecraft 帖子) 真实玩家语言
+    # 参考: https://docs.minedojo.org/sections/getting_started/data.html#reddit-database
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "punch a tree"
+          - "get some wood"
+          - "just punch a tree lol"
+          - "get logs"
+          - "punch wood"
+          - "chop down some trees"
+          - "grab some logs"
+      
+      reddit_posts:
+        name: "Reddit帖子风格"
+        description: "r/Minecraft帖子标题和内容的真实表达"
+        variants:
+          - "Just started a new world, first thing I did was punch a tree"
+          - "Day 1: punched trees until my hand hurt lol"
+          - "New survival world, time to punch some trees"
+          - "First priority is always wood, then shelter"
+          - "Pro tip: punch the bottom block of the tree first"
+          - "Anyone else find punching trees satisfying?"
+          - "Wood collection speedrun strats"
+      
+      reddit_comments:
+        name: "Reddit评论风格"
+        description: "r/Minecraft评论区的真实玩家回复"
+        variants:
+          - "bro just get some wood first"
+          - "you need logs to make planks"
+          - "go chop down some trees my guy"
+          - "first thing I always do is gather wood"
+          - "make sure you get enough logs before dark"
+          - "punch tree -> planks -> crafting table -> tools"
+          - "wood is life in minecraft"
+      
+      beginner_advice:
+        name: "新手建议风格"
+        description: "Reddit上老玩家给新手的建议"
+        variants:
+          - "start by punching a tree to get wood"
+          - "first you need to collect some wood"
+          - "get wood so you can make tools"
+          - "the first step is always getting wood"
+          - "you need logs to craft a crafting table"
+          - "grab some logs and make a crafting table"
+          - "the classic tree punching experience"
+      
+      casual_slang:
+        name: "口语俚语风格"
+        description: "Reddit/Discord中的口语化表达"
+        variants:
+          - "yo go punch that tree over there"
+          - "just get some wood real quick"
+          - "lemme chop this tree down"
+          - "hold up gotta get some logs"
+          - "brb punching trees"
+          - "one sec need to grab wood"
+          - "quick wood run"
+      
+      survival_urgency:
+        name: "生存紧迫感"
+        description: "强调时间压力的生存模式表达"
+        variants:
+          - "Gotta get that wood before nightfall"
+          - "day one get that wood before dark"
+          - "gotta get wood before the sun sets"
+          - "first priority is collecting logs"
+          - "need wood ASAP before mobs spawn"
+          - "rush for wood its getting dark"
+          - "wood first shelter second"
+      
+      meme_culture:
+        name: "梗文化"
+        description: "Minecraft社区的经典梗和表达"
+        variants:
+          - "the minecraft classic punch wood"
+          - "every minecraft game starts with punching wood"
+          - "cant mine without punching trees first"
+          - "wood punching simulator 2024"
+          - "steve punching trees since 2011"
+          - "tree punching gang rise up"
+          - "virgin pickaxe vs chad tree punch"
+    success_visuals_path: "data/success_visuals/harvest_1_log"
+  
+  harvest_1_gravel:
+    category: raw_resources
+    difficulty: easy
+    description: "挖掘1个砾石（山地群系）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "dig gravel"
+    max_steps: 500
+    n_trials: 3
+    
+    env_config:
+      specified_biome: mountains
+      initial_inventory:
+      - type: stone_pickaxe
+        quantity: 1
+      reward_config:
+      - entity: gravel
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "dig gravel"
+          - "get gravel"
+          - "mine gravel"
+          - "collect gravel"
+          - "grab some gravel"
+          - "break gravel"
+          - "pick up gravel"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "yo grab some gravel"
+          - "need gravel blocks here"
+          - "quick gravel run"
+          - "bro just mine some gravel"
+          - "anyone got gravel?"
+          - "gravel farming time"
+          - "go get that gravel"
+      
+      flint_farming:
+        name: "燧石获取目的"
+        description: "用于获取燧石的常见表达"
+        variants:
+          - "mine gravel for flint"
+          - "need gravel to get flint"
+          - "gravel drops flint sometimes"
+          - "farming gravel for flint"
+          - "dig gravel hope for flint"
+          - "flint grinding session"
+          - "gravel -> flint for arrows"
+      
+      concrete_purpose:
+        name: "混凝土用途"
+        description: "用于混凝土的表达"
+        variants:
+          - "need gravel for concrete"
+          - "get gravel to make concrete powder"
+          - "sand plus gravel for concrete"
+          - "concrete needs gravel"
+          - "gravel for my concrete build"
+          - "collecting gravel for concrete production"
+          - "gravel is half the concrete recipe"
+      
+      gravity_annoyance:
+        name: "重力吐槽"
+        description: "关于砾石掉落的吐槽"
+        variants:
+          - "ugh gravel falls when you mine it"
+          - "hate gravel it always falls on me"
+          - "gravel has gravity be careful"
+          - "dont dig under gravel"
+          - "gravel suffocation deaths are real"
+          - "dig from the side not under"
+          - "gravel is trying to kill me again"
+      
+      location_context:
+        name: "地点背景"
+        description: "与地点相关的表达"
+        variants:
+          - "found gravel in the mountains"
+          - "gravel near the river"
+          - "dig gravel from the beach"
+          - "ocean floor has tons of gravel"
+          - "gravel patches underground"
+          - "mountain biome gravel run"
+          - "riverbed has gravel"
+      
+      meme_frustration:
+        name: "梗/吐槽风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "gravel is the worst block"
+          - "gravel gaming (derogatory)"
+          - "gravel fell on me again"
+          - "death by gravel counter: 47"
+          - "gravel is just ugly sand"
+          - "the bane of every miner: gravel"
+          - "why does gravel even exist"
+    success_visuals_path: "data/success_visuals/harvest_1_gravel"
+  
+  harvest_1_flower:
+    category: plants
+    difficulty: easy
+    description: "采集1朵花（任意种类）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "pick poppy or dandelion or oxeye_daisy, any a flower"
+    max_steps: 800
+    n_trials: 3
+    
+    env_config:
+      specified_biome: plains
+      reward_config:
+      - entity: poppy
+        amount: 1
+        reward: 100
+      - entity: dandelion
+        amount: 1
+        reward: 100
+      - entity: oxeye_daisy
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "pick a flower"
+          - "get a flower"
+          - "grab a flower"
+          - "collect flower"
+          - "pick up flower"
+          - "get that poppy"
+          - "grab dandelion"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just pick up a flower real quick"
+          - "yo grab that flower"
+          - "need a flower here"
+          - "go get me a flower"
+          - "flower picking time"
+          - "snag a flower from the plains"
+          - "quick flower run"
+      
+      dye_crafting:
+        name: "染料制作目的"
+        description: "用于制作染料的常见表达"
+        variants:
+          - "pick flower for dye"
+          - "need flowers to make dye"
+          - "get poppy for red dye"
+          - "dandelion for yellow dye"
+          - "flower farming for dyes"
+          - "collecting flowers for coloring"
+          - "dye farm needs flowers"
+      
+      decoration_purpose:
+        name: "装饰用途"
+        description: "用于装饰的表达"
+        variants:
+          - "flower for my house"
+          - "get flowers for decoration"
+          - "decorating with flowers"
+          - "flower pot needs a flower"
+          - "making my base pretty with flowers"
+          - "aesthetic flower collection"
+          - "flowers for the garden"
+      
+      specific_types:
+        name: "具体花卉类型"
+        description: "指定花卉种类的表达"
+        variants:
+          - "get a poppy"
+          - "pick a dandelion"
+          - "find an oxeye daisy"
+          - "any flower works"
+          - "poppy or dandelion doesnt matter"
+          - "grab whatever flower you see"
+          - "first flower you find"
+      
+      plains_biome:
+        name: "平原生物群系"
+        description: "与平原相关的表达"
+        variants:
+          - "flowers spawn in plains"
+          - "look for flowers in the meadow"
+          - "plains biome has flowers"
+          - "flower forest has tons"
+          - "found flowers in the grass"
+          - "sunflower plains for flowers"
+          - "grassy areas have flowers"
+      
+      bee_related:
+        name: "蜜蜂相关"
+        description: "与蜜蜂/授粉相关的表达"
+        variants:
+          - "flower for my bees"
+          - "bees need flowers nearby"
+          - "get flowers for the bee farm"
+          - "pollination requires flowers"
+          - "bee breeding needs flowers"
+          - "honey farm flower setup"
+          - "flowers attract bees"
+    success_visuals_path: "data/success_visuals/harvest_1_flower"
+  
+  # --------------------------------------------------------------------------
+  # Tier 2 - Medium (4个)
+  # --------------------------------------------------------------------------
+  
+  harvest_1_cobblestone:
+    category: raw_resources
+    difficulty: medium
+    description: "采集1个圆石（提供木镐）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "mine cobblestone"
+    max_steps: 800
+    n_trials: 3
+    
+    env_config:
+      specified_biome: mountains
       initial_inventory:
       - type: wooden_pickaxe
         quantity: 1
@@ -124,26 +816,113 @@ harvest_tasks:
       - entity: cobblestone
         amount: 1
         reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "mine cobblestone"
+          - "get cobble"
+          - "mine stone"
+          - "get cobblestone"
+          - "grab some cobble"
+          - "mine some stone"
+          - "collect cobble"
       
-      specified_biome: mountains
-      start_time: 6000
-      allow_mob_spawn: false
-
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_coal
-  # 描述: 使用英文指令采集1个煤炭（提供木镐）
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: mine coal
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_coal
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just mine some cobble"
+          - "bro get some cobblestone"
+          - "yo mine that stone"
+          - "quick cobble run"
+          - "need cobble here"
+          - "go grab some cobblestone"
+          - "cobble farming time"
+      
+      furnace_smelting:
+        name: "熔炉/冶炼用途"
+        description: "用于建造熔炉的表达"
+        variants:
+          - "need cobble for a furnace"
+          - "get 8 cobble for furnace"
+          - "cobblestone for smelting setup"
+          - "mining stone to make furnace"
+          - "furnace needs cobblestone"
+          - "gotta get cobble to smelt"
+          - "cobble for the furnace craft"
+      
+      building_purpose:
+        name: "建筑用途"
+        description: "用于建筑的表达"
+        variants:
+          - "cobblestone for my house"
+          - "need cobble for building"
+          - "mining stone for walls"
+          - "cobble for the base"
+          - "get cobblestone for construction"
+          - "building with cobblestone"
+          - "cobble is great for structures"
+      
+      tool_upgrade:
+        name: "工具升级"
+        description: "用于制作石质工具的表达"
+        variants:
+          - "cobble for stone tools"
+          - "need cobblestone for stone pickaxe"
+          - "get cobble to upgrade tools"
+          - "stone tools need cobblestone"
+          - "mine cobble for better pickaxe"
+          - "cobblestone for stone sword"
+          - "upgrading from wood to stone"
+      
+      mining_basics:
+        name: "挖矿基础"
+        description: "关于挖矿入门的表达"
+        variants:
+          - "use pickaxe on stone to get cobble"
+          - "stone drops cobblestone when mined"
+          - "hit stone with pickaxe for cobble"
+          - "mine the grey blocks for cobble"
+          - "pickaxe + stone = cobblestone"
+          - "break stone blocks for cobble"
+          - "any stone you mine becomes cobble"
+      
+      cobble_generator:
+        name: "刷石机相关"
+        description: "与刷石机相关的表达"
+        variants:
+          - "just build a cobble generator"
+          - "infinite cobble from generator"
+          - "lava + water = free cobble"
+          - "cobblestone generator setup"
+          - "farm cobble with water and lava"
+          - "auto cobble farm"
+          - "renewable cobblestone ftw"
+    success_visuals_path: "data/success_visuals/harvest_1_cobblestone"
+  
+  harvest_1_coal:
     category: raw_resources
     difficulty: medium
-    description: 使用英文指令采集1个煤炭（提供木镐）
+    description: "采集1个煤炭（提供木镐）"
+    
     env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: mine coal
+    en_instruction: "mine coal"
+    max_steps: 1000
+    n_trials: 3
+    
     env_config:
+      specified_biome: mountains
       initial_inventory:
       - type: wooden_pickaxe
         quantity: 1
@@ -151,81 +930,224 @@ harvest_tasks:
       - entity: coal
         amount: 1
         reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_iron_ore
-  # 描述: 使用英文指令采集1个铁矿石（提供石镐）
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: mine iron ore
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_iron_ore
-    category: raw_resources
-    difficulty: hard
-    description: 使用英文指令采集1个铁矿石（提供石镐）
-    env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: mine iron ore
-    env_config:
-      initial_inventory:
-      - type: stone_pickaxe
-        quantity: 1
-      reward_config:
-      - entity: iron_ore
-        amount: 1
-        reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_sand
-  # 描述: 使用英文指令采集1个沙子
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: dig sand
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_sand
-    category: raw_resources
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "mine coal"
+          - "get coal"
+          - "find coal"
+          - "collect coal"
+          - "grab some coal"
+          - "dig up coal"
+          - "get coal ore"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just mine some coal"
+          - "bro go get coal"
+          - "need coal ASAP"
+          - "yo find some coal ore"
+          - "quick coal run"
+          - "gotta get coal"
+          - "coal hunting time"
+      
+      torch_crafting:
+        name: "火把制作"
+        description: "用于制作火把的常见表达"
+        variants:
+          - "need coal for torches"
+          - "coal plus sticks equals torches"
+          - "get coal to make torches"
+          - "torch crafting needs coal"
+          - "mining for torch supplies"
+          - "coal for lighting up caves"
+          - "gonna need coal for light"
+      
+      smelting_fuel:
+        name: "冶炼燃料"
+        description: "作为燃料使用的表达"
+        variants:
+          - "coal for the furnace"
+          - "need fuel for smelting"
+          - "coal to cook food"
+          - "furnace fuel run"
+          - "get coal to smelt iron"
+          - "coal burns longer than wood"
+          - "best early game fuel is coal"
+      
+      cave_mining:
+        name: "洞穴挖矿"
+        description: "在洞穴中找煤的表达"
+        variants:
+          - "coal spawns in caves"
+          - "look for black specks in stone"
+          - "coal ore on cave walls"
+          - "mine the dark spotted blocks"
+          - "coal is easy to find underground"
+          - "strip mining for coal"
+          - "surface coal exposed on mountains"
+      
+      early_game:
+        name: "前期游戏"
+        description: "游戏前期获取煤的表达"
+        variants:
+          - "first night survival needs coal"
+          - "coal before dark for torches"
+          - "early game coal rush"
+          - "cant survive night without coal"
+          - "priority one: find coal"
+          - "coal keeps monsters away"
+          - "no coal no torches no survival"
+      
+      ore_spotting:
+        name: "矿石识别"
+        description: "识别煤矿的表达"
+        variants:
+          - "look for the black ore"
+          - "coal ore has black spots"
+          - "stone with dark specks is coal"
+          - "easy to spot coal ore"
+          - "coal is the black spotted stone"
+          - "most common ore is coal"
+          - "coal generates everywhere"
+    success_visuals_path: "data/success_visuals/harvest_1_coal"
+  
+  harvest_1_sapling:
+    category: plants
     difficulty: easy
-    description: 使用英文指令采集1个沙子
+    description: "获取1个树苗（破坏树叶掉落）"
+    
     env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: dig sand
+    en_instruction: "get sapling from tree"
+    max_steps: 500
+    n_trials: 3
+    
     env_config:
+      specified_biome: forest
       reward_config:
-      - entity: sand
+      - entity: sapling
         amount: 1
         reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_gravel
-  # 描述: 使用英文指令采集1个沙砾
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: dig gravel
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_gravel
-    category: raw_resources
-    difficulty: easy
-    description: 使用英文指令采集1个沙砾
-    env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: dig gravel
-    env_config:
-      reward_config:
-      - entity: gravel
-        amount: 1
-        reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_wool
-  # 描述: 使用英文指令获取1个羊毛（提供剪刀或击杀羊）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get wool from sheep
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_wool
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "get a sapling"
+          - "collect sapling"
+          - "grab a sapling"
+          - "pick up sapling"
+          - "get tree sapling"
+          - "find a sapling"
+          - "obtain sapling"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just get a sapling real quick"
+          - "yo grab that sapling"
+          - "need a sapling here"
+          - "bro get me a sapling"
+          - "sapling hunting time"
+          - "quick sapling run"
+          - "gotta find saplings"
+      
+      leaves_mechanic:
+        name: "树叶机制"
+        description: "通过破坏树叶获取的表达"
+        variants:
+          - "break leaves for sapling"
+          - "saplings drop from leaves"
+          - "punch leaves to get sapling"
+          - "leaves have a chance to drop saplings"
+          - "destroy leaves for sapling drops"
+          - "farm leaves for saplings"
+          - "rng sapling from leaves"
+      
+      tree_farm:
+        name: "树场用途"
+        description: "用于树场的常见表达"
+        variants:
+          - "need saplings for tree farm"
+          - "sapling for my wood farm"
+          - "tree farming needs saplings"
+          - "renewable wood requires saplings"
+          - "plant saplings grow trees"
+          - "infinite wood from saplings"
+          - "sapling farming setup"
+      
+      replanting:
+        name: "补种相关"
+        description: "补种树木的表达"
+        variants:
+          - "always replant saplings"
+          - "get sapling to regrow tree"
+          - "sustainable wood: replant saplings"
+          - "dont forget to replant"
+          - "replace the tree with sapling"
+          - "plant sapling where you chopped"
+          - "keep the forest growing"
+      
+      drop_rate:
+        name: "掉落率相关"
+        description: "关于掉落率的表达"
+        variants:
+          - "saplings have low drop rate"
+          - "keep breaking leaves for sapling"
+          - "rng please give sapling"
+          - "fortune helps sapling drops"
+          - "sometimes takes forever to get sapling"
+          - "sapling drop rates are annoying"
+          - "just need one sapling to drop"
+      
+      specific_types:
+        name: "特定种类"
+        description: "指定树苗种类的表达"
+        variants:
+          - "get oak sapling"
+          - "birch sapling please"
+          - "need spruce sapling"
+          - "dark oak saplings are rare"
+          - "jungle saplings are huge"
+          - "acacia sapling for savanna"
+          - "any sapling works"
+    success_visuals_path: "data/success_visuals/harvest_1_sapling"
+  
+  harvest_1_wool:
     category: animal_drops
     difficulty: medium
-    description: 使用英文指令获取1个羊毛（提供剪刀或击杀羊）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get wool from sheep
+    description: "获取1个羊毛（提供剪刀）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "get wool from sheep"
+    max_steps: 800
+    n_trials: 3
+    
     env_config:
+      specified_biome: plains
       initial_inventory:
       - type: shears
         quantity: 1
@@ -233,430 +1155,1995 @@ harvest_tasks:
       - entity: wool
         amount: 1
         reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_beef
-  # 描述: 使用英文指令获取1个生牛肉（击杀牛）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get beef from cow
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_beef
-    category: animal_drops
-    difficulty: medium
-    description: 使用英文指令获取1个生牛肉（击杀牛）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get beef from cow
-    env_config:
-      initial_inventory:
-      - type: wooden_sword
-        quantity: 1
-      reward_config:
-      - entity: beef
+      - entity: white_wool
         amount: 1
         reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_porkchop
-  # 描述: 使用英文指令获取1个生猪肉（击杀猪）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get porkchop from pig
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_porkchop
-    category: animal_drops
-    difficulty: medium
-    description: 使用英文指令获取1个生猪肉（击杀猪）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get porkchop from pig
-    env_config:
-      initial_inventory:
-      - type: wooden_sword
-        quantity: 1
-      reward_config:
-      - entity: porkchop
-        amount: 1
-        reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_chicken
-  # 描述: 使用英文指令获取1个生鸡肉（击杀鸡）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get chicken from chicken
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_chicken
-    category: animal_drops
-    difficulty: medium
-    description: 使用英文指令获取1个生鸡肉（击杀鸡）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get chicken from chicken
-    env_config:
-      initial_inventory:
-      - type: wooden_sword
-        quantity: 1
-      reward_config:
-      - entity: chicken
-        amount: 1
-        reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_leather
-  # 描述: 使用英文指令获取1个皮革（击杀牛掉落）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get leather from cow
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_leather
-    category: special_drops
-    difficulty: medium
-    description: 使用英文指令获取1个皮革（击杀牛掉落）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get leather from cow
-    env_config:
-      initial_inventory:
-      - type: wooden_sword
-        quantity: 1
-      reward_config:
-      - entity: leather
-        amount: 1
-        reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_feather
-  # 描述: 使用英文指令获取1个羽毛（击杀鸡掉落）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get feather from chicken
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_feather
-    category: special_drops
-    difficulty: medium
-    description: 使用英文指令获取1个羽毛（击杀鸡掉落）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get feather from chicken
-    env_config:
-      initial_inventory:
-      - type: wooden_sword
-        quantity: 1
-      reward_config:
-      - entity: feather
-        amount: 1
-        reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_flower
-  # 描述: 使用英文指令采集1朵花（任意种类）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: pick flower
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_flower
-    category: plants
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "get wool"
+          - "shear sheep"
+          - "collect wool"
+          - "grab some wool"
+          - "get sheep wool"
+          - "shear a sheep"
+          - "obtain wool"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just shear a sheep real quick"
+          - "yo shear that sheep"
+          - "need wool here"
+          - "bro go get some wool"
+          - "wool hunting time"
+          - "quick wool run"
+          - "gotta get wool"
+      
+      bed_crafting:
+        name: "床制作目的"
+        description: "用于制作床的常见表达"
+        variants:
+          - "need wool for a bed"
+          - "get 3 wool for bed"
+          - "wool to skip the night"
+          - "bed crafting needs wool"
+          - "shear sheep for bed materials"
+          - "wool + planks = bed"
+          - "first night bed requires wool"
+      
+      shears_mechanic:
+        name: "剪刀机制"
+        description: "使用剪刀的表达"
+        variants:
+          - "use shears on sheep"
+          - "shears give more wool"
+          - "right click sheep with shears"
+          - "shearing is better than killing"
+          - "dont kill sheep just shear"
+          - "shears are renewable wool"
+          - "sheep regrow wool after shearing"
+      
+      decoration_building:
+        name: "装饰/建筑"
+        description: "用于装饰和建筑的表达"
+        variants:
+          - "wool for my build"
+          - "colored wool for decoration"
+          - "wool blocks for pixel art"
+          - "building with wool"
+          - "wool carpet for floor"
+          - "need wool for banners"
+          - "dyeable wool for builds"
+      
+      sheep_finding:
+        name: "寻找羊"
+        description: "寻找羊的表达"
+        variants:
+          - "find a sheep first"
+          - "sheep spawn in plains"
+          - "look for white fluffy mobs"
+          - "sheep are everywhere in grass"
+          - "locate sheep to shear"
+          - "grassy areas have sheep"
+          - "where are the sheep"
+      
+      wool_farming:
+        name: "羊毛农场"
+        description: "与羊毛农场相关的表达"
+        variants:
+          - "set up a wool farm"
+          - "auto wool farm ftw"
+          - "sheep farm for infinite wool"
+          - "wool is farmable"
+          - "breed sheep for more wool"
+          - "renewable wool source"
+          - "observer based wool farm"
+    success_visuals_path: "data/success_visuals/harvest_1_wool"
+  
+  # ==========================================================================
+  # Combat Tasks - 战斗任务 (6个)
+  # ==========================================================================
+  
+  # --------------------------------------------------------------------------
+  # Tier 1 - Easy (3个)
+  # --------------------------------------------------------------------------
+  
+  combat_pig:
+    category: combat
     difficulty: easy
-    description: 使用英文指令采集1朵花（任意种类）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: pick flower
+    description: "击杀1只猪（被动生物）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "hunt pig"
+    max_steps: 800
+    n_trials: 3
+    
     env_config:
+      specified_biome: plains
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
       reward_config:
-      - entity: yellow_flower
+      - event: kill_entity
+        entity_type: pig
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000  # 白天
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "kill a pig"
+          - "hunt pig"
+          - "attack pig"
+          - "slay pig"
+          - "kill the pig"
+          - "take out pig"
+          - "get that pig"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just kill the pig bro"
+          - "yo take out that pig"
+          - "pig hunting time"
+          - "gotta kill a pig"
+          - "go murder that pig lol"
+          - "rip pig"
+          - "pig goes brrr"
+      
+      food_purpose:
+        name: "食物目的"
+        description: "为获取食物而击杀的表达"
+        variants:
+          - "kill pig for porkchop"
+          - "need food kill a pig"
+          - "pig = free porkchops"
+          - "hungry gotta kill pig"
+          - "porkchop farming"
+          - "food run kill some pigs"
+          - "pig drops raw porkchop"
+      
+      survival_context:
+        name: "生存背景"
+        description: "生存模式中的表达"
+        variants:
+          - "starving need to kill pig"
+          - "survival food source: pigs"
+          - "pig for early game food"
+          - "kill pig before hunger drops"
+          - "emergency food kill pig"
+          - "pig hunting for survival"
+          - "passive mob = easy food"
+      
+      combat_tips:
+        name: "战斗技巧"
+        description: "关于战斗的提示"
+        variants:
+          - "hit pig with sword"
+          - "sprint attack the pig"
+          - "pig cant fight back lol"
+          - "just punch the pig"
+          - "sword makes it faster"
+          - "pigs are easy targets"
+          - "one hit with crit kills pig"
+      
+      cooking_related:
+        name: "烹饪相关"
+        description: "与烹饪相关的表达"
+        variants:
+          - "kill pig cook porkchop"
+          - "raw porkchop needs cooking"
+          - "pig -> furnace -> food"
+          - "cooked porkchop is best food"
+          - "get pork to cook later"
+          - "need fuel and pig for food"
+          - "smelt that porkchop"
+      
+      humor_meme:
+        name: "幽默/梗风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "technoblade voice: pig"
+          - "pig gaming over"
+          - "this pig is about to be bacon"
+          - "sorry pig nothing personal"
+          - "pig had a good life"
+          - "rip piggy 2024"
+          - "pig speedrun any%"
+    success_visuals_path: "data/success_visuals/combat_pig"
+  
+  combat_chicken:
+    category: combat
+    difficulty: easy
+    description: "击杀1只鸡（被动生物）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "hunt chicken"
+    max_steps: 800
+    n_trials: 3
+    
+    env_config:
+      specified_biome: plains
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - event: kill_entity
+        entity_type: chicken
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000  # 白天
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "kill a chicken"
+          - "hunt chicken"
+          - "attack chicken"
+          - "slay chicken"
+          - "get chicken"
+          - "take out chicken"
+          - "kill that chicken"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just kill the chicken bro"
+          - "yo attack that chicken"
+          - "chicken hunting time"
+          - "gotta kill chicken"
+          - "murder that chicken lol"
+          - "rip chicken"
+          - "chicken goes cluck no more"
+      
+      feather_arrows:
+        name: "羽毛/箭矢目的"
+        description: "为获取羽毛制作箭的表达"
+        variants:
+          - "kill chicken for feathers"
+          - "need feathers for arrows"
+          - "chicken = free feathers"
+          - "feather farming kill chickens"
+          - "arrows need feathers from chicken"
+          - "grind chickens for feathers"
+          - "chicken drops feathers for arrows"
+      
+      food_early_game:
+        name: "早期食物"
+        description: "作为早期食物来源的表达"
+        variants:
+          - "chicken for early game food"
+          - "raw chicken is food"
+          - "kill chicken cook meat"
+          - "chicken meat is decent food"
+          - "easy food source: chickens"
+          - "hungry go kill chicken"
+          - "chicken drops raw chicken"
+      
+      easy_target:
+        name: "简单目标"
+        description: "强调鸡是简单目标的表达"
+        variants:
+          - "chickens are easy to kill"
+          - "one hit kills chicken"
+          - "chicken cant fight back"
+          - "easiest mob to kill"
+          - "chicken has low hp"
+          - "just punch the chicken"
+          - "weakest passive mob"
+      
+      egg_related:
+        name: "鸡蛋相关"
+        description: "与鸡蛋相关的表达"
+        variants:
+          - "kill chicken or wait for eggs"
+          - "chickens also drop eggs"
+          - "egg farm vs killing chickens"
+          - "chicken farm for eggs and meat"
+          - "eggs spawn more chickens"
+          - "throw eggs at chicken"
+          - "chicken breeding with eggs"
+      
+      humor_meme:
+        name: "幽默/梗风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "chicken nuggets incoming"
+          - "sorry little chicken"
+          - "chicken dinner time"
+          - "winner winner chicken dinner"
+          - "kfc in minecraft"
+          - "the chicken had it coming"
+          - "chicken speedrun any%"
+    success_visuals_path: "data/success_visuals/combat_chicken"
+  
+  combat_cow:
+    category: combat
+    difficulty: easy
+    description: "击杀1只牛（被动生物）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "hunt cow"
+    max_steps: 800
+    n_trials: 3
+    
+    env_config:
+      specified_biome: plains
+      initial_inventory:
+      - type: wooden_sword
+        quantity: 1
+      reward_config:
+      - event: kill_entity
+        entity_type: cow
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000  # 白天
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "kill a cow"
+          - "hunt cow"
+          - "attack cow"
+          - "slay cow"
+          - "get cow"
+          - "take out cow"
+          - "kill that cow"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just kill the cow bro"
+          - "yo attack that cow"
+          - "cow hunting time"
+          - "gotta kill a cow"
+          - "murder that cow lol"
+          - "rip cow"
+          - "cow goes moo no more"
+      
+      leather_purpose:
+        name: "皮革目的"
+        description: "为获取皮革的表达"
+        variants:
+          - "kill cow for leather"
+          - "need leather kill cows"
+          - "cow = free leather"
+          - "leather farming kill cows"
+          - "armor needs cow leather"
+          - "books need leather from cows"
+          - "cow drops leather"
+      
+      steak_food:
+        name: "牛排食物"
+        description: "为获取牛排的表达"
+        variants:
+          - "kill cow for steak"
+          - "beef is best food"
+          - "raw beef from cow"
+          - "steak is top tier food"
+          - "cooked steak healing"
+          - "cow for dinner"
+          - "steak farming time"
+      
+      dual_drops:
+        name: "双重掉落"
+        description: "强调牛的双重掉落物"
+        variants:
+          - "cow drops leather AND beef"
+          - "best passive mob for drops"
+          - "two drops from one cow"
+          - "leather plus steak combo"
+          - "cow is most valuable passive"
+          - "kill cow get food and armor mat"
+          - "efficient farming: cows"
+      
+      cow_farm:
+        name: "牛场相关"
+        description: "与牛场相关的表达"
+        variants:
+          - "cow farm for infinite leather"
+          - "breed cows then kill"
+          - "wheat attracts cows"
+          - "auto cow farm setup"
+          - "renewable leather source"
+          - "cow breeder slaughter cycle"
+          - "efficient cow farming"
+      
+      humor_meme:
+        name: "幽默/梗风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "steak dinner incoming"
+          - "sorry cow its survival"
+          - "cow had a good grass life"
+          - "moo moo boom"
+          - "burger time in minecraft"
+          - "the cow knew too much"
+          - "cow speedrun any%"
+    success_visuals_path: "data/success_visuals/combat_cow"
+  
+  # --------------------------------------------------------------------------
+  # Tier 2 - Medium (3个)
+  # --------------------------------------------------------------------------
+  
+  combat_spider:
+    category: combat
+    difficulty: medium
+    description: "击杀1只蜘蛛（敌对生物）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "kill spider"
+    max_steps: 1500
+    n_trials: 3
+    
+    env_config:
+      specified_biome: plains
+      initial_inventory:
+      - type: stone_sword
+        quantity: 1
+      reward_config:
+      - event: kill_entity
+        entity_type: spider
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 20000  # 夜晚
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "kill spider"
+          - "fight spider"
+          - "attack spider"
+          - "slay spider"
+          - "kill the spider"
+          - "take out spider"
+          - "defeat spider"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "kill that spider bro"
+          - "yo attack the spider"
+          - "spider hunting time"
+          - "gotta kill spider"
+          - "murder that spider"
+          - "rip spider"
+          - "spider goes splat"
+      
+      string_purpose:
+        name: "线材目的"
+        description: "为获取线材的表达"
+        variants:
+          - "kill spider for string"
+          - "need string kill spiders"
+          - "spider = free string"
+          - "string farming kill spiders"
+          - "bow needs string from spider"
+          - "fishing rod needs string"
+          - "spider drops 0-2 string"
+      
+      spider_eye:
+        name: "蜘蛛眼"
+        description: "为获取蜘蛛眼的表达"
+        variants:
+          - "spider drops spider eye"
+          - "need spider eye for potions"
+          - "fermented spider eye ingredient"
+          - "potion brewing needs spider eye"
+          - "rare drop spider eye"
+          - "alchemy requires spider eyes"
+          - "spider eye for weakness potion"
+      
+      hostile_warning:
+        name: "敌对警告"
+        description: "关于蜘蛛敌对性的表达"
+        variants:
+          - "spider is hostile at night"
+          - "watch out spider attacks"
+          - "spider can climb walls"
+          - "neutral in day hostile at night"
+          - "spider jumps at you"
+          - "careful spider has poison"
+          - "cave spider is worse"
+      
+      combat_strategy:
+        name: "战斗策略"
+        description: "战斗策略相关的表达"
+        variants:
+          - "hit spider with sword"
+          - "sprint attack spider"
+          - "crit hit the spider"
+          - "shield block spider attack"
+          - "strafe around spider"
+          - "dont let spider jump on you"
+          - "keep distance from spider"
+      
+      humor_fear:
+        name: "幽默/恐惧"
+        description: "社区梗和幽默表达"
+        variants:
+          - "arachnophobia activated"
+          - "nope kill it with fire"
+          - "spider bigger than me irl"
+          - "minecraft spider nightmare fuel"
+          - "those eyes are creepy"
+          - "eight legs of nope"
+          - "australia simulator"
+    success_visuals_path: "data/success_visuals/combat_spider"
+  
+  combat_zombie:
+    category: combat
+    difficulty: medium
+    description: "击杀1只僵尸（敌对生物）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "kill zombie"
+    max_steps: 1500
+    n_trials: 3
+    
+    env_config:
+      specified_biome: plains
+      initial_inventory:
+      - type: stone_sword
+        quantity: 1
+      reward_config:
+      - event: kill_entity
+        entity_type: zombie
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 20000  # 夜晚
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "kill zombie"
+          - "fight zombie"
+          - "attack zombie"
+          - "slay zombie"
+          - "kill the zombie"
+          - "take out zombie"
+          - "defeat zombie"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "kill that zombie bro"
+          - "yo attack the zombie"
+          - "zombie hunting time"
+          - "gotta kill zombie"
+          - "murder that zombie"
+          - "rip zombie"
+          - "zombie goes down"
+      
+      night_survival:
+        name: "夜间生存"
+        description: "夜间生存相关的表达"
+        variants:
+          - "zombie spawned kill it"
+          - "night time zombie hunt"
+          - "clear zombies before dawn"
+          - "zombies everywhere kill them"
+          - "survive the night kill zombies"
+          - "dont let zombie in house"
+          - "zombie siege defense"
+      
+      drops_loot:
+        name: "掉落物"
+        description: "关于僵尸掉落物的表达"
+        variants:
+          - "zombie drops rotten flesh"
+          - "kill zombie for iron maybe"
+          - "rare drop iron ingot"
+          - "zombie can drop carrot"
+          - "potato from zombie"
+          - "rotten flesh is dog food"
+          - "xp from zombie kill"
+      
+      combat_strategy:
+        name: "战斗策略"
+        description: "战斗策略相关的表达"
+        variants:
+          - "hit zombie with sword"
+          - "sprint attack zombie"
+          - "crit hit the zombie"
+          - "shield block zombie"
+          - "zombie is slow easy kill"
+          - "knockback keeps zombie away"
+          - "strafe around zombie"
+      
+      zombie_variants:
+        name: "僵尸变体"
+        description: "关于僵尸变种的表达"
+        variants:
+          - "regular zombie easy"
+          - "watch for baby zombie fast"
+          - "drowned is water zombie"
+          - "husk is desert zombie"
+          - "zombie villager can cure"
+          - "baby zombie on chicken"
+          - "armored zombie harder"
+      
+      humor_meme:
+        name: "幽默/梗风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "zombie apocalypse simulator"
+          - "braaains denied"
+          - "zombie had one job"
+          - "walking dead minecraft edition"
+          - "zombie speedrun any%"
+          - "green boi goes splat"
+          - "undead? more like re-dead"
+    success_visuals_path: "data/success_visuals/combat_zombie"
+  
+  combat_skeleton:
+    category: combat
+    difficulty: medium
+    description: "击杀1只骷髅（敌对生物，远程）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "kill skeleton"
+    max_steps: 2000
+    n_trials: 3
+    
+    env_config:
+      specified_biome: plains
+      initial_inventory:
+      - type: stone_sword
+        quantity: 1
+      - type: shield
+        quantity: 1
+      reward_config:
+      - event: kill_entity
+        entity_type: skeleton
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 20000  # 夜晚
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "kill skeleton"
+          - "fight skeleton"
+          - "attack skeleton"
+          - "slay skeleton"
+          - "kill the skeleton"
+          - "take out skeleton"
+          - "defeat skeleton"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "kill that skeleton bro"
+          - "yo attack the skelly"
+          - "skeleton hunting time"
+          - "gotta kill skeleton"
+          - "murder that skeleton"
+          - "rip skeleton"
+          - "boney boi goes down"
+      
+      arrow_drops:
+        name: "箭矢掉落"
+        description: "为获取箭矢的表达"
+        variants:
+          - "kill skeleton for arrows"
+          - "free arrows from skeleton"
+          - "skeleton drops 0-2 arrows"
+          - "arrow farming kill skeletons"
+          - "need arrows kill skeleton"
+          - "skeleton = free ammo"
+          - "best arrow source skeletons"
+      
+      bone_drops:
+        name: "骨头/骨粉"
+        description: "为获取骨头的表达"
+        variants:
+          - "kill skeleton for bones"
+          - "bone meal from skeleton"
+          - "bones for wolf taming"
+          - "skeleton drops bones"
+          - "need bonemeal kill skeleton"
+          - "farm growth with bone drops"
+          - "bones for the dogs"
+      
+      ranged_threat:
+        name: "远程威胁"
+        description: "关于骷髅远程攻击的表达"
+        variants:
+          - "skeleton shoots arrows"
+          - "watch out skeleton is ranged"
+          - "skeleton snipes you"
+          - "use shield vs skeleton"
+          - "close distance fast"
+          - "skeleton has aimbot"
+          - "dodge the arrows"
+      
+      combat_strategy:
+        name: "战斗策略"
+        description: "战斗策略相关的表达"
+        variants:
+          - "rush skeleton with sword"
+          - "shield block arrows then attack"
+          - "sprint hit skeleton"
+          - "get close skeleton bad at melee"
+          - "strafe to dodge arrows"
+          - "corner skeleton so it cant shoot"
+          - "crit jump attack skeleton"
+      
+      humor_meme:
+        name: "幽默/梗风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "spooky scary skeleton"
+          - "calcium deficiency incoming"
+          - "doot doot no more"
+          - "bone zone"
+          - "skeleton aimbot is unfair"
+          - "rattled"
+          - "skeleton speedrun any%"
+    success_visuals_path: "data/success_visuals/combat_skeleton"
+  
+  # ==========================================================================
+  # Techtree Tasks - 科技树任务 (9个)
+  # ==========================================================================
+  
+  # --------------------------------------------------------------------------
+  # Tier 1 - Easy (3个)
+  # --------------------------------------------------------------------------
+  
+  techtree_craft_planks:
+    category: techtree
+    difficulty: easy
+    description: "制作木板（基础科技树）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft wooden planks"
+    max_steps: 600
+    n_trials: 3
+    
+    env_config:
+      specified_biome: forest
+      initial_inventory:
+      - type: oak_log
+        quantity: 1
+      reward_config:
+      - entity: oak_planks
+        amount: 4
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft planks"
+          - "make planks"
+          - "get planks"
+          - "convert to planks"
+          - "wood to planks"
+          - "make wooden planks"
+          - "craft wood planks"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft some planks"
+          - "bro make planks"
+          - "yo convert that wood"
+          - "quick planks craft"
+          - "need planks now"
+          - "gotta get planks"
+          - "planks time"
+      
+      conversion_mechanic:
+        name: "转换机制"
+        description: "描述转换机制的表达"
+        variants:
+          - "log gives 4 planks"
+          - "one log = four planks"
+          - "convert log to planks"
+          - "logs craft into planks"
+          - "put log in crafting get planks"
+          - "wood to planks 1:4 ratio"
+          - "multiply wood with planks"
+      
+      crafting_table_purpose:
+        name: "工作台用途"
+        description: "制作工作台相关的表达"
+        variants:
+          - "planks to make crafting table"
+          - "need 4 planks for table"
+          - "craft planks then table"
+          - "planks are for crafting table"
+          - "table needs planks"
+          - "first planks then workbench"
+          - "4 planks = crafting table"
+      
+      tool_materials:
+        name: "工具材料"
+        description: "用于制作工具的表达"
+        variants:
+          - "planks for wooden tools"
+          - "need planks for pickaxe"
+          - "planks make sticks and tools"
+          - "tool crafting needs planks"
+          - "wooden sword needs planks"
+          - "planks are tool ingredient"
+          - "first planks then tools"
+      
+      inventory_craft:
+        name: "背包合成"
+        description: "在背包中合成的表达"
+        variants:
+          - "craft planks in inventory"
+          - "no table needed for planks"
+          - "2x2 grid makes planks"
+          - "inventory crafting: planks"
+          - "can craft planks anywhere"
+          - "planks dont need workbench"
+          - "basic craft just planks"
+      
+      progression_step:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "first step after wood: planks"
+          - "log to planks progression"
+          - "planks unlock everything"
+          - "basic resource: planks"
+          - "cant do anything without planks"
+          - "planks are foundation"
+          - "start with planks"
+    success_visuals_path: "data/success_visuals/techtree_craft_planks"
+  
+  techtree_craft_sticks:
+    category: techtree
+    difficulty: easy
+    description: "制作木棒（工具前置）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft sticks"
+    max_steps: 600
+    n_trials: 3
+    
+    env_config:
+      specified_biome: forest
+      initial_inventory:
+      - type: oak_planks
+        quantity: 2
+      - type: crafting_table
+        quantity: 1
+      reward_config:
+      - entity: stick
+        amount: 4
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft sticks"
+          - "make sticks"
+          - "get sticks"
+          - "make some sticks"
+          - "craft wooden sticks"
+          - "sticks please"
+          - "need sticks"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft sticks real quick"
+          - "bro make sticks"
+          - "yo get some sticks"
+          - "quick sticks craft"
+          - "need sticks now"
+          - "gotta make sticks"
+          - "sticks time"
+      
+      conversion_mechanic:
+        name: "转换机制"
+        description: "描述转换机制的表达"
+        variants:
+          - "2 planks = 4 sticks"
+          - "planks on top of each other"
+          - "stack planks for sticks"
+          - "vertical planks make sticks"
+          - "put 2 planks vertically"
+          - "planks above planks = sticks"
+          - "sticks from plank stack"
+      
+      tool_essential:
+        name: "工具必需品"
+        description: "强调工具必需的表达"
+        variants:
+          - "sticks for tool handles"
+          - "every tool needs sticks"
+          - "cant make tools without sticks"
+          - "pickaxe needs 2 sticks"
+          - "sword handle is stick"
+          - "sticks are tool component"
+          - "tools = planks + sticks"
+      
+      torch_arrows:
+        name: "火把/箭矢"
+        description: "用于火把和箭的表达"
+        variants:
+          - "sticks for torches"
+          - "coal + sticks = torches"
+          - "arrows need sticks"
+          - "stick + coal torch"
+          - "flint + stick + feather arrow"
+          - "torch crafting sticks"
+          - "light sources need sticks"
+      
+      inventory_craft:
+        name: "背包合成"
+        description: "在背包中合成的表达"
+        variants:
+          - "craft sticks in inventory"
+          - "no table needed for sticks"
+          - "2x2 grid sticks"
+          - "inventory craft sticks"
+          - "can make sticks anywhere"
+          - "sticks dont need workbench"
+          - "basic craft just sticks"
+      
+      progression:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "planks then sticks"
+          - "wood -> planks -> sticks"
+          - "sticks after planks"
+          - "next step is sticks"
+          - "progression: get sticks"
+          - "sticks unlock tools"
+          - "sticks before pickaxe"
+    success_visuals_path: "data/success_visuals/techtree_craft_sticks"
+  
+  techtree_craft_crafting_table:
+    category: techtree
+    difficulty: easy
+    description: "制作工作台（科技树关键）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft crafting table"
+    max_steps: 800
+    n_trials: 3
+    
+    env_config:
+      specified_biome: forest
+      initial_inventory:
+      - type: oak_planks
+        quantity: 4
+      reward_config:
+      - entity: crafting_table
         amount: 1
         reward: 100
-      - entity: red_flower
-        amount: 1
-        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft crafting table"
+          - "make crafting table"
+          - "make a workbench"
+          - "craft a table"
+          - "get crafting table"
+          - "build workbench"
+          - "make workbench"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft a table real quick"
+          - "bro make a crafting table"
+          - "yo get a workbench"
+          - "quick table craft"
+          - "need crafting table now"
+          - "gotta make a table"
+          - "table time"
+      
+      recipe_4planks:
+        name: "4木板配方"
+        description: "描述配方的表达"
+        variants:
+          - "4 planks = crafting table"
+          - "fill 2x2 with planks"
+          - "square of planks makes table"
+          - "4 planks in inventory grid"
+          - "2x2 planks crafting table"
+          - "four planks for workbench"
+          - "planks fill grid = table"
+      
+      unlock_recipes:
+        name: "解锁配方"
+        description: "强调解锁3x3配方的表达"
+        variants:
+          - "crafting table unlocks 3x3"
+          - "need table for complex recipes"
+          - "workbench for bigger crafts"
+          - "3x3 grid needs table"
+          - "advanced crafting requires table"
+          - "tools need 3x3 grid"
+          - "cant make pickaxe without table"
+      
+      essential_item:
+        name: "必需品"
+        description: "强调重要性的表达"
+        variants:
+          - "most important early item"
+          - "cant progress without table"
+          - "first thing to craft"
+          - "essential crafting station"
+          - "game starts with workbench"
+          - "table is priority one"
+          - "need this for everything"
+      
+      place_and_use:
+        name: "放置使用"
+        description: "关于放置和使用的表达"
+        variants:
+          - "craft table then place it"
+          - "put down the workbench"
+          - "right click placed table"
+          - "crafting table is a block"
+          - "place workbench to use"
+          - "table goes on ground"
+          - "interact with placed table"
+      
+      progression:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "logs -> planks -> table"
+          - "first crafting station"
+          - "table before tools"
+          - "progression needs table"
+          - "after planks make table"
+          - "table is tech tree start"
+          - "workbench unlocks game"
+    success_visuals_path: "data/success_visuals/techtree_craft_crafting_table"
+  
+  # --------------------------------------------------------------------------
+  # Tier 2 - Medium (3个)
+  # --------------------------------------------------------------------------
+  
+  techtree_craft_wooden_pickaxe:
+    category: techtree
+    difficulty: medium
+    description: "制作木镐（工具链起点）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft wooden pickaxe"
     max_steps: 1000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_sapling
-  # 描述: 使用英文指令获取1个树苗（破坏树叶掉落）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get sapling from tree
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_sapling
-    category: plants
-    difficulty: easy
-    description: 使用英文指令获取1个树苗（破坏树叶掉落）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get sapling from tree
+    n_trials: 3
+    
     env_config:
+      specified_biome: forest
+      initial_inventory:
+      - type: crafting_table
+        quantity: 1
+      - type: oak_planks
+        quantity: 3
+      - type: stick
+        quantity: 2
       reward_config:
-      - entity: sapling
+      - entity: wooden_pickaxe
         amount: 1
         reward: 100
-    max_steps: 1500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_mushroom
-  # 描述: 使用英文指令采集1个蘑菇（红色或棕色）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: pick mushroom
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_mushroom
-    category: plants
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库 (340K+ r/Minecraft 帖子) 真实玩家语言
+    # 参考: https://docs.minedojo.org/sections/getting_started/data.html#reddit-database
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft a wooden pickaxe"
+          - "make a wood pick"
+          - "get a wooden pick"
+          - "craft wood pick"
+          - "make a pickaxe"
+          - "craft a pick"
+          - "wooden pickaxe"
+      
+      reddit_posts:
+        name: "Reddit帖子风格"
+        description: "r/Minecraft帖子标题和内容的真实表达"
+        variants:
+          - "Made my first wooden pickaxe!"
+          - "Can't mine stone without a pickaxe"
+          - "First tool should always be a wooden pickaxe"
+          - "Wooden pickaxe to stone pickaxe speedrun"
+          - "Remember when you didn't know how to craft a pickaxe?"
+          - "The pickaxe progression: wood -> stone -> iron -> diamond"
+          - "First pickaxe of the game always feels good"
+      
+      reddit_comments:
+        name: "Reddit评论风格"
+        description: "r/Minecraft评论区的真实玩家回复"
+        variants:
+          - "make a wood pick to mine stone"
+          - "you need a pickaxe to get cobble"
+          - "craft pickaxe with planks and sticks"
+          - "3 planks on top 2 sticks down"
+          - "wooden pickaxe is just for getting stone"
+          - "gotta craft that first pickaxe"
+          - "pickaxe = mining capabilities unlocked"
+      
+      recipe_help:
+        name: "配方帮助"
+        description: "Reddit上关于配方的帮助回复"
+        variants:
+          - "You need 3 planks and 2 sticks for a wooden pickaxe"
+          - "put 3 planks on top and 2 sticks down the middle"
+          - "use 3 wooden planks and 2 sticks to make a pickaxe"
+          - "place planks in a row and sticks below for pickaxe"
+          - "make pickaxe from 3 planks 2 sticks"
+          - "its planks across top with sticks down center"
+          - "crafting grid: PPP then S then S (P=plank S=stick)"
+      
+      purpose_mining:
+        name: "挖矿目的"
+        description: "强调制作镐用于挖矿的表达"
+        variants:
+          - "Craft a pickaxe so you can get cobblestone"
+          - "make a wooden pick so I can get cobble"
+          - "need a pickaxe to break stone blocks"
+          - "without a pick you cant do anything"
+          - "make wooden pickaxe for cobblestone mining"
+          - "need a pickaxe for stone and ores"
+          - "pickaxe lets you mine actual resources"
+      
+      casual_slang:
+        name: "口语俚语风格"
+        description: "Reddit/Discord中的口语化表达"
+        variants:
+          - "yo make me a wooden pickaxe real quick"
+          - "just whip up a quick wooden pick"
+          - "lemme craft a wood pickaxe"
+          - "gotta get myself a wooden pick"
+          - "skip wood pick and punch stone? nah"
+          - "bruh just make a pickaxe"
+          - "wood pick time lets go"
+      
+      progression_chain:
+        name: "进度链描述"
+        description: "描述工具升级路径的表达"
+        variants:
+          - "after making sticks craft a wooden pickaxe"
+          - "now that we have planks lets make a pickaxe"
+          - "next step is crafting a wooden pickaxe"
+          - "Wooden pickaxe breaks so fast tho"
+          - "wood pick is just stepping stone to stone pick"
+          - "first pickaxe then upgrade to stone"
+          - "wood -> stone -> iron pickaxe progression"
+    success_visuals_path: "data/success_visuals/techtree_craft_wooden_pickaxe"
+  
+  techtree_craft_wooden_sword:
+    category: techtree
     difficulty: medium
-    description: 使用英文指令采集1个蘑菇（红色或棕色）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: pick mushroom
-    env_config:
-      reward_config:
-      - entity: red_mushroom
-        amount: 1
-        reward: 100
-      - entity: brown_mushroom
-        amount: 1
-        reward: 100
-    max_steps: 2000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_clay
-  # 描述: 使用英文指令采集1个粘土块
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: dig clay
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_clay
-    category: special_blocks
-    difficulty: medium
-    description: 使用英文指令采集1个粘土块
+    description: "制作木剑（武器链起点）"
+    
     env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: dig clay
+    en_instruction: "craft wooden sword"
+    max_steps: 1000
+    n_trials: 3
+    
     env_config:
+      specified_biome: forest
+      initial_inventory:
+      - type: crafting_table
+        quantity: 1
+      - type: oak_planks
+        quantity: 2
+      - type: stick
+        quantity: 1
       reward_config:
-      - entity: clay
+      - entity: wooden_sword
         amount: 1
         reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_snow
-  # 描述: 使用英文指令采集1个雪块
-  # 环境: MineRLHarvestDefaultEnv-v0
-  # 指令: dig snow
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_snow
-    category: special_blocks
-    difficulty: easy
-    description: 使用英文指令采集1个雪块
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft wooden sword"
+          - "make wood sword"
+          - "get a wooden sword"
+          - "craft a sword"
+          - "make a sword"
+          - "wood sword"
+          - "wooden sword please"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft a sword real quick"
+          - "bro make a wooden sword"
+          - "yo get a sword"
+          - "quick sword craft"
+          - "need a sword now"
+          - "gotta make sword"
+          - "sword time lets go"
+      
+      combat_purpose:
+        name: "战斗目的"
+        description: "为战斗准备的表达"
+        variants:
+          - "sword for killing mobs"
+          - "need sword for zombies"
+          - "weapon for night survival"
+          - "sword to fight mobs"
+          - "cant fight without sword"
+          - "first weapon wooden sword"
+          - "sword for monster hunting"
+      
+      recipe_description:
+        name: "配方描述"
+        description: "描述配方的表达"
+        variants:
+          - "2 planks 1 stick = sword"
+          - "planks vertical with stick"
+          - "blade on top handle below"
+          - "wood sword recipe easy"
+          - "two planks one stick sword"
+          - "vertical planks + stick"
+          - "stack planks add stick handle"
+      
+      first_weapon:
+        name: "第一把武器"
+        description: "作为第一把武器的表达"
+        variants:
+          - "first weapon in minecraft"
+          - "starter sword is wood"
+          - "beginning weapon wooden"
+          - "early game sword"
+          - "basic combat weapon"
+          - "first thing for combat"
+          - "survival needs sword first"
+      
+      damage_comparison:
+        name: "伤害对比"
+        description: "与其他武器对比的表达"
+        variants:
+          - "wood sword weak but works"
+          - "better than punching mobs"
+          - "4 damage wood sword"
+          - "upgrade to stone later"
+          - "wood sword temporary weapon"
+          - "sword doubles attack damage"
+          - "wood sword gets job done"
+      
+      humor_meme:
+        name: "幽默/梗风格"
+        description: "社区梗和幽默表达"
+        variants:
+          - "wooden sword gaming"
+          - "starter sword go bonk"
+          - "wood sword best sword"
+          - "its not much but its honest work"
+          - "sword go swoosh"
+          - "time to bonk some zombies"
+          - "wooden sword speedrun"
+    success_visuals_path: "data/success_visuals/techtree_craft_wooden_sword"
+  
+  techtree_craft_furnace:
+    category: techtree
+    difficulty: medium
+    description: "制作熔炉（熔炼前置）"
+    
     env_name: MineRLHarvestDefaultEnv-v0
-    en_instruction: dig snow
+    en_instruction: "craft furnace"
+    max_steps: 1200
+    n_trials: 3
+    
     env_config:
+      specified_biome: mountains
       initial_inventory:
-      - type: wooden_shovel
+      - type: crafting_table
         quantity: 1
+      - type: cobblestone
+        quantity: 8
       reward_config:
-      - entity: snow
+      - entity: furnace
         amount: 1
         reward: 100
-    max_steps: 500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_gold_ore
-  # 描述: 使用英文指令采集1个金矿石（需要铁镐）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: mine gold ore
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_gold_ore
-    category: extended_ores
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft furnace"
+          - "make furnace"
+          - "build a furnace"
+          - "get a furnace"
+          - "make a smelter"
+          - "craft a furnace"
+          - "furnace please"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft a furnace real quick"
+          - "bro make a furnace"
+          - "yo get a furnace going"
+          - "quick furnace craft"
+          - "need furnace now"
+          - "gotta make furnace"
+          - "smelting time"
+      
+      recipe_8cobble:
+        name: "8圆石配方"
+        description: "描述配方的表达"
+        variants:
+          - "8 cobblestone = furnace"
+          - "ring of cobblestone"
+          - "hollow square of cobble"
+          - "surround empty space with cobble"
+          - "8 cobble around edge"
+          - "cobblestone donut shape"
+          - "leave middle empty"
+      
+      smelting_purpose:
+        name: "熔炼用途"
+        description: "用于熔炼的表达"
+        variants:
+          - "furnace for smelting iron"
+          - "need furnace to smelt ore"
+          - "cant get iron without furnace"
+          - "furnace cooks ore to ingot"
+          - "smelting station furnace"
+          - "ore processing needs furnace"
+          - "iron ore requires furnace"
+      
+      cooking_purpose:
+        name: "烹饪用途"
+        description: "用于烹饪的表达"
+        variants:
+          - "furnace to cook food"
+          - "cook meat in furnace"
+          - "raw food needs furnace"
+          - "cooked steak from furnace"
+          - "food cooking station"
+          - "better food heal in furnace"
+          - "smelt that raw pork"
+      
+      fuel_mention:
+        name: "燃料提及"
+        description: "提及燃料的表达"
+        variants:
+          - "furnace needs fuel"
+          - "coal for furnace"
+          - "wood fuel furnace"
+          - "put coal in bottom"
+          - "furnace runs on fuel"
+          - "charcoal works too"
+          - "blaze rod best fuel"
+      
+      progression:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "furnace unlocks iron"
+          - "need furnace for progression"
+          - "cant advance without furnace"
+          - "furnace is essential"
+          - "iron age needs furnace"
+          - "stone age to iron via furnace"
+          - "furnace opens up game"
+    success_visuals_path: "data/success_visuals/techtree_craft_furnace"
+  
+  # --------------------------------------------------------------------------
+  # Tier 3 - Hard (3个)
+  # --------------------------------------------------------------------------
+  
+  techtree_craft_stone_sword:
+    category: techtree
     difficulty: hard
-    description: 使用英文指令采集1个金矿石（需要铁镐）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: mine gold ore
-    env_config:
-      initial_inventory:
-      - type: iron_pickaxe
-        quantity: 1
-      reward_config:
-      - entity: gold_ore
-        amount: 1
-        reward: 100
-    max_steps: 4000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_lapis_ore
-  # 描述: 使用英文指令采集1个青金石矿石
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: mine lapis lazuli ore
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_lapis_ore
-    category: extended_ores
-    difficulty: medium
-    description: 使用英文指令采集1个青金石矿石
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: mine lapis lazuli ore
-    env_config:
-      initial_inventory:
-      - type: stone_pickaxe
-        quantity: 1
-      reward_config:
-      - entity: lapis_ore
-        amount: 1
-        reward: 100
-    max_steps: 3000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_apple
-  # 描述: 使用英文指令获取1个苹果（从橡树树叶掉落）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: get apple from oak tree
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_apple
-    category: food
-    difficulty: medium
-    description: 使用英文指令获取1个苹果（从橡树树叶掉落）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: get apple from oak tree
-    env_config:
-      reward_config:
-      - entity: apple
-        amount: 1
-        reward: 100
+    description: "制作石剑（工具升级）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft stone sword"
     max_steps: 1500
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_wheat
-  # 描述: 使用英文指令种植并收获1个小麦（提供种子和锄头）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: plant and harvest wheat
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_wheat
-    category: crops
-    difficulty: hard
-    description: 使用英文指令种植并收获1个小麦（提供种子和锄头）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: plant and harvest wheat
+    n_trials: 3
+    
     env_config:
+      specified_biome: mountains
       initial_inventory:
-      - type: wheat_seeds
-        quantity: 4
-      - type: wooden_hoe
+      - type: crafting_table
         quantity: 1
-      - type: water_bucket
+      - type: cobblestone
+        quantity: 2
+      - type: stick
         quantity: 1
       reward_config:
-      - entity: wheat
+      - entity: stone_sword
         amount: 1
         reward: 100
-    max_steps: 6000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_carrot
-  # 描述: 使用英文指令种植并收获1个胡萝卜（提供胡萝卜和锄头）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: plant and harvest carrot
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_carrot
-    category: crops
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft stone sword"
+          - "make stone sword"
+          - "get stone sword"
+          - "stone sword please"
+          - "make a stone sword"
+          - "craft a stone sword"
+          - "cobble sword"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft stone sword"
+          - "bro make stone sword"
+          - "yo get a stone sword"
+          - "quick stone sword"
+          - "need stone sword now"
+          - "gotta upgrade to stone"
+          - "stone sword time"
+      
+      upgrade_from_wood:
+        name: "从木剑升级"
+        description: "强调升级的表达"
+        variants:
+          - "upgrade from wood sword"
+          - "stone sword better than wood"
+          - "time to upgrade sword"
+          - "wood sword -> stone sword"
+          - "next tier sword"
+          - "better sword from cobble"
+          - "first sword upgrade"
+      
+      damage_stats:
+        name: "伤害数据"
+        description: "关于伤害的表达"
+        variants:
+          - "stone sword 5 damage"
+          - "more damage than wood"
+          - "stone hits harder"
+          - "better attack damage"
+          - "worth the upgrade"
+          - "kills faster with stone"
+          - "stone sword efficient"
+      
+      combat_purpose:
+        name: "战斗目的"
+        description: "为战斗准备的表达"
+        variants:
+          - "stone sword for zombies"
+          - "better weapon for night"
+          - "fighting mobs easier"
+          - "mob killing upgrade"
+          - "combat improvement"
+          - "stone sword for hunting"
+          - "monster slaying weapon"
+      
+      cheap_effective:
+        name: "性价比"
+        description: "强调性价比的表达"
+        variants:
+          - "stone sword is cheap"
+          - "cobble is everywhere"
+          - "easy to make stone sword"
+          - "infinite cobble infinite swords"
+          - "disposable stone swords"
+          - "cheap but effective"
+          - "cobble generator sword farm"
+      
+      progression:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "stone before iron sword"
+          - "early game best sword"
+          - "until you get iron"
+          - "mid early game weapon"
+          - "stone tier combat"
+          - "progression: stone weapons"
+          - "step up from wood tier"
+    success_visuals_path: "data/success_visuals/techtree_craft_stone_sword"
+  
+  techtree_smelt_iron_ingot:
+    category: techtree
     difficulty: hard
-    description: 使用英文指令种植并收获1个胡萝卜（提供胡萝卜和锄头）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: plant and harvest carrot
-    env_config:
-      initial_inventory:
-      - type: carrot
-        quantity: 4
-      - type: wooden_hoe
-        quantity: 1
-      - type: water_bucket
-        quantity: 1
-      reward_config:
-      - entity: carrot
-        amount: 1
-        reward: 100
-    max_steps: 6000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_potato
-  # 描述: 使用英文指令种植并收获1个土豆（提供土豆和锄头）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: plant and harvest potato
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_potato
-    category: crops
-    difficulty: hard
-    description: 使用英文指令种植并收获1个土豆（提供土豆和锄头）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: plant and harvest potato
-    env_config:
-      initial_inventory:
-      - type: potato
-        quantity: 4
-      - type: wooden_hoe
-        quantity: 1
-      - type: water_bucket
-        quantity: 1
-      reward_config:
-      - entity: potato
-        amount: 1
-        reward: 100
-    max_steps: 6000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_beetroot
-  # 描述: 使用英文指令种植并收获1个甜菜根（提供种子和锄头）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: plant and harvest beetroot
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_beetroot
-    category: crops
-    difficulty: hard
-    description: 使用英文指令种植并收获1个甜菜根（提供种子和锄头）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: plant and harvest beetroot
-    env_config:
-      initial_inventory:
-      - type: beetroot_seeds
-        quantity: 4
-      - type: wooden_hoe
-        quantity: 1
-      - type: water_bucket
-        quantity: 1
-      reward_config:
-      - entity: beetroot
-        amount: 1
-        reward: 100
-    max_steps: 6000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_pumpkin
-  # 描述: 使用英文指令种植并收获1个南瓜（提供种子和锄头）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: plant and harvest pumpkin
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_pumpkin
-    category: crops
-    difficulty: hard
-    description: 使用英文指令种植并收获1个南瓜（提供种子和锄头）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: plant and harvest pumpkin
-    env_config:
-      initial_inventory:
-      - type: pumpkin_seeds
-        quantity: 4
-      - type: wooden_hoe
-        quantity: 1
-      - type: water_bucket
-        quantity: 1
-      reward_config:
-      - entity: pumpkin
-        amount: 1
-        reward: 100
-    max_steps: 6000
-
-  # ----------------------------------------------------------------------------
-  # 任务: harvest_1_reeds
-  # 描述: 使用英文指令收获1个甘蔗（甘蔗自然生成在水边）
-  # 环境: MineRLHarvestEnv-v0
-  # 指令: harvest sugar cane
-  # ----------------------------------------------------------------------------
-  - task_id: harvest_1_reeds
-    category: crops
-    difficulty: medium
-    description: 使用英文指令收获1个甘蔗（甘蔗自然生成在水边）
-    env_name: MineRLHarvestEnv-v0
-    en_instruction: harvest sugar cane
-    env_config:
-      reward_config:
-      - entity: reeds
-        amount: 1
-        reward: 100
+    description: "熔炼铁锭（熔炼系统）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "smelt iron ore"
     max_steps: 2000
+    n_trials: 3
+    
+    env_config:
+      specified_biome: mountains
+      initial_inventory:
+      - type: furnace
+        quantity: 1
+      - type: iron_ore
+        quantity: 1
+      - type: coal
+        quantity: 1
+      reward_config:
+      - entity: iron_ingot
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: true  # 关键！允许时间流逝用于熔炼
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "smelt iron"
+          - "make iron ingot"
+          - "get iron"
+          - "smelt iron ore"
+          - "iron ingot please"
+          - "make iron"
+          - "smelt the ore"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just smelt some iron"
+          - "bro smelt that iron"
+          - "yo get iron ingots"
+          - "quick iron smelt"
+          - "need iron now"
+          - "gotta smelt iron"
+          - "iron time"
+      
+      furnace_process:
+        name: "熔炉流程"
+        description: "描述熔炉操作的表达"
+        variants:
+          - "put iron ore in furnace"
+          - "ore goes top coal bottom"
+          - "furnace + ore + fuel"
+          - "iron ore into furnace"
+          - "load up the furnace"
+          - "furnace smelts ore to ingot"
+          - "top slot ore bottom slot fuel"
+      
+      fuel_mention:
+        name: "燃料提及"
+        description: "提及燃料的表达"
+        variants:
+          - "coal to smelt iron"
+          - "need fuel for iron"
+          - "charcoal works for smelting"
+          - "1 coal smelts 8 items"
+          - "dont forget the fuel"
+          - "iron needs coal to smelt"
+          - "blaze rod most efficient"
+      
+      tool_purpose:
+        name: "工具用途"
+        description: "用于制作工具的表达"
+        variants:
+          - "iron for iron pickaxe"
+          - "smelt iron for tools"
+          - "need iron ingots for gear"
+          - "iron tools are worth it"
+          - "upgrade to iron tier"
+          - "iron for armor and tools"
+          - "iron pickaxe needs 3 ingots"
+      
+      wait_time:
+        name: "等待时间"
+        description: "关于熔炼时间的表达"
+        variants:
+          - "smelting takes time"
+          - "wait for iron to cook"
+          - "10 seconds per item"
+          - "go do something while smelting"
+          - "afk at furnace"
+          - "iron takes a bit"
+          - "come back when done"
+      
+      progression:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "iron age begins"
+          - "finally getting iron"
+          - "stone to iron upgrade"
+          - "iron unlocks diamonds"
+          - "iron pickaxe mines gold"
+          - "progression milestone"
+          - "entering iron tier"
+    success_visuals_path: "data/success_visuals/techtree_smelt_iron_ingot"
+  
+  techtree_craft_iron_pickaxe:
+    category: techtree
+    difficulty: hard
+    description: "制作铁镐（工具升级）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft iron pickaxe"
+    max_steps: 1500
+    n_trials: 3
+    
+    env_config:
+      specified_biome: mountains
+      initial_inventory:
+      - type: crafting_table
+        quantity: 1
+      - type: iron_ingot
+        quantity: 3
+      - type: stick
+        quantity: 2
+      reward_config:
+      - entity: iron_pickaxe
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 6000
+        allow_passage_of_time: false
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    # 基于 MineDojo Reddit 数据库真实玩家语言
+    instruction_variants:
+      simple_direct:
+        name: "简单直接指令"
+        description: "Reddit评论中常见的简洁表达"
+        variants:
+          - "craft iron pickaxe"
+          - "make iron pick"
+          - "get iron pickaxe"
+          - "iron pickaxe please"
+          - "make iron pickaxe"
+          - "craft iron pick"
+          - "iron pick"
+      
+      reddit_casual:
+        name: "Reddit随意风格"
+        description: "r/Minecraft社区的日常表达"
+        variants:
+          - "just craft iron pick"
+          - "bro make iron pickaxe"
+          - "yo get iron pick"
+          - "quick iron pick craft"
+          - "need iron pickaxe now"
+          - "gotta make iron pick"
+          - "iron pick time"
+      
+      diamond_mining:
+        name: "钻石挖掘"
+        description: "用于挖钻石的表达"
+        variants:
+          - "iron pick for diamonds"
+          - "need iron to mine diamonds"
+          - "diamond mining requires iron"
+          - "cant get diamonds without iron pick"
+          - "iron pickaxe mines diamond ore"
+          - "diamond hunting needs iron"
+          - "finally can mine diamonds"
+      
+      upgrade_path:
+        name: "升级路径"
+        description: "工具升级相关的表达"
+        variants:
+          - "upgrade from stone pick"
+          - "stone -> iron upgrade"
+          - "iron is big upgrade"
+          - "iron pick worth it"
+          - "huge improvement from stone"
+          - "now we talking iron tier"
+          - "proper pickaxe at last"
+      
+      durability_mention:
+        name: "耐久度"
+        description: "关于耐久度的表达"
+        variants:
+          - "iron pick lasts longer"
+          - "251 durability iron pick"
+          - "more durable than stone"
+          - "wont break as fast"
+          - "iron pick for long mining"
+          - "durability upgrade with iron"
+          - "mines more before breaking"
+      
+      recipe_help:
+        name: "配方帮助"
+        description: "关于配方的表达"
+        variants:
+          - "3 iron ingots 2 sticks"
+          - "iron across top sticks down"
+          - "same pattern as other picks"
+          - "pickaxe shape with iron"
+          - "three iron two sticks"
+          - "top row iron middle stick"
+          - "standard pickaxe recipe"
+      
+      progression:
+        name: "进度步骤"
+        description: "游戏进度相关的表达"
+        variants:
+          - "iron pick unlocks everything"
+          - "gateway to diamonds"
+          - "obsidian needs iron minimum"
+          - "iron tier achieved"
+          - "real mining starts here"
+          - "iron pick is essential"
+          - "must have tool in minecraft"
+    success_visuals_path: "data/success_visuals/techtree_craft_iron_pickaxe"
+  
+  techtree_craft_diamond_pickaxe:
+    category: techtree
+    difficulty: extreme
+    description: "从零开始制作钻石镐（完整科技树挑战：砍树→木镐→石镐→铁镐→挖钻石→钻石镐）"
+    
+    env_name: MineRLHarvestDefaultEnv-v0
+    en_instruction: "craft a diamond pickaxe from scratch"
+    max_steps: 36000  # 30分钟，需要完成完整科技树
+    n_trials: 3
+    
+    env_config:
+      specified_biome: mountains  # 山地更容易找到矿洞
+      # 无初始库存，从零开始
+      reward_config:
+      - entity: diamond_pickaxe
+        amount: 1
+        reward: 100
+      reward_rule: any
+      time_condition:
+        start_time: 0  # 从清晨开始，有更多时间
+        allow_passage_of_time: true  # 允许时间流逝
+      spawning_condition:
+        allow_spawning: true
+    
+    # Prior 评估配置 (分类变体结构)
+    instruction_variants:
+      challenge_oriented:
+        name: "挑战导向指令"
+        description: "强调从零开始完整挑战的指令"
+        variants:
+          - "craft a diamond pickaxe from scratch"
+          - "make a diamond pickaxe starting from nothing"
+          - "create diamond pickaxe without any tools"
+          - "build diamond pickaxe from the beginning"
+          - "obtain diamond pickaxe by gathering all resources"
+          - "get diamond pickaxe through the full tech tree"
+          - "complete the tech tree to craft diamond pickaxe"
+      
+      process_descriptive:
+        name: "流程描述"
+        description: "描述完整制作流程的指令"
+        variants:
+          - "chop trees and eventually craft diamond pickaxe"
+          - "start by punching trees then make diamond pickaxe"
+          - "gather wood and work up to diamond pickaxe"
+          - "begin with nothing and craft diamond pickaxe"
+          - "mine your way to a diamond pickaxe"
+          - "collect resources to make diamond pickaxe"
+          - "harvest materials for diamond pickaxe"
+      
+      progression_based:
+        name: "进度升级"
+        description: "强调工具升级过程的指令"
+        variants:
+          - "wood to stone to iron to diamond pickaxe"
+          - "upgrade through pickaxes to diamond"
+          - "progress through all pickaxe tiers"
+          - "advance from wooden to diamond pickaxe"
+          - "evolve your tools to diamond pick极axe"
+          - "progress from basic to diamond tools"
+      
+      mining_focused:
+        name: "挖矿相关"
+        description: "强调挖矿获取钻石的指令"
+        variants:
+          - "mine diamonds and craft a pickaxe"
+          - "find diamonds and make diamond pickaxe"
+          - "dig deep for diamonds to craft pickaxe"
+          - "explore caves and craft diamond pickaxe"
+          - "descend to diamond level and craft pickaxe"
+          - "mine underground for diamond pickaxe"
+          - "search for diamond ore to make pickaxe"
+      
+      goal_oriented:
+        name: "目标导向"
+        description: "明确任务目标的指令"
+        variants:
+          - "your goal is to craft diamond pickaxe"
+          - "objective: obtain diamond pickaxe"
+          - "mission: create diamond pickaxe from scratch"
+          - "task: make diamond pickaxe without help"
+          - "challenge: craft diamond pickaxe alone"
+          - "aim: achieve diamond tool crafting"
+          - "purpose: create ultimate mining tool"
+      
+      efficiency_based:
+        name: "效率优化"
+        description: "强调效率和速度的指令"
+        variants:
+          - "craft diamond pickaxe as fast as possible"
+          - "quickly progress to diamond pickaxe"
+          - "efficiently craft diamond pickaxe"
+          - "speedrun to diamond pickaxe"
+          - "race to craft diamond pickaxe"
+          - "optimize path to diamond pickaxe"
+          - "minimize time to diamond tools"
+      
+      conversational_motivational:
+        name: "口语化激励"
+        description: "激励性、口语化的指令表达"
+        variants:
+          - "go get yourself a diamond pickaxe"
+          - "time to make a diamond pickaxe"
+          - "let's craft that diamond pickaxe"
+          - "can you make a diamond pickaxe"
+          - "show me how to get diamond pickaxe"
+          - "prove you can make diamond pickaxe"
+          - "demonstrate diamond tool crafting"
+    success_visuals_path: "data/success_visuals/techtree_craft_diamond_pickaxe"
+
+# ==============================================================================
+# 使用说明
+# ==============================================================================
+#
+# Policy 评估（完整评估）:
+#   快速测试: bash scripts/run_evaluation.sh --config config/eval_tasks_unified.yaml --task-set quick_test
+#   基线测试: bash scripts/run_evaluation.sh --config config/eval_tasks_unified.yaml --task-set baseline_test
+#   完整评估: bash scripts/run_evaluation.sh --config config/eval_tasks_unified.yaml --task-set full_evaluation
+#   单个任务: bash scripts/run_evaluation.sh --config config/eval_tasks_unified.yaml --task harvest_1_dirt
+#
+# Prior 评估:
+#   所有任务: bash scripts/run_prior_eval.sh --config config/eval_tasks_unified.yaml
+#   任务集: bash scripts/run_prior_eval.sh --config config/eval_tasks_unified.yaml --task-set harvest
+#   指定任务: bash scripts/run_prior_eval.sh --config config/eval_tasks_unified.yaml --task-ids harvest_1_dirt harvest_1_sand
+#
+# ==============================================================================
+
+
+

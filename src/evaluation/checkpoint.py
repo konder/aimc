@@ -71,8 +71,8 @@ class CheckpointManager:
         try:
             with open(checkpoint_path, 'w', encoding='utf-8') as f:
                 json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
-            logger.info(f"💾 检查点已保存: {checkpoint_path}")
-            logger.info(f"   进度: {len(completed_trials)}/{total_trials} trials")
+            logger.info(f"检查点已保存: {checkpoint_path}")
+            #logger.info(f"  进度: {len(completed_trials)}/{total_trials} trials")
         except Exception as e:
             logger.error(f"⚠️ 保存检查点失败: {e}")
     
@@ -95,9 +95,9 @@ class CheckpointManager:
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
                 checkpoint_data = json.load(f)
             
-            logger.info(f"📥 检查点已加载: {checkpoint_path}")
-            logger.info(f"   进度: {checkpoint_data['completed_trials_count']}/{checkpoint_data['total_trials']} trials")
-            logger.info(f"   时间: {checkpoint_data['timestamp']}")
+            logger.info(f"检查点已加载: {checkpoint_path}")
+            #logger.info(f"  进度: {checkpoint_data['completed_trials_count']}/{checkpoint_data['total_trials']} trials")
+            #logger.info(f"  时间: {checkpoint_data['timestamp']}")
             
             return checkpoint_data
         except Exception as e:
@@ -142,7 +142,7 @@ class CheckpointManager:
         if checkpoint_path.exists():
             try:
                 checkpoint_path.unlink()
-                logger.info(f"🗑️ 检查点已删除: {checkpoint_path}")
+                #logger.info(f"🗑️ 检查点已删除: {checkpoint_path}")
             except Exception as e:
                 logger.error(f"⚠️ 删除检查点失败: {e}")
     
@@ -229,8 +229,8 @@ class CheckpointManager:
         try:
             with open(checkpoint_path, 'w', encoding='utf-8') as f:
                 json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
-            logger.info(f"💾 Task-set检查点已保存: {checkpoint_path}")
-            logger.info(f"   进度: {len(completed_task_ids)}/{len(all_task_ids)} tasks")
+            logger.info(f"Task-set检查点已保存: {checkpoint_path}")
+            #logger.info(f"  进度: {len(completed_task_ids)}/{len(all_task_ids)} tasks")
         except Exception as e:
             logger.error(f"⚠️ 保存task-set检查点失败: {e}")
     
@@ -253,9 +253,9 @@ class CheckpointManager:
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
                 checkpoint_data = json.load(f)
             
-            logger.info(f"📥 Task-set检查点已加载: {checkpoint_path}")
-            logger.info(f"   进度: {checkpoint_data['completed_tasks_count']}/{checkpoint_data['total_tasks']} tasks")
-            logger.info(f"   时间: {checkpoint_data['timestamp']}")
+            logger.info(f"Task-set检查点已加载: {checkpoint_path}")
+            #logger.info(f"  进度: {checkpoint_data['completed_tasks_count']}/{checkpoint_data['total_tasks']} tasks")
+            #logger.info(f"  时间: {checkpoint_data['timestamp']}")
             
             return checkpoint_data
         except Exception as e:
@@ -274,7 +274,7 @@ class CheckpointManager:
         if checkpoint_path.exists():
             try:
                 checkpoint_path.unlink()
-                logger.info(f"🗑️ Task-set检查点已删除: {checkpoint_path}")
+                logger.info(f"  Task-set检查点已删除: {checkpoint_path}")
             except Exception as e:
                 logger.error(f"⚠️ 删除task-set检查点失败: {e}")
 

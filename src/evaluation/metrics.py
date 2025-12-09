@@ -19,6 +19,17 @@ class TrialResult:
     time_seconds: float    # 使用的时间（秒）
     trajectory: List = field(default_factory=list)  # 轨迹数据（可选）
     final_inventory: Dict[str, int] = field(default_factory=dict)  # 最终库存
+    actions: List[Dict] = field(default_factory=list)  # 动作序列（用于 Policy 评估）
+    rewards: List[float] = field(default_factory=list)  # 奖励序列（用于 Policy 评估）
+    total_reward: float = 0.0  # 总奖励
+    
+    # 目标接近度指标（Goal Progress）
+    goal_distances: List[float] = field(default_factory=list)  # 采样帧到目标的距离序列
+    goal_progress_rate: float = 0.0  # 进度率: (初始距离 - 最终距离) / 初始距离
+    goal_monotonic_rate: float = 0.0  # 单调率: 距离递减的步数比例
+    goal_initial_distance: float = 0.0  # 初始距离
+    goal_final_distance: float = 0.0  # 最终距离
+    goal_sample_indices: List[int] = field(default_factory=list)  # 采样帧索引
 
 
 @dataclass

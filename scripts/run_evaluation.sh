@@ -18,8 +18,11 @@ TASK=""
 TASK_LIST=""
 TASK_SET=""
 CONFIG="config/eval_tasks.yaml"  # 默认配置文件
-N_TRIALS=3
-MAX_STEPS=2000
+OUTPUT_DIR=""         # 输出目录（留空使用默认）
+N_TRIALS=""           # 留空表示使用配置文件的值
+MAX_STEPS=""          # 留空表示使用配置文件的值
+N_TRIALS_SET=false    # 是否显式指定了 n-trials
+MAX_STEPS_SET=false   # 是否显式指定了 max-steps
 RENDER=""
 ENABLE_VIDEO=""
 REPORT_NAME="evaluation_report"
@@ -44,6 +47,11 @@ show_help() {
     echo "配置文件："
     echo "  --config FILE               指定配置文件（默认: config/eval_tasks.yaml）"
     echo "                              示例: --config config/eval_tasks_comprehensive.yaml"
+    echo ""
+    echo "输出配置："
+    echo "  --output-dir DIR            输出目录（默认: data/evaluation/）"
+    echo "                              checkpoints 将保存在 {output-dir}/checkpoints/"
+    echo "                              示例: --output-dir data/evaluation/baseline_v1"
     echo ""
     echo "参数配置："
     echo "  --n-trials N                试验次数（默认: 3）"
@@ -102,12 +110,18 @@ while [[ $# -gt 0 ]]; do
             CONFIG="$2"
             shift 2
             ;;
+        --output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
         --n-trials)
             N_TRIALS="$2"
+            N_TRIALS_SET=true
             shift 2
             ;;
         --max-steps)
             MAX_STEPS="$2"
+            MAX_STEPS_SET=true
             shift 2
             ;;
         --render)
@@ -174,6 +188,11 @@ PYTHON_CMD="python src/evaluation/eval_framework.py"
 # 添加配置文件参数
 PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
 
+# 添加输出目录参数（如果指定）
+if [[ -n "$OUTPUT_DIR" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --output-dir $OUTPUT_DIR"
+fi
+
 if [[ -n "$TASK" ]]; then
     PYTHON_CMD="$PYTHON_CMD --task $TASK"
 elif [[ -n "$TASK_LIST" ]]; then
@@ -182,7 +201,14 @@ elif [[ -n "$TASK_SET" ]]; then
     PYTHON_CMD="$PYTHON_CMD --task-set $TASK_SET"
 fi
 
-PYTHON_CMD="$PYTHON_CMD --n-trials $N_TRIALS --max-steps $MAX_STEPS"
+# 只在显式指定时才添加参数（否则使用配置文件的值）
+if [[ "$N_TRIALS_SET" = true ]]; then
+    PYTHON_CMD="$PYTHON_CMD --n-trials $N_TRIALS"
+fi
+
+if [[ "$MAX_STEPS_SET" = true ]]; then
+    PYTHON_CMD="$PYTHON_CMD --max-steps $MAX_STEPS"
+fi
 
 if [[ -n "$RENDER" ]]; then
     PYTHON_CMD="$PYTHON_CMD $RENDER"
@@ -202,6 +228,12 @@ echo "STEVE-1 评估框架"
 echo -e "==========================================${NC}"
 echo -e "${GREEN}项目根目录:${NC} $PROJECT_ROOT"
 echo -e "${GREEN}配置文件:${NC} $CONFIG"
+if [[ -n "$OUTPUT_DIR" ]]; then
+    echo -e "${GREEN}输出目录:${NC} $OUTPUT_DIR"
+    echo -e "${GREEN}检查点目录:${NC} $OUTPUT_DIR/checkpoints"
+else
+    echo -e "${GREEN}输出目录:${NC} (自动生成)"
+fi
 
 if [[ -n "$TASK" ]]; then
     echo -e "${GREEN}评估模式:${NC} 单任务"
@@ -214,11 +246,19 @@ elif [[ -n "$TASK_SET" ]]; then
     echo -e "${GREEN}任务集:${NC} $TASK_SET"
 fi
 
-echo -e "${GREEN}试验次数:${NC} $N_TRIALS"
-echo -e "${GREEN}最大步数:${NC} $MAX_STEPS"
+if [[ "$N_TRIALS_SET" = true ]]; then
+    echo -e "${GREEN}试验次数:${NC} $N_TRIALS (命令行指定)"
+else
+    echo -e "${GREEN}试验次数:${NC} (使用配置文件的值)"
+fi
+if [[ "$MAX_STEPS_SET" = true ]]; then
+    echo -e "${GREEN}最大步数:${NC} $MAX_STEPS (命令行指定)"
+else
+    echo -e "${GREEN}最大步数:${NC} (使用配置文件的值)"
+fi
 echo -e "${GREEN}显示窗口:${NC} $([ -n "$RENDER" ] && echo "是" || echo "否")"
 echo -e "${GREEN}录制视频:${NC} $([ -n "$ENABLE_VIDEO" ] && echo "是 (640x360)" || echo "否")"
-echo -e "${GREEN}生成报告:${NC} $([ -n "$ENABLE_REPORT" ] && echo "是 (含三维矩阵分析)" || echo "否")"
+echo -e "${GREEN}生成报告:${NC} $([ -n "$ENABLE_REPORT" ] && echo "是" || echo "否")"
 echo -e "${GREEN}架构模式:${NC} $([ "$USE_X86" = true ] && echo "x86_64" || echo "原生")"
 echo -e "${BLUE}==========================================${NC}"
 echo ""

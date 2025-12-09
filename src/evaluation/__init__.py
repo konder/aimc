@@ -20,9 +20,18 @@ except ImportError:
     EvaluationFramework = None
 
 try:
-    from .steve1_evaluator import STEVE1Evaluator
+    from .policy_evaluator import STEVE1Evaluator
+    PolicyEvaluator = STEVE1Evaluator  # 别名
 except ImportError:
     STEVE1Evaluator = None
+    PolicyEvaluator = None
+
+try:
+    from .prior_evaluator import Steve1PriorEvaluator
+    PriorEvaluator = Steve1PriorEvaluator  # 别名
+except ImportError:
+    Steve1PriorEvaluator = None
+    PriorEvaluator = None
 
 try:
     from .vpt_evaluator import VPTEvaluator
@@ -34,6 +43,9 @@ __all__ = [
     'EvaluationMetrics',
     'EvaluationFramework',
     'STEVE1Evaluator',
+    'PolicyEvaluator',  # 别名
+    'Steve1PriorEvaluator',
+    'PriorEvaluator',  # 别名
     'VPTEvaluator',
 ]
 

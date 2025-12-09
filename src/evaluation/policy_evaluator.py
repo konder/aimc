@@ -1,0 +1,1884 @@
+"""
+STEVE-1 评估器 (基于 MineRL 环境)
+使用完整 pip 安装的 steve1 包
+"""
+
+import time
+import logging
+import json
+import warnings
+from typing import Dict, Any, Optional, List, Tuple
+from pathlib import Path
+
+import torch as th
+import numpy as np
+import cv2
+import sys
+from tqdm import tqdm
+
+# 过滤不必要的警告和日志
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
+warnings.filterwarnings('ignore', category=UserWarning, message='.*has_cuda.*deprecated.*')
+warnings.filterwarnings('ignore', message='.*CUDA is not available.*')
+warnings.filterwarnings('ignore', message='.*Implicit dimension choice for softmax.*')
+warnings.filterwarnings('ignore', message='.*invalid value encountered in cast.*', category=RuntimeWarning)
+warnings.filterwarnings('ignore', message='.*minerl.utils.process_watcher.*found in sys.modules.*', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', message='.*RequestsDependencyWarning.*')
+warnings.filterwarnings('ignore', message='.*Unable to find acceptable character detection.*')
+
+# 屏蔽 Intel MKL 警告（通过环境变量）
+import os
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'  # 禁用 MKL 警告
+os.environ['KMP_WARNINGS'] = '0'  # 禁用 OpenMP 警告
+
+# 完全静默 MineRL/Malmo/MineDojo 日志
+_silent_loggers = [
+    'minerl.env.malmo.instance',
+    'minerl.env._multiagent',
+    'minerl.env.malmo',
+    'process_watcher',
+    'minedojo.tasks',  # 屏蔽 "Loaded 1572 Programmatic tasks..." 日志
+    'minedojo',
+]
+for _logger_name in _silent_loggers:
+    _logger = logging.getLogger(_logger_name)
+    _logger.setLevel(logging.CRITICAL + 1)  # 完全静默
+    _logger.propagate = False  # 不传播到父 logger
+
+# 导入本地版本的工具函数（支持自定义环境）
+from src.utils.steve1_mineclip_agent_env_utils import (
+    load_mineclip_agent_env,
+    load_mineclip_wconfig,
+    load_vae_model,
+    make_env  # 添加 make_env 导入
+)
+from src.utils.device import DEVICE
+
+# 导入 steve1 官方工具
+from steve1.utils.embed_utils import get_prior_embed
+from steve1.config import PRIOR_INFO
+
+from .metrics import TrialResult, TaskResult
+from .checkpoint import CheckpointManager, CheckpointConfig
+from ..translation.translator import ChineseTranslator
+from scipy.spatial.distance import cosine as cosine_distance
+
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# 目标接近度计算配置（Goal Progress）
+# ============================================================================
+GOAL_PROGRESS_SAMPLE_INTERVAL = 20  # 每 N 步采样一次用于计算目标接近度
+GOAL_PROGRESS_ENABLED = True  # 是否启用目标接近度计算
+
+
+class STEVE1Evaluator:
+    """
+    STEVE-1 评估器（执行器/Worker）
+    
+    职责:
+    - 加载和管理 STEVE-1 模型、MineCLIP、Prior 和环境
+    - 集成中文翻译器（自动检测和翻译中文指令）
+    - 执行单个任务评估（run trials）
+    - 返回任务结果（TaskResult）
+    
+    特性:
+    - 使用官方 steve1 包 (pip install -e)
+    - 基于 MineRL 环境（支持自定义环境）
+    - 自动中文→英文翻译
+    
+    注意：
+    - 报告生成由 EvaluationFramework 负责
+    - 任务管理和调度由 EvaluationFramework 负责
+    """
+    
+    def __init__(
+        self,
+        model_path: str = "data/weights/vpt/2x.model",
+        weights_path: str = "data/weights/steve1/steve1.weights",
+        prior_weights: str = "data/weights/steve1/steve1_prior.pt",
+        text_cond_scale: float = 6.0,
+        visual_cond_scale: float = 7.0,
+        seed: int = 42,
+        enable_render: bool = False,
+        enable_report: bool = False,
+        video_size: Optional[Tuple[int, int]] = None,
+        env_name: str = 'MineRLHarvestDefaultEnv-v0',
+        env_config: Optional[Dict] = None,
+        replay_actions_file: Optional[str] = None,
+        checkpoint_manager: Optional[CheckpointManager] = None,
+        checkpoint_config: Optional[CheckpointConfig] = None,
+        rebuild_interval: int = 15
+    ):
+        """
+        初始化 STEVE-1 评估器（执行器/Worker）
+        
+        职责：
+        - 加载 STEVE-1 模型和环境
+        - 集成中文翻译器
+        - 执行单个任务评估
+        - 录制和保存视频（如果启用）
+        - 支持动作序列回放（跳过模型推理）
+        - 支持检查点恢复（中断继续）
+        
+        Args:
+            model_path: VPT 模型配置文件路径
+            weights_path: STEVE-1 权重文件路径
+            prior_weights: STEVE-1 Prior 权重文件路径（重要！）
+            text_cond_scale: Text classifier-free guidance scale
+            visual_cond_scale: Visual classifier-free guidance scale
+            seed: 随机种子
+            enable_render: 是否启用渲染
+            video_size: 视频尺寸 (width, height)，None 表示不录制（已弃用，使用固定尺寸 640x360）
+            env_name: 环境名称（支持自定义环境，如 'MineRLHarvestEnv-v0'）
+            env_config: 环境配置（传递给环境的参数，如 reward_config 等）
+            replay_actions_file: 动作序列文件路径（JSON），如果提供则跳过模型推理
+            checkpoint_manager: 检查点管理器（可选）
+            checkpoint_config: 检查点配置（可选）
+            rebuild_interval: 环境重建间隔（每N个trial重建一次，0=每次，-1=从不）
+        """
+        self.model_path = model_path
+        self.weights_path = weights_path
+        self.prior_weights = prior_weights
+        self.text_cond_scale = text_cond_scale
+        self.visual_cond_scale = visual_cond_scale
+        self.seed = seed
+        self.enable_render = enable_render
+        self.enable_report = enable_report
+        
+        self.video_size = (640, 360) if video_size is not None else None
+        
+        self.env_name = env_name
+        self.env_config = env_config
+        self.replay_actions_file = replay_actions_file
+        self.replay_actions = None  # 加载的动作序列
+        
+        # 检查点支持
+        self.checkpoint_manager = checkpoint_manager
+        self.checkpoint_config = checkpoint_config or CheckpointConfig()
+        
+        # 环境重建策略
+        self.rebuild_interval = rebuild_interval  # 每N个trial重建一次（0=每次，-1=从不）
+        
+        # 延迟加载
+        self._agent = None
+        self._mineclip = None
+        self._prior = None
+        self._env = None
+        
+        # 初始化中文翻译器
+        self.translator = ChineseTranslator(
+            term_dict_path="data/chinese_terms.json",
+            method="term_dict"  # 使用术语词典翻译
+        )
+        
+        #logger.info("STEVE-1 评估器初始化完成")
+        if self.video_size:
+            logger.info(f"  视频录制: 启用 (固定尺寸: {self.video_size[0]}x{self.video_size[1]})")
+    
+    def _load_models(self):
+        """
+        延迟加载 Agent, MineCLIP 和 Prior（不加载环境）
+        用于动作相似度评估等不需要环境的场景
+        """
+        if self._agent is None:
+            # 获取当前device信息
+            import torch
+            from src.utils.device import DEVICE
+
+            logger.info(f"Device 模式: {DEVICE}")
+            if DEVICE == 'cuda':
+                logger.info(f"  GPU: {torch.cuda.get_device_name(0)}")
+                logger.info(f"  显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            elif DEVICE == 'mps':
+                logger.info(f"  Apple Silicon GPU")
+            else:
+                logger.info(f"CPU 模式")
+            
+            logger.info(f"模型: {self.model_path}")
+            logger.info(f"权重: {self.weights_path}")
+            logger.info(f"Prior: {self.prior_weights}")
+            logger.info(f"Text CFG Scale: {self.text_cond_scale}")
+            logger.info(f"Visual CFG Scale: {self.visual_cond_scale}")
+            
+            # 1. 只加载 Agent 和 MineCLIP（不加载环境）
+            self._agent, self._mineclip, _ = load_mineclip_agent_env(
+                in_model=self.model_path,
+                in_weights=self.weights_path,
+                seed=self.seed,
+                cond_scale=self.text_cond_scale,
+                env_name=self.env_name,
+                env_config=self.env_config,
+                load_env=False  # 不加载环境
+            )
+            
+            # 🔧 包装agent的get_action方法，确保输入tensor是float32
+            original_get_action = self._agent.get_action
+            def get_action_float32(obs, goal_embed):
+                """包装get_action，确保输入是float32"""
+                # 如果goal_embed是numpy，确保是float32
+                if isinstance(goal_embed, np.ndarray) and goal_embed.dtype == np.float16:
+                    goal_embed = goal_embed.astype(np.float32)
+                
+                # 使用原始方法，但在禁用autocast的环境下
+                with th.cuda.amp.autocast(enabled=False):
+                    return original_get_action(obs, goal_embed)
+            
+            self._agent.get_action = get_action_float32
+            
+            # 2. 加载 Prior 模型（官方方式）
+            prior_info = PRIOR_INFO.copy()
+            prior_info['prior_weights'] = self.prior_weights
+            self._prior = load_vae_model(prior_info)
+            logger.info(f"✓ 模型加载完成（Agent + MineCLIP + Prior）")
+            
+            # 3. 加载动作序列（如果提供）
+            if self.replay_actions_file:
+                logger.info(f"  加载动作序列: {self.replay_actions_file}")
+                self.replay_actions = self._load_replay_actions(self.replay_actions_file)
+                logger.info(f"  ✓ 动作序列加载完成 ({len(self.replay_actions)} 个动作)")
+                logger.info(f"  ⚠️ 回放模式：将跳过 STEVE-1 模型推理")
+    
+    def _load_env(self):
+        """
+        延迟加载环境（仅在需要 Policy 执行时调用）
+        """
+        if self._env is None:
+            from src.utils.steve1_mineclip_agent_env_utils import make_env
+            logger.info(f"加载环境: {self.env_name}")
+            if self.env_config:
+                logger.info(f"  环境配置: {self.env_config}")
+            self._env = make_env(self.seed, env_name=self.env_name, env_config=self.env_config)
+            logger.info(f"✓ 环境加载完成")
+    
+    def _load_components(self):
+        """延迟加载所有组件（Agent, MineCLIP, Prior 和环境）"""
+        self._load_models()
+        self._load_env()
+    
+    def _load_replay_actions(self, actions_file: str) -> List[Dict]:
+        """
+        加载动作序列文件（JSON 格式）
+        
+        Args:
+            actions_file: 动作序列文件路径
+        
+        Returns:
+            List[Dict]: 动作列表
+        """
+        actions_path = Path(actions_file)
+        if not actions_path.exists():
+            raise FileNotFoundError(f"动作序列文件不存在: {actions_file}")
+        
+        with open(actions_path, 'r', encoding='utf-8') as f:
+            actions_data = json.load(f)
+        
+        # 提取动作列表
+        actions = []
+        for item in actions_data:
+            action = item['action']
+            
+            # 转换 camera 为 numpy 数组
+            if 'camera' in action and isinstance(action['camera'], list):
+                action['camera'] = np.array(action['camera'])
+            
+            # 处理所有可能是列表的动作字段（MineRL 格式）
+            for key in ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint',
+                        'attack', 'use', 'drop', 'inventory', 'swapHands', 'pickItem', 'ESC']:
+                if key in action and isinstance(action[key], list):
+                    action[key] = action[key][0] if len(action[key]) > 0 else 0
+            
+            # 处理 hotbar 动作
+            for i in range(1, 10):
+                hotbar_key = f'hotbar.{i}'
+                if hotbar_key in action and isinstance(action[hotbar_key], list):
+                    action[hotbar_key] = action[hotbar_key][0] if len(action[hotbar_key]) > 0 else 0
+            
+            actions.append(action)
+        
+        return actions
+    
+    # =========================================================================
+    # 目标接近度计算辅助方法
+    # =========================================================================
+    
+    def _preprocess_frame_for_mineclip(self, frame: np.ndarray) -> np.ndarray:
+        """
+        预处理帧以供 MineCLIP 编码
+        
+        参考 src/utils/generate_visual_embeds_from_frames.py
+        
+        Args:
+            frame: 原始帧 (H, W, 3) RGB 格式
+            
+        Returns:
+            预处理后的帧 (3, 160, 256)
+        """
+        # 确保是 RGB 格式
+        if frame.shape[-1] != 3:
+            raise ValueError(f"Expected RGB frame, got shape {frame.shape}")
+        
+        # 调整大小到 MineCLIP 输入尺寸 (160, 256)
+        frame_resized = cv2.resize(frame, (256, 160))
+        
+        # 转换为 (C, H, W) 格式
+        frame_chw = np.transpose(frame_resized, (2, 0, 1))
+        
+        # 注意：不除以 255.0，保持 [0, 255] 范围（MineCLIP 官方用法）
+        return frame_chw.astype(np.float32)
+    
+    def _encode_video_for_mineclip(self, frames: List[np.ndarray]) -> np.ndarray:
+        """
+        使用 MineCLIP 编码 16 帧视频
+        
+        参考 src/utils/generate_visual_embeds_from_frames.py
+        
+        Args:
+            frames: 16 个预处理后的帧，每帧 (3, 160, 256)
+            
+        Returns:
+            视频嵌入向量 (512,)
+        """
+        if len(frames) != 16:
+            raise ValueError(f"MineCLIP 需要 16 帧，当前 {len(frames)} 帧")
+        
+        # 堆叠帧: (16, 3, 160, 256)
+        video = np.stack(frames, axis=0)
+        
+        # 转换为 tensor: (1, 16, 3, 160, 256)
+        video_tensor = th.from_numpy(video).unsqueeze(0).float()
+        
+        # 移动到正确设备
+        video_tensor = video_tensor.to(DEVICE)
+        
+        # 编码
+        with th.no_grad():
+            embed = self._mineclip.encode_video(video_tensor)
+        
+        return embed.cpu().numpy().flatten()
+    
+    def _compute_goal_progress_metrics(
+        self, 
+        distances: List[float]
+    ) -> Tuple[float, float, float, float]:
+        """
+        从距离序列计算目标接近度指标
+        
+        Args:
+            distances: 每个采样点到目标的距离
+            
+        Returns:
+            (progress_rate, monotonic_rate, initial_distance, final_distance)
+        """
+        if len(distances) < 2:
+            return 0.0, 0.0, 0.0, 0.0
+        
+        initial_dist = distances[0]
+        final_dist = distances[-1]
+        
+        # 进度率: (初始距离 - 最终距离) / 初始距离
+        if initial_dist > 1e-8:
+            progress_rate = (initial_dist - final_dist) / initial_dist
+        else:
+            progress_rate = 0.0
+        
+        # 单调率: 距离递减的步数比例（使用相对容差）
+        distances_arr = np.array(distances)
+        tolerance = np.std(distances_arr) * 0.1 if np.std(distances_arr) > 1e-8 else 0.001
+        improving_steps = sum(
+            1 for i in range(1, len(distances))
+            if distances[i-1] - distances[i] > tolerance
+        )
+        monotonic_rate = improving_steps / (len(distances) - 1)
+        
+        return progress_rate, monotonic_rate, initial_dist, final_dist
+    
+    def evaluate_expert_data(
+        self,
+        task_id: str,
+        samples_dir: Path,
+        goal_embed: Optional[np.ndarray] = None
+    ) -> Dict:
+        """
+        评估专家演示数据：计算专家接近度和动作相似度
+        
+        Args:
+            task_id: 任务ID
+            samples_dir: 样本数据目录 (data/train_samples/{task_id})
+            goal_embed: 目标嵌入（如不提供则从样本目录加载）
+            
+        Returns:
+            Dict containing:
+            - expert_progress_rate: 专家接近度进度率
+            - expert_monotonic_rate: 专家接近度单调率
+            - expert_initial_distance: 专家初始距离
+            - expert_final_distance: 专家最终距离
+            - action_similarity: 动作相似度（如果有动作数据）
+            - has_action_data: 是否有动作数据
+            - n_frames_evaluated: 评估的帧数
+        """
+        import pickle
+        
+        # 确保模型已加载（不需要环境）
+        if self._mineclip is None or self._agent is None:
+            self._load_models()
+        
+        # 查找样本目录
+        task_samples_dir = samples_dir / task_id
+        
+        if not task_samples_dir.exists():
+            return {'enabled': False, 'error': f'No sample directory: {task_samples_dir}'}
+        
+        # 加载目标嵌入（如果未提供）
+        if goal_embed is None:
+            trial_dirs = sorted([d for d in task_samples_dir.iterdir() 
+                               if d.is_dir() and d.name.startswith('trial')])
+            for trial_dir in trial_dirs:
+                embed_file = trial_dir / 'visual_embeds.pkl'
+                if embed_file.exists():
+                    try:
+                        with open(embed_file, 'rb') as f:
+                            goal_embed = pickle.load(f)
+                        if hasattr(goal_embed, 'numpy'):
+                            goal_embed = goal_embed.numpy()
+                        goal_embed = np.squeeze(goal_embed)
+                        break
+                    except Exception as e:
+                        logger.debug(f"加载目标嵌入失败: {e}")
+        
+        if goal_embed is None:
+            return {'enabled': False, 'error': 'No goal embedding found'}
+        
+        # 遍历所有 trial，计算专家指标
+        all_expert_distances = []
+        all_action_similarities = []
+        all_camera_similarities = []
+        all_model_actions = []
+        
+        trial_dirs = sorted([d for d in task_samples_dir.iterdir() 
+                           if d.is_dir() and d.name.startswith('trial')])
+        
+        if not trial_dirs:
+            logger.info(f"  无 trial 目录: {task_samples_dir}")
+            return {'enabled': False, 'error': 'No trial directories'}
+        
+        logger.info(f"评估专家数据: {len(trial_dirs)} 个 trial")
+        
+        # 采样间隔（每 N 帧采样一次，避免处理太慢）
+        SAMPLE_INTERVAL = 10
+        
+        for trial_dir in trial_dirs:
+            # 加载帧文件路径（延迟加载）
+            frames_dir = trial_dir / 'frames'
+            frame_files = []
+            if frames_dir.exists():
+                frame_files = sorted(frames_dir.glob('*.png'))
+            
+            if not frame_files:
+                logger.debug(f"    {trial_dir.name}: 无帧文件")
+                continue
+            
+            # 加载动作（可选）
+            actions = []
+            actions_file = trial_dir / 'actions.json'
+            if actions_file.exists():
+                with open(actions_file, 'r') as f:
+                    actions = json.load(f)
+            
+            has_actions = len(actions) >= len(frame_files)
+            
+            # 采样帧索引
+            sample_indices = list(range(0, len(frame_files), SAMPLE_INTERVAL))
+            # 确保包含最后一帧
+            if sample_indices[-1] != len(frame_files) - 1:
+                sample_indices.append(len(frame_files) - 1)
+            
+            logger.info(f"  {trial_dir.name}: {len(frame_files)} 帧, 采样 {len(sample_indices)} 帧")
+            
+            # 计算采样帧的专家接近度
+            frame_buffer = []
+            for i, frame_idx in enumerate(sample_indices):
+                # 延迟加载帧
+                frame = cv2.imread(str(frame_files[frame_idx]))
+                if frame is None:
+                    continue
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # 预处理帧
+                preprocessed = self._preprocess_frame_for_mineclip(frame)
+                frame_buffer.append(preprocessed)
+                
+                # 构建 16 帧滑动窗口
+                if len(frame_buffer) >= 16:
+                    window = frame_buffer[-16:]
+                else:
+                    window = [frame_buffer[0]] * (16 - len(frame_buffer)) + frame_buffer
+                
+                # 编码并计算距离
+                frame_embed = self._encode_video_for_mineclip(window)
+                distance = cosine_distance(frame_embed, goal_embed)
+                all_expert_distances.append(float(distance))
+                
+                # 计算动作相似度（如果有动作数据）
+                if has_actions and frame_idx < len(actions):
+                    expert_action = actions[frame_idx]
+                    
+                    # 获取模型预测的动作
+                    with th.no_grad():
+                        obs_for_agent = {'pov': frame}
+                        model_action = self._agent.get_action(
+                            obs_for_agent, 
+                            goal_embed[np.newaxis, :]
+                        )
+                    
+                    # 计算 Jaccard 相似度
+                    similarity = self._compute_action_jaccard(model_action, expert_action)
+                    all_action_similarities.append(similarity)
+                    
+                    # 计算 Camera 相似度
+                    camera_sim = self._compute_camera_similarity(model_action, expert_action)
+                    all_camera_similarities.append(camera_sim)
+                    
+                    # 收集模型预测的动作用于计算熵、平滑度、覆盖率
+                    all_model_actions.append(model_action)
+        
+        if not all_expert_distances:
+            return {'enabled': False, 'error': 'No frames processed'}
+        
+        # 计算专家接近度指标
+        progress_rate, monotonic_rate, initial_dist, final_dist = \
+            self._compute_goal_progress_metrics(all_expert_distances)
+        
+        # 计算动作相似度
+        has_action_data = len(all_action_similarities) > 0
+        action_similarity = float(np.mean(all_action_similarities)) if has_action_data else 0.0
+        camera_similarity = float(np.mean(all_camera_similarities)) if all_camera_similarities else 0.0
+        
+        # 计算额外的 Policy 指标
+        action_entropy = self._compute_action_entropy(all_model_actions) if all_model_actions else 0.0
+        temporal_smoothness = self._compute_temporal_smoothness(all_model_actions) if all_model_actions else 0.0
+        action_coverage = self._compute_action_coverage(all_model_actions) if all_model_actions else 0.0
+        
+        # 收集动作分布数据（用于可视化）
+        expert_action_dist = {}
+        model_action_dist = {}
+        expert_actions_list = []
+        model_actions_list = []
+        
+        # 处理所有帧的动作数据
+        for trial_dir in trial_dirs:
+            actions_file = trial_dir / 'actions.json'
+            if actions_file.exists():
+                with open(actions_file, 'r') as f:
+                    trial_actions = json.load(f)
+                for action in trial_actions:
+                    dominant = self._get_dominant_action(action)
+                    expert_action_dist[dominant] = expert_action_dist.get(dominant, 0) + 1
+                    expert_actions_list.append(dominant)
+        
+        # 模型预测动作分布
+        for action in all_model_actions:
+            dominant = self._get_dominant_action(action)
+            model_action_dist[dominant] = model_action_dist.get(dominant, 0) + 1
+            model_actions_list.append(dominant)
+        
+        # 归一化分布
+        expert_total = sum(expert_action_dist.values()) or 1
+        model_total = sum(model_action_dist.values()) or 1
+        expert_action_dist = {k: v / expert_total for k, v in expert_action_dist.items()}
+        model_action_dist = {k: v / model_total for k, v in model_action_dist.items()}
+        
+        return {
+            'enabled': True,
+            'expert_progress_rate': progress_rate,
+            'expert_monotonic_rate': monotonic_rate,
+            'expert_initial_distance': initial_dist,
+            'expert_final_distance': final_dist,
+            'action_similarity': action_similarity,
+            'camera_similarity': camera_similarity,
+            'action_entropy': action_entropy,
+            'temporal_smoothness': temporal_smoothness,
+            'action_coverage': action_coverage,
+            'has_action_data': has_action_data,
+            'n_frames_evaluated': len(all_expert_distances),
+            # 🆕 可视化数据
+            'expert_distances': all_expert_distances,
+            'frame_similarities': all_action_similarities,
+            'camera_similarities': all_camera_similarities,
+            'expert_action_distribution': expert_action_dist,
+            'model_action_distribution': model_action_dist,
+            'expert_actions_list': expert_actions_list[-len(model_actions_list):] if expert_actions_list else [],  # 对齐长度
+            'model_actions_list': model_actions_list,
+        }
+    
+    def _compute_action_jaccard(self, pred_action: Dict, expert_action: Dict) -> float:
+        """计算两个动作的 Jaccard 相似度"""
+        discrete_keys = ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 'attack', 'use']
+        
+        pred_active = set()
+        expert_active = set()
+        
+        for key in discrete_keys:
+            pred_val = pred_action.get(key, 0)
+            expert_val = expert_action.get(key, 0)
+            
+            # 处理列表格式
+            if isinstance(pred_val, (list, np.ndarray)):
+                pred_val = pred_val[0] if len(pred_val) > 0 else 0
+            if isinstance(expert_val, (list, np.ndarray)):
+                expert_val = expert_val[0] if len(expert_val) > 0 else 0
+            
+            if pred_val:
+                pred_active.add(key)
+            if expert_val:
+                expert_active.add(key)
+        
+        # Jaccard 相似度
+        if not pred_active and not expert_active:
+            return 1.0  # 都是空集
+        
+        intersection = len(pred_active & expert_active)
+        union = len(pred_active | expert_active)
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def _compute_camera_similarity(self, pred_action: Dict, expert_action: Dict) -> float:
+        """计算 Camera 相似度"""
+        pred_camera = pred_action.get('camera', [0, 0])
+        expert_camera = expert_action.get('camera', [0, 0])
+        
+        # 处理列表格式
+        if isinstance(pred_camera, np.ndarray):
+            pred_camera = pred_camera.tolist()
+        if isinstance(expert_camera, np.ndarray):
+            expert_camera = expert_camera.tolist()
+        
+        if not pred_camera or not expert_camera:
+            return 0.0
+        
+        # 计算余弦相似度
+        pred_vec = np.array(pred_camera[:2])
+        expert_vec = np.array(expert_camera[:2])
+        
+        pred_norm = np.linalg.norm(pred_vec)
+        expert_norm = np.linalg.norm(expert_vec)
+        
+        if pred_norm < 1e-8 and expert_norm < 1e-8:
+            return 1.0  # 都是零向量
+        if pred_norm < 1e-8 or expert_norm < 1e-8:
+            return 0.0  # 一个是零向量
+        
+        cos_sim = np.dot(pred_vec, expert_vec) / (pred_norm * expert_norm)
+        return float(max(0, cos_sim))  # 限制在 [0, 1]
+    
+    def _get_dominant_action(self, action: Dict) -> str:
+        """
+        获取动作的主要类别
+        
+        优先级: attack > use > jump > movement > idle
+        """
+        discrete_keys = ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 'attack', 'use']
+        
+        # 收集激活的动作
+        active = []
+        for key in discrete_keys:
+            val = action.get(key, 0)
+            if isinstance(val, (list, np.ndarray)):
+                val = val[0] if len(val) > 0 else 0
+            if val:
+                active.append(key)
+        
+        # 优先级判断
+        if 'attack' in active:
+            return 'attack'
+        if 'use' in active:
+            return 'use'
+        if 'jump' in active:
+            return 'jump'
+        if 'forward' in active:
+            return 'forward'
+        if 'back' in active:
+            return 'back'
+        if 'left' in active:
+            return 'left'
+        if 'right' in active:
+            return 'right'
+        if 'sneak' in active:
+            return 'sneak'
+        if 'sprint' in active:
+            return 'sprint'
+        
+        # 检查 camera 动作
+        camera = action.get('camera', [0, 0])
+        if isinstance(camera, np.ndarray):
+            camera = camera.tolist()
+        if isinstance(camera, list) and len(camera) >= 2:
+            if abs(camera[0]) > 1 or abs(camera[1]) > 1:
+                return 'camera'
+        
+        return 'idle'
+    
+    def _compute_action_entropy(self, actions: List[Dict]) -> float:
+        """计算动作熵（预测动作的多样性）"""
+        if not actions:
+            return 0.0
+        
+        discrete_keys = ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 'attack', 'use']
+        
+        # 统计每个动作的激活次数
+        action_counts = {key: 0 for key in discrete_keys}
+        total_activations = 0
+        
+        for action in actions:
+            for key in discrete_keys:
+                val = action.get(key, 0)
+                if isinstance(val, (list, np.ndarray)):
+                    val = val[0] if len(val) > 0 else 0
+                if val:
+                    action_counts[key] += 1
+                    total_activations += 1
+        
+        if total_activations == 0:
+            return 0.0
+        
+        # 计算熵
+        entropy = 0.0
+        for key in discrete_keys:
+            if action_counts[key] > 0:
+                p = action_counts[key] / total_activations
+                entropy -= p * np.log2(p)
+        
+        return float(entropy)
+    
+    def _compute_temporal_smoothness(self, actions: List[Dict]) -> float:
+        """计算时序平滑度（连续相同动作的比例）"""
+        if len(actions) < 2:
+            return 1.0
+        
+        discrete_keys = ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 'attack', 'use']
+        
+        same_count = 0
+        for i in range(1, len(actions)):
+            prev_action = actions[i - 1]
+            curr_action = actions[i]
+            
+            is_same = True
+            for key in discrete_keys:
+                prev_val = prev_action.get(key, 0)
+                curr_val = curr_action.get(key, 0)
+                
+                if isinstance(prev_val, (list, np.ndarray)):
+                    prev_val = prev_val[0] if len(prev_val) > 0 else 0
+                if isinstance(curr_val, (list, np.ndarray)):
+                    curr_val = curr_val[0] if len(curr_val) > 0 else 0
+                
+                if bool(prev_val) != bool(curr_val):
+                    is_same = False
+                    break
+            
+            if is_same:
+                same_count += 1
+        
+        return float(same_count / (len(actions) - 1))
+    
+    def _compute_action_coverage(self, actions: List[Dict]) -> float:
+        """计算动作覆盖率（使用的动作类型占比）"""
+        if not actions:
+            return 0.0
+        
+        discrete_keys = ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 'attack', 'use']
+        
+        used_actions = set()
+        for action in actions:
+            for key in discrete_keys:
+                val = action.get(key, 0)
+                if isinstance(val, (list, np.ndarray)):
+                    val = val[0] if len(val) > 0 else 0
+                if val:
+                    used_actions.add(key)
+        
+        return float(len(used_actions) / len(discrete_keys))
+    
+    def _rebuild_environment(self):
+        """
+        完全重建Minecraft环境，释放内存
+        
+        适用场景: 内存累积到临界点时（每15次trial）
+        时间开销: ~18秒
+        
+        效果:
+        - Java内存完全重置到2.6GB
+        - 清理所有世界数据
+        - 完全避免socket timeout
+        - 保证环境状态干净
+        """
+        logger.info("  ♻️  完全重建环境...")
+        try:
+            # 关闭旧环境
+            if self._env is not None:
+                logger.info("    关闭旧环境...")
+                self._env.close()
+            
+            # 清理saves
+            logger.info("    清理MineDojo saves...")
+            self._clean_minedojo_saves()
+            
+            # 等待Java进程释放资源（优化为2秒）
+            import time
+            time.sleep(2)
+            
+            # 重新创建环境（保持agent和mineclip不变）
+            logger.info("    重新创建Minecraft环境...")
+            self._env = make_env(
+                seed=self.seed,
+                env_name=self.env_name,
+                env_config=self.env_config
+            )
+            logger.info("  ✓ 环境已完全重建，内存重置到2.6GB")
+        except Exception as e:
+            logger.error(f"  ⚠️ 重建环境失败: {e}")
+            import traceback
+            traceback.print_exc()
+            raise  # 重建失败则停止，不继续使用脏环境
+    
+    def _clean_minedojo_saves(self):
+        """清理MineDojo saves目录"""
+        import shutil
+        saves_path = Path.home() / ".minedojo" / "saves"
+        if saves_path.exists():
+            try:
+                for item in saves_path.iterdir():
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                logger.debug("    ✓ saves目录已清理")
+            except Exception as e:
+                logger.warning(f"    ⚠️ 清理saves失败: {e}")
+    
+    def _cleanup_after_reset(self):
+        """
+        Reset后的轻量清理（替代完全重建）
+        
+        适用场景: 大部分trial，减少时间开销
+        时间开销: ~2秒（vs 完全重建的18秒）
+        
+        操作:
+        - 清理saves目录（释放磁盘和部分内存引用）
+        - 触发Python GC
+        - 尝试触发Java GC（如果jcmd可用）
+        
+        效果:
+        - 减缓内存增长（从100MB/trial降到40-60MB/trial）
+        - 延长重建间隔（可以15-20次才重建一次）
+        - 显著提升效率（时间节省89%）
+        """
+        import gc
+        import subprocess
+        
+        # 1. 清理saves目录
+        self._clean_minedojo_saves()
+        
+        # 2. 触发Python GC
+        gc.collect()
+        
+        # 3. 尝试触发Java GC（可选，如果jcmd可用）
+        try:
+            # 获取Java进程PID
+            result = subprocess.run(
+                ["pgrep", "-f", "java.*Minecraft"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+            if result.returncode == 0:
+                java_pids = result.stdout.strip().split('\n')
+                for pid in java_pids:
+                    if pid and pid.strip():
+                        # 触发Java GC
+                        subprocess.run(
+                            ["jcmd", pid.strip(), "GC.run"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=1
+                        )
+                logger.debug("  🧹 已清理saves并触发GC")
+        except:
+            # jcmd不可用或失败，只记录debug
+            logger.debug("  🧹 已清理saves（Java GC不可用）")
+    
+    def evaluate_task(
+        self,
+        task_id: str,
+        language: str = "en",
+        n_trials: int = 10,
+        max_steps: int = 1000,
+        instruction: Optional[str] = None,
+        output_dir: Optional[Path] = None,
+        task_index: Optional[int] = None,  # 任务索引（用于进度显示）
+        total_tasks: Optional[int] = None,  # 总任务数（用于进度显示）
+        env_name: Optional[str] = None,     # 覆盖环境名称
+        env_config: Optional[Dict] = None,  # 覆盖环境配置
+    ) -> TaskResult:
+        """
+        评估单个任务
+        
+        Args:
+            task_id: 任务ID (如 "simple_survival", "chop_tree")
+            language: 语言类型 ('en', 'zh_auto', 'zh_manual')
+            n_trials: 试验次数
+            max_steps: 最大步数
+            instruction: 自定义指令（如果不提供，使用默认）
+            output_dir: 输出目录（用于保存视频等）
+            env_name: 覆盖环境名称（如果提供）
+            env_config: 覆盖环境配置（如果提供）
+            
+        Returns:
+            TaskResult: 任务评估结果
+        """
+        # 检查是否需要更新环境配置
+        need_rebuild = False
+        if env_name is not None and env_name != self.env_name:
+            logger.info(f"环境名称变更: {self.env_name} -> {env_name}")
+            self.env_name = env_name
+            need_rebuild = True
+        if env_config is not None and env_config != self.env_config:
+            logger.info(f"环境配置变更: {env_config}")
+            self.env_config = env_config
+            need_rebuild = True
+        
+        # 加载组件
+        self._load_components()
+        
+        # 如果配置变更，强制重建环境
+        if need_rebuild and self._env is not None:
+            logger.info("配置变更，重建环境...")
+            self._rebuild_environment()
+        
+        # 🔑 如果是中文指令，自动翻译成英文
+        original_instruction = instruction
+        if language in ["zh", "zh_auto", "zh_manual"]:
+            logger.info(f"检测到中文指令，执行翻译...")
+            logger.info(f"  原始指令: {instruction}")
+            instruction = self.translator.translate(instruction)
+            logger.info(f"  翻译结果: {instruction}")
+        
+        logger.info(f"语言: {language}")
+        logger.info(f"指令: {original_instruction}")
+        if original_instruction != instruction:
+            logger.info(f"  翻译后: {instruction}")
+        logger.info(f"试验次数: {n_trials}")
+        logger.info(f"最大步数: {max_steps}")
+        
+        # 检查点恢复支持
+        start_trial_idx = 0
+        trials = []
+        
+        if (self.checkpoint_manager and 
+            self.checkpoint_config.enabled and 
+            self.checkpoint_config.auto_resume):
+            checkpoint_data = self.checkpoint_manager.load_checkpoint(task_id)
+            if checkpoint_data and checkpoint_data['total_trials'] == n_trials:
+                logger.info("📥 发现检查点，恢复进度...")
+                trials = self.checkpoint_manager.restore_trials(checkpoint_data)
+                start_trial_idx = len(trials)
+                logger.info(f"  已完成: {start_trial_idx}/{n_trials} trials")
+                if start_trial_idx >= n_trials:
+                    logger.info("✅ 所有trial已完成，无需继续")
+                    return TaskResult(
+                        task_id=task_id,
+                        language=language,
+                        instruction=instruction,
+                        trials=trials
+                    )
+        
+        # 运行多次试验（不使用独立的trial进度条）
+        for trial_idx in range(start_trial_idx, n_trials):
+            # 构建进度信息
+            if task_index is not None and total_tasks is not None:
+                progress_info = f"Task {task_index}/{total_tasks}, Trial {trial_idx + 1}/{n_trials}"
+            else:
+                progress_info = f"Trial {trial_idx + 1}/{n_trials}"
+            
+            logger.info(f"  {progress_info}...")
+            
+            # 环境重建策略（可配置）
+            # - rebuild_interval=0: 每次都完全重建（最稳定，最慢）
+            # - rebuild_interval=15: 每15次重建，其他轻量清理（推荐）
+            # - rebuild_interval=-1: 从不重建，只轻量清理（最快，可能不稳定）
+            if trial_idx > start_trial_idx:
+                if self.rebuild_interval == 0:
+                    # 每次都完全重建（最稳定）
+                    self._rebuild_environment()
+                elif self.rebuild_interval > 0 and trial_idx % self.rebuild_interval == 0:
+                    # 定期完全重建（推荐）
+                    logger.info(f"  ♻️  定期重建环境（第{trial_idx}次，防止内存累积）")
+                    self._rebuild_environment()
+                else:
+                    # 轻量清理（大部分情况）
+                    self._cleanup_after_reset()
+            
+            trial_result = self._run_single_trial(
+                task_id=task_id,
+                instruction=instruction,
+                max_steps=max_steps,
+                trial_idx=trial_idx + 1,  # 1-based for display
+                n_trials=n_trials,  # 传递总试验数
+                output_dir=output_dir,  # 传递输出目录
+                task_index=task_index,  # 传递任务索引
+                total_tasks=total_tasks,  # 传递总任务数
+                current_trial=trial_idx + 1,  # 当前是第几个trial
+            )
+            
+            trials.append(trial_result)
+            
+            logger.info(f"结果: {'✅ 成功' if trial_result.success else '❌ 失败'}, "
+                       f"步数: {trial_result.steps}, "
+                       f"时间: {trial_result.time_seconds:.1f}s")
+            
+            # 保存检查点策略
+            if self.checkpoint_manager and self.checkpoint_config.enabled:
+                # 计算实际完成的trial数（考虑恢复的情况）
+                completed_count = len(trials)
+                should_save = False
+                
+                # 情况1: 定期保存（每N个trial）
+                if completed_count % self.checkpoint_config.save_interval == 0:
+                    should_save = True
+                    logger.debug(f"  [检查点] 达到保存间隔: {completed_count} % {self.checkpoint_config.save_interval} == 0")
+                
+                # 情况2: 最后一个trial
+                if trial_idx + 1 == n_trials:
+                    should_save = True
+                    logger.debug(f"  [检查点] 最后一个trial: {trial_idx + 1} == {n_trials}")
+                
+                # 情况3: 保险策略 - 每个trial都保存（防止Ctrl+C丢失进度）
+                # 虽然增加了I/O开销，但对于长时间评估更安全
+                # 检查点文件很小（每个trial约100-200字节），影响可忽略
+                should_save = True
+                
+                if should_save:
+                    logger.debug(f"  [检查点] 保存条件满足，已完成: {completed_count}/{n_trials}")
+                    self.checkpoint_manager.save_checkpoint(
+                        task_id=task_id,
+                        completed_trials=trials,
+                        total_trials=n_trials,
+                        metadata={
+                            "language": language,
+                            "instruction": instruction,
+                            "max_steps": max_steps
+                        }
+                    )
+
+        # 构建任务结果
+        task_result = TaskResult(
+            task_id=task_id,
+            language=language,
+            instruction=original_instruction,  # 保存原始指令
+            trials=trials
+        )
+
+        logger.info(f"成功率 {task_result.success_rate*100:.1f}%")
+        
+        # 清理检查点（如果配置为完成后清理）
+        if (self.checkpoint_manager and 
+            self.checkpoint_config.enabled and 
+            self.checkpoint_config.cleanup_on_complete):
+            self.checkpoint_manager.delete_checkpoint(task_id)
+        
+        return task_result
+    
+    def _run_single_trial(
+        self,
+        task_id: str,
+        instruction: str,
+        max_steps: int,
+        trial_idx: int,
+        n_trials: int,  # 总试验数
+        output_dir: Optional[Path] = None,  # 输出目录
+        task_index: Optional[int] = None,  # 任务索引
+        total_tasks: Optional[int] = None,  # 总任务数
+        current_trial: Optional[int] = None,  # 当前第几个trial
+    ) -> TrialResult:
+        """
+        运行单次试验，可选录制视频和生成详细报告
+        
+        Args:
+            task_id: 任务ID
+            instruction: 指令文本
+            max_steps: 最大步数
+            trial_idx: 试验索引（从1开始）
+            n_trials: 总试验数
+            output_dir: 输出目录（用于保存视频和报告）
+            enable_report: 启用详细报告（保存动作、截图、生成HTML报告）
+            
+        Returns:
+            TrialResult: 试验结果（不包含frames）
+        """
+        start_time = time.time()
+        frames = [] if self.video_size else None  # 只在需要时收集帧
+        
+        # 报告模式：收集动作和帧
+        report_actions = [] if self.enable_report else None
+        report_frames = [] if self.enable_report else None
+        
+        # 🆕 记录每步的奖励和动作（用于 Policy 六维度评估）
+        step_rewards = []
+        step_actions = []
+        
+        # 🆕 目标接近度计算数据
+        goal_distances = []
+        goal_sample_indices = []
+        goal_frame_buffer = []  # 用于构建 16 帧滑动窗口
+        goal_embed = None  # 目标嵌入（将在执行过程中更新）
+        
+        try:
+            # 使用 Prior 编码指令（官方方式）
+            logger.debug(f"  使用 Prior 编码指令: '{instruction}'")
+            with th.no_grad():
+                # 使用官方的 get_prior_embed 函数
+                prompt_embed = get_prior_embed(
+                    instruction,
+                    self._mineclip,
+                    self._prior,
+                    DEVICE
+                )
+                # 🔧 修复dtype问题: 确保嵌入是float32（针对4090等支持混合精度的GPU）
+                if hasattr(prompt_embed, 'dtype') and prompt_embed.dtype == th.float16:
+                    logger.debug(f"  检测到 float16 嵌入，转换为 float32")
+                    prompt_embed = prompt_embed.float()
+                
+                # 转换为 numpy（MineRLConditionalAgent 需要）
+                prompt_embed_np = prompt_embed.cpu().numpy() if hasattr(prompt_embed, 'cpu') else prompt_embed
+                
+                # 🆕 保存为目标嵌入（用于目标接近度计算）
+                goal_embed = prompt_embed_np.flatten() if GOAL_PROGRESS_ENABLED else None
+            
+            # 重置环境
+            obs = self._env.reset()
+            
+            # 注意: 官方实现中没有显式调用 agent.reset()
+            # Agent 的内部状态（LSTM）会在第一次调用时自动初始化
+            
+            # 运行 episode
+            done = False
+            success = False
+            steps = 0
+            total_reward = 0.0
+            
+            # 创建包含三层信息的进度条描述
+            # 构建完整的层级信息
+            if task_index is not None and total_tasks is not None:
+                # 多任务场景：显示3层信息
+                task_short = task_id[:15] + '...' if len(task_id) > 15 else task_id
+                desc = f"📦{task_index}/{total_tasks} | 🎯{current_trial}/{n_trials} | 🏃Trial{trial_idx}"
+            else:
+                # 单任务场景：显示2层信息
+                desc = f"🎯{current_trial}/{n_trials} | 🏃Trial{trial_idx}"
+            
+            with tqdm(
+                total=max_steps, 
+                desc=desc,
+                unit="step",
+                position=0,  # 所有信息在一行，使用position=0
+                leave=False,
+                file=sys.stderr,
+                dynamic_ncols=True,
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]'
+            ) as pbar:
+                while not done and steps < max_steps:
+                    # 获取动作
+                    if self.replay_actions:
+                        # 🎬 回放模式：从预加载的动作序列中获取动作
+                        if steps < len(self.replay_actions):
+                            action = self.replay_actions[steps]
+                        else:
+                            # 动作序列已用完，提前结束
+                            logger.info(f"  ⚠️ 动作序列已用完 (共 {len(self.replay_actions)} 个动作)")
+                            break
+                    else:
+                        # 🤖 正常模式：使用 STEVE-1 模型推理
+                        # wrapper已经处理了dtype和autocast，直接调用即可
+                        with th.no_grad():
+                            action = self._agent.get_action(obs, prompt_embed_np)
+                    
+                    # 📊 报告模式：收集动作
+                    if self.enable_report:
+                        report_actions.append(action.copy() if isinstance(action, dict) else action)
+                    
+                    # 执行动作
+                    obs, reward, done, info = self._env.step(action)
+                    
+                    # 📊 报告模式：保存帧
+                    if self.enable_report and 'pov' in obs:
+                        report_frames.append(obs['pov'].copy())
+                    
+                    # 累积奖励（环境自己计算奖励）
+                    total_reward += reward
+                    steps += 1
+                    
+                    # 🆕 记录每步数据（用于 Policy 六维度评估）
+                    step_rewards.append(float(reward))
+                    step_actions.append(action.copy() if isinstance(action, dict) else action)
+                    
+                    # 🆕 目标接近度计算（按采样率采集）
+                    if GOAL_PROGRESS_ENABLED and goal_embed is not None and 'pov' in obs:
+                        # 预处理帧并加入缓冲区
+                        preprocessed = self._preprocess_frame_for_mineclip(obs['pov'])
+                        goal_frame_buffer.append(preprocessed)
+                        
+                        # 保持缓冲区最多 16 帧
+                        if len(goal_frame_buffer) > 16:
+                            goal_frame_buffer.pop(0)
+                        
+                        # 按采样率计算目标距离
+                        if steps >= 16 and steps % GOAL_PROGRESS_SAMPLE_INTERVAL == 0:
+                            # 构建 16 帧窗口
+                            if len(goal_frame_buffer) >= 16:
+                                window_frames = goal_frame_buffer[-16:]
+                            else:
+                                # 填充不足的帧
+                                window_frames = goal_frame_buffer.copy()
+                                while len(window_frames) < 16:
+                                    window_frames.insert(0, goal_frame_buffer[0])
+                            
+                            try:
+                                # 编码视频并计算距离
+                                frame_embed = self._encode_video_for_mineclip(window_frames)
+                                dist = cosine_distance(frame_embed, goal_embed)
+                                goal_distances.append(float(dist))
+                                goal_sample_indices.append(steps)
+                            except Exception as e:
+                                logger.debug(f"    目标接近度计算失败 (step {steps}): {e}")
+                    
+                    # 更新进度条
+                    pbar.update(1)
+                    if reward > 0:
+                        pbar.set_postfix({'reward': f'{total_reward:.1f}'})
+                    
+                    # 收集视频帧（如果启用录制）
+                    if frames is not None and 'pov' in obs:
+                        frame = obs['pov']
+                        # 使用 video_size 调整大小
+                        frame_resized = cv2.resize(frame, self.video_size)
+                        frames.append(frame_resized)
+                    
+                    # 记录奖励（用于调试）
+                    if reward > 0:
+                        logger.debug(f"    Step {steps}: reward={reward:.3f}")
+                    
+                    # 可选渲染
+                    if self.enable_render:
+                        self._env.render()
+            
+            # 调试：任务结束时打印详细信息（无论done是True还是超时）
+            # 打印基本信息
+            logger.info(f"总奖励: {total_reward}")
+            logger.info(f"最后done: {done}")
+            
+            # 提取最终库存（用于报告）
+            final_inventory = {}
+            if 'inventory' in obs:
+                for key, value in obs['inventory'].items():
+                    # 处理 numpy array
+                    if hasattr(value, 'item'):
+                        value = value.item()
+                    value = int(value)  # 确保是整数
+                    if value > 0:
+                        final_inventory[key] = value
+            
+            if final_inventory:
+                logger.info("最终库存:")
+                for item, count in final_inventory.items():
+                    logger.info(f"  {item}: {count}")
+            else:
+                logger.info("库存为空")            # 打印结束原因
+            if steps >= max_steps:
+                logger.info(f"结束原因: 达到最大步数 ({steps})")
+            elif done and total_reward > 0:
+                logger.info(f"结束原因: 任务目标达成 (总奖励: {total_reward})")
+            elif done:
+                logger.info(f"结束原因: 任务提前结束但无奖励 (done=True)")
+            else:
+                logger.info(f"❓ 结束原因: 未知")
+            
+            # 判断成功
+            # 1. 如果 done=True 且有奖励，说明任务完成
+            # 2. 对于 Survival 类任务，能持续运行较长时间即为成功
+            if done and total_reward > 0:
+                success = True
+            # else:
+            #     success = steps >= max_steps * 0.8
+            
+            time_seconds = time.time() - start_time
+            
+            # 保存视频（如果录制了）
+            if frames and output_dir:
+                try:
+                    from steve1.utils.video_utils import save_frames_as_video
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    video_path = output_dir / f"trial_{trial_idx}.mp4"
+                   #logger.info(f"  保存视频: trial_{trial_idx}.mp4 ({len(frames)} 帧)")
+                    save_frames_as_video(frames, str(video_path), 20, to_bgr=True)
+                    logger.info(f"  ✓ 视频已保存: {video_path.name}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ 视频保存失败: {e}")
+                finally:
+                    # 清空 frames 释放内存
+                    frames.clear()
+            
+            # 📊 报告模式：保存动作和帧，生成HTML报告
+            if self.enable_report and report_actions and report_frames:
+                self._save_report_data(
+                    report_actions, 
+                    report_frames, 
+                    output_dir or Path("/tmp/steve1_reports"), 
+                    task_id, 
+                    trial_idx
+                )
+            
+            # 🆕 计算目标接近度指标
+            goal_progress_rate = 0.0
+            goal_monotonic_rate = 0.0
+            goal_initial_distance = 0.0
+            goal_final_distance = 0.0
+            
+            if GOAL_PROGRESS_ENABLED and goal_distances:
+                goal_progress_rate, goal_monotonic_rate, goal_initial_distance, goal_final_distance = \
+                    self._compute_goal_progress_metrics(goal_distances)
+                logger.info(f"目标接近度: 进度率={goal_progress_rate:+.1%}, "
+                          f"单调率={goal_monotonic_rate:.1%}, "
+                          f"初始距离={goal_initial_distance:.4f}, "
+                          f"最终距离={goal_final_distance:.4f}")
+            
+            return TrialResult(
+                task_id=task_id,
+                language="",  # 将在外层填充
+                instruction=instruction,
+                success=success,
+                steps=steps,
+                time_seconds=time_seconds,
+                final_inventory=final_inventory,
+                actions=step_actions,  # 🆕 返回动作序列
+                rewards=step_rewards,  # 🆕 返回奖励序列
+                total_reward=total_reward,  # 🆕 返回总奖励
+                # 🆕 目标接近度数据
+                goal_distances=goal_distances,
+                goal_progress_rate=goal_progress_rate,
+                goal_monotonic_rate=goal_monotonic_rate,
+                goal_initial_distance=goal_initial_distance,
+                goal_final_distance=goal_final_distance,
+                goal_sample_indices=goal_sample_indices
+            )
+            
+        except Exception as e:
+            logger.error(f"Trial {trial_idx} 执行失败: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 如果录制了视频但出错，也尝试保存（可能部分帧已收集）
+            if frames and output_dir:
+                try:
+                    from steve1.utils.video_utils import save_frames_as_video
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    video_path = output_dir / f"trial_{trial_idx}.mp4"
+                    if frames:
+                        logger.info(f"  保存部分视频: trial_{trial_idx}.mp4 ({len(frames)} 帧)")
+                        save_frames_as_video(frames, str(video_path), 20, to_bgr=True)
+                    frames.clear()
+                except Exception as save_error:
+                    logger.warning(f"  ⚠ 视频保存失败: {save_error}")
+            
+            time_seconds = time.time() - start_time
+            
+            return TrialResult(
+                task_id=task_id,
+                language="",
+                instruction=instruction,
+                success=False,
+                steps=0,
+                time_seconds=time_seconds,
+                final_inventory={},
+                actions=[],  # 空动作序列
+                rewards=[],  # 空奖励序列
+                total_reward=0.0,
+                # 🆕 空的目标接近度数据
+                goal_distances=[],
+                goal_progress_rate=0.0,
+                goal_monotonic_rate=0.0,
+                goal_initial_distance=0.0,
+                goal_final_distance=0.0,
+                goal_sample_indices=[]
+            )
+    
+    def _clean_minedojo_saves(self):
+        """清理 MineDojo 的 saves 目录"""
+        import shutil
+        import sys
+        from pathlib import Path
+        
+        try:
+            # MineDojo saves 目录位于其安装路径下的 Malmo/Minecraft/run/saves/
+            minedojo_path = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages" / "minedojo"
+            saves_path = minedojo_path / "sim" / "Malmo" / "Minecraft" / "run" / "saves"
+            
+            if not saves_path.exists():
+                return
+            
+            # 统计删除前的大小
+            total_size = 0
+            save_count = 0
+            for save_dir in saves_path.iterdir():
+                if save_dir.is_dir():
+                    save_count += 1
+                    for file in save_dir.rglob('*'):
+                        if file.is_file():
+                            total_size += file.stat().st_size
+            
+            if save_count == 0:
+                return
+            
+            # 删除所有存档
+            for save_dir in saves_path.iterdir():
+                if save_dir.is_dir():
+                    shutil.rmtree(save_dir)
+            
+            freed_mb = total_size / (1024 * 1024)
+            logger.info(f"  ✓ 已清理 {save_count} 个 MineDojo 存档，释放 {freed_mb:.1f} MB 空间")
+            
+        except Exception as e:
+            pass  # 静默失败
+    
+    def close(self):
+        """清理资源，释放内存"""
+        if self._env is not None:
+            try:
+                self._env.close()
+                logger.debug("✓ 环境已关闭")
+            except Exception as e:
+                logger.warning(f"关闭环境时出错: {e}")
+            finally:
+                self._env = None
+        
+        # 清理 MineRL saves 存档（防止磁盘空间积累）
+        try:
+            from src.utils.minerl_cleanup import clean_minerl_saves
+            removed_count, freed_mb = clean_minerl_saves()
+            if removed_count > 0:
+                logger.info(f"  ✓ 已清理 {removed_count} 个 MineRL 存档，释放 {freed_mb:.1f} MB 空间")
+        except Exception as e:
+            logger.warning(f"清理 MineRL 存档时出错: {e}")
+        
+        # 释放模型引用，帮助垃圾回收
+        if self._agent is not None:
+            self._agent = None
+        if self._mineclip is not None:
+            self._mineclip = None
+        if self._prior is not None:
+            self._prior = None
+    
+    def _save_report_data(
+        self, 
+        actions: List[Dict], 
+        frames: List[np.ndarray], 
+        output_dir: Path, 
+        task_id: str, 
+        trial_idx: int
+    ):
+        """
+        保存详细报告数据（动作序列、截图、HTML报告）
+        
+        Args:
+            actions: 动作列表
+            frames: 帧列表 (POV 图像)
+            output_dir: 输出目录
+            task_id: 任务ID
+            trial_idx: Trial 索引
+        """
+        import json
+        from PIL import Image
+        
+        # 创建报告目录
+        report_dir = output_dir / f"report_{task_id}_trial{trial_idx}"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        
+        #logger.info(f"  📊 保存报告数据到: {report_dir}")
+        
+        # 1. 保存动作序列为 JSON
+        actions_file = report_dir / "actions.json"
+        try:
+            # 转换动作为可序列化格式
+            actions_serializable = []
+            for i, action in enumerate(actions):
+                action_dict = {}
+                for key, value in action.items():
+                    if isinstance(value, np.ndarray):
+                        action_dict[key] = value.tolist()
+                    elif hasattr(value, 'item'):  # numpy scalar
+                        action_dict[key] = value.item()
+                    else:
+                        action_dict[key] = value
+                actions_serializable.append({
+                    "step": i,
+                    "action": action_dict
+                })
+            
+            with open(actions_file, 'w', encoding='utf-8') as f:
+                json.dump(actions_serializable, f, indent=2, ensure_ascii=False)
+            
+            #logger.info(f"  ✓ 动作序列已保存: actions.json ({len(actions)} steps)")
+        except Exception as e:
+            logger.error(f"    ❌ 保存动作序列失败: {e}")
+        
+        # 2. 保存帧图像
+        frames_dir = report_dir / "frames"
+        frames_dir.mkdir(exist_ok=True)
+        
+        try:
+            saved_count = 0
+            for i, frame in enumerate(frames):
+                # frame 是 (H, W, C) 的 numpy 数组
+                img = Image.fromarray(frame)
+                img_path = frames_dir / f"step_{i:04d}.png"
+                img.save(img_path)
+                saved_count += 1
+            
+            #logger.info(f"  ✓ 帧图像已保存: frames/ ({saved_count} 张)")
+        except Exception as e:
+            logger.error(f"    ❌ 保存帧图像失败: {e}")
+        
+        # 3. 生成简单的 HTML 报告
+        html_file = report_dir / "report.html"
+        try:
+            html_content = self._generate_report_html(actions, len(frames), task_id, trial_idx)
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            #logger.info(f"  ✓ HTML 报告已生成: report.html")
+            #logger.info(f"  打开报告: open {html_file}")
+        except Exception as e:
+            logger.error(f"    ❌ 生成 HTML 报告失败: {e}")
+    
+    def _generate_report_html(
+        self, 
+        actions: List[Dict], 
+        num_frames: int, 
+        task_id: str, 
+        trial_idx: int
+    ) -> str:
+        """
+        生成简洁大方的 HTML 详细报告（每行4图的网格布局）
+        
+        Args:
+            actions: 动作列表
+            num_frames: 帧数量
+            task_id: 任务ID
+            trial_idx: Trial 索引
+            
+        Returns:
+            HTML 字符串
+        """
+        import json
+        
+        # 统计动作组合
+        action_combo_stats = {}
+        for action in actions:
+            # 收集非零动作
+            active_keys = []
+            
+            # 移动和功能键
+            for key in ['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 
+                        'attack', 'use', 'drop', 'inventory']:
+                val = action.get(key, 0)
+                if val:
+                    active_keys.append(key)
+            
+            # Camera
+            camera = action.get('camera', [0, 0])
+            if isinstance(camera, np.ndarray):
+                camera_flat = camera.flatten()
+                if len(camera_flat) >= 2 and (camera_flat[0] != 0 or camera_flat[1] != 0):
+                    active_keys.append('camera')
+            elif isinstance(camera, list) and len(camera) >= 2:
+                if camera[0] != 0 or camera[1] != 0:
+                    active_keys.append('camera')
+            
+            # 合成/装备
+            for key in ['craft', 'equip', 'place']:
+                val = action.get(key, 'none')
+                if val != 'none':
+                    active_keys.append(key)
+            
+            # 生成组合键
+            if not active_keys:
+                combo_key = 'noop'
+            else:
+                combo_key = '+'.join(sorted(active_keys))
+            
+            action_combo_stats[combo_key] = action_combo_stats.get(combo_key, 0) + 1
+        
+        # 按出现次数排序
+        sorted_combos = sorted(action_combo_stats.items(), key=lambda x: x[1], reverse=True)
+        
+        # 生成统计表格
+        stats_html = '<div class="stats">\n'
+        stats_html += '  <h3>📊 Action Statistics</h3>\n'
+        stats_html += '  <table>\n'
+        stats_html += '    <tr><th>Action Combination</th><th>Count</th></tr>\n'
+        for combo, count in sorted_combos:
+            stats_html += f'    <tr><td>{combo}</td><td>{count}</td></tr>\n'
+        stats_html += '  </table>\n'
+        stats_html += '</div>'
+        
+        # 生成 HTML 头部（简洁大方的网格布局）
+        html = f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STEVE-1 Report - {task_id}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
+            font-size: 14px;
+            color: #333;
+        }}
+        .container {{ max-width: 1600px; margin: 0 auto; }}
+        .header {{ 
+            background: white;
+            padding: 24px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+        }}
+        .header h1 {{ font-size: 24px; margin-bottom: 8px; color: #1a1a1a; }}
+        .header .meta {{ color: #666; font-size: 14px; }}
+        .stats {{ 
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+        }}
+        .stats h3 {{ font-size: 16px; margin-bottom: 12px; color: #1a1a1a; }}
+        .stats table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+        .stats th {{ background: #f8f9fa; padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e9ecef; }}
+        .stats td {{ padding: 6px 12px; border-bottom: 1px solid #f0f0f0; }}
+        .stats td:last-child {{ text-align: right; font-weight: 600; color: #667eea; }}
+        .stats tr:hover {{ background: #f8f9fa; }}
+        .grid {{ 
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }}
+        .step-card {{ 
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        .step-card:hover {{ 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }}
+        .step-img {{ 
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #000;
+        }}
+        .step-info {{ padding: 12px; }}
+        .step-num {{ 
+            font-size: 12px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 8px;
+        }}
+        .step-desc {{ 
+            font-size: 12px;
+            line-height: 1.5;
+            color: #555;
+            margin-bottom: 8px;
+        }}
+        .step-toggle {{ 
+            font-size: 11px;
+            color: #667eea;
+            cursor: pointer;
+            text-decoration: underline;
+            user-select: none;
+        }}
+        .step-toggle:hover {{ color: #764ba2; }}
+        .step-json {{ 
+            display: none;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            overflow-x: auto;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #e9ecef;
+        }}
+        .step-json.show {{ display: block; }}
+        .tag {{ 
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 4px;
+        }}
+        .tag-inv {{ background: #d4edda; color: #155724; }}
+        .tag-move {{ background: #d1ecf1; color: #0c5460; }}
+        .tag-cam {{ background: #fff3cd; color: #856404; }}
+        .tag-act {{ background: #f8d7da; color: #721c24; }}
+    </style>
+    <script>
+        function toggleJson(id) {{
+            var el = document.getElementById('json-' + id);
+            el.classList.toggle('show');
+        }}
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 STEVE-1 Report</h1>
+            <div class="meta">Task: {task_id} | Trial: {trial_idx} | Steps: {len(actions)} | Frames: {num_frames}</div>
+        </div>
+        
+        {stats_html}
+        
+        <div class="grid">
+"""
+        
+        # 生成每一步的网格卡片（每行4个）
+        for i, action in enumerate(actions):
+            # 生成可读的动作描述
+            readable_action = self._format_action_readable(action)
+            
+            # 将原始动作转换为 JSON 字符串
+            action_json = self._action_to_json_str(action)
+            
+            html += f"""
+            <div class="step-card">
+                <img src="frames/step_{i:04d}.png" alt="Step {i}" class="step-img">
+                <div class="step-info">
+                    <div class="step-num">Step {i}</div>
+                    <div class="step-desc">{readable_action}</div>
+                    <div class="step-toggle" onclick="toggleJson({i})">▼ Show JSON</div>
+                    <div class="step-json" id="json-{i}">{action_json}</div>
+                </div>
+            </div>
+"""
+        
+        html += """
+        </div>
+    </div>
+</body>
+</html>
+"""
+        
+        return html
+    
+    def _format_action_readable(self, action: Dict[str, Any]) -> str:
+        """
+        将动作格式化为可读的 HTML 字符串
+        
+        Args:
+            action: 动作字典
+            
+        Returns:
+            HTML 格式的可读字符串
+        """
+        parts = []
+        
+        # 移动
+        if action.get('forward', 0):
+            parts.append('<span class="key">forward</span>')
+        if action.get('back', 0):
+            parts.append('<span class="key">back</span>')
+        if action.get('left', 0):
+            parts.append('<span class="key">left</span>')
+        if action.get('right', 0):
+            parts.append('<span class="key">right</span>')
+        
+        # 功能
+        if action.get('jump', 0):
+            parts.append('<span class="key">jump</span>')
+        if action.get('sneak', 0):
+            parts.append('<span class="key">sneak</span>')
+        if action.get('sprint', 0):
+            parts.append('<span class="key">sprint</span>')
+        if action.get('attack', 0):
+            parts.append('<span class="key">attack</span>')
+        if action.get('use', 0):
+            parts.append('<span class="key">use</span>')
+        if action.get('drop', 0):
+            parts.append('<span class="key">drop</span>')
+        if action.get('inventory', 0):
+            parts.append('<span class="inventory">📦 INVENTORY</span>')
+        
+        # 合成/装备
+        if action.get('craft', 'none') != 'none':
+            parts.append(f'<span class="key">craft({action["craft"]})</span>')
+        if action.get('equip', 'none') != 'none':
+            parts.append(f'<span class="key">equip({action["equip"]})</span>')
+        if action.get('place', 'none') != 'none':
+            parts.append(f'<span class="key">place({action["place"]})</span>')
+        
+        # Camera
+        camera = action.get('camera', [0, 0])
+        if isinstance(camera, np.ndarray):
+            camera_flat = camera.flatten()
+            if len(camera_flat) >= 2:
+                camera_pitch = float(camera_flat[0])
+                camera_yaw = float(camera_flat[1])
+                if camera_pitch != 0 or camera_yaw != 0:
+                    parts.append(f'<span class="key">camera=({camera_pitch:.2f}, {camera_yaw:.2f})</span>')
+        
+        if not parts:
+            return '<span style="color: #999;">noop</span>'
+        
+        return ' + '.join(parts)
+    
+    def _action_to_json_str(self, action: Dict[str, Any]) -> str:
+        """
+        将动作转换为格式化的 JSON 字符串
+        
+        Args:
+            action: 动作字典
+            
+        Returns:
+            格式化的 JSON 字符串
+        """
+        import json
+        
+        # 转换为可序列化格式
+        action_serializable = {}
+        for key, value in action.items():
+            if isinstance(value, np.ndarray):
+                action_serializable[key] = value.tolist()
+            elif hasattr(value, 'item'):
+                action_serializable[key] = value.item()
+            else:
+                action_serializable[key] = value
+        
+        return json.dumps(action_serializable, indent=2, ensure_ascii=False)
+        
+        # 清理 CUDA 缓存（如果使用GPU）
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.debug("✓ CUDA 缓存已清理")
+        except Exception:
+            pass

@@ -31,7 +31,7 @@ def load_model_parameters(path_to_model_file):
 
 
 def load_mineclip_wconfig():
-    logger.info('Loading MineClip...')
+    #logger.info('Loading MineClip...')
     return load(MINECLIP_CONFIG, device=DEVICE)
 
 
@@ -51,14 +51,14 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
     """
     logger.info(f'Loading MineRL environment: {env_name}...')
     
-    # MineRL 自定义环境
-    minerl_custom_envs = ['MineRLHarvestDefaultEnv-v0']
+    # MineRL 自定义环境（包含别名）
+    minerl_custom_envs = ['MineRLHarvestDefaultEnv-v0', 'MineRLHarvestEnv-v0']
     # MineDojo 自定义环境
     minedojo_custom_envs = ['MineDojoHarvestEnv-v0']
     
     if env_name in minerl_custom_envs and env_config:
         # MineRL 环境配置
-        from src.envs.item_name_mapper import convert_initial_inventory, convert_reward_config
+        from src.envs.env_bridge import convert_initial_inventory, convert_reward_config
         
         reward_config = env_config.get('reward_config')
         reward_rule = env_config.get('reward_rule', 'any')
@@ -72,15 +72,14 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
         # 🔄 转换物品名称：MineDojo 格式 → MineRL 格式
         if initial_inventory:
             initial_inventory = convert_initial_inventory(initial_inventory, target_env='minerl')
-            logger.info(f"  🔄 initial_inventory 转换为 MineRL 格式")
+            #logger.info(f"  🔄 initial_inventory 转换为 MineRL 格式")
         
         if reward_config:
             reward_config = convert_reward_config(reward_config, target_env='minerl')
-            logger.info(f"  🔄 reward_config 转换为 MineRL 格式")
+            #logger.info(f"  🔄 reward_config 转换为 MineRL 格式")
         
-        logger.info(f"{'='*30}")
-        logger.info(f"创建 MineRL Harvest 环境")
-        logger.info(f"{'='*30}")
+        
+        logger.info(f"MineRL Harvest 环境")
         logger.info(f"  reward_config: {len(reward_config)} 项" if reward_config else "  reward_config: None")
         logger.info(f"  reward_rule: {reward_rule}")
         logger.info(f"  initial_inventory: {initial_inventory}" if initial_inventory else "  initial_inventory: None")
@@ -148,7 +147,7 @@ def make_env(seed, env_name='MineRLBasaltFindCave-v0', env_config=None):
     
     # 不在这里 reset，留给 _run_single_trial 时首次调用
     # （避免双重初始化：一次在组件加载时，一次在 trial 开始时）
-    logger.info('Environment created (will be reset on first trial)...')
+    #logger.info('Environment created (will be reset on first trial)...')
     
     if seed is not None:
         logger.info(f'Setting seed to {seed}...')
@@ -175,14 +174,14 @@ def make_agent(in_model, in_weights, cond_scale):
         for module in agent.policy.modules():
             if hasattr(module, 'float'):
                 module.float()
-        logger.info('  Agent policy 及所有子模块已转换为 float32')
+        #logger.info('  Agent policy 及所有子模块已转换为 float32')
     
     agent.reset(cond_scale=cond_scale)
     env.close()
     return agent
 
 
-def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='MineRLBasaltFindCave-v0', env_config=None):
+def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='MineRLBasaltFindCave-v0', env_config=None, load_env=True):
     """
     加载 MineCLIP, Agent 和环境
     
@@ -193,15 +192,16 @@ def load_mineclip_agent_env(in_model, in_weights, seed, cond_scale, env_name='Mi
         cond_scale: CFG scale
         env_name: 环境名称（支持自定义环境）
         env_config: 环境配置（用于自定义环境）
+        load_env: 是否加载环境（默认 True），设为 False 可用于仅模型评估
     
     Returns:
         agent: MineRLConditionalAgent
         mineclip: MineCLIP 模型
-        env: MineRL 环境
+        env: MineRL 环境（如果 load_env=False 则为 None）
     """
     mineclip = load_mineclip_wconfig()
     agent = make_agent(in_model, in_weights, cond_scale=cond_scale)
-    env = make_env(seed, env_name=env_name, env_config=env_config)
+    env = make_env(seed, env_name=env_name, env_config=env_config) if load_env else None
     return agent, mineclip, env
 
 

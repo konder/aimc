@@ -1,6 +1,6 @@
---- src/main/java/com/minerl/multiagent/env/EnvServer.java.backup	2025-11-20 17:58:12
-+++ src/main/java/com/minerl/multiagent/env/EnvServer.java	2025-11-20 18:52:08
-@@ -32,6 +32,15 @@
+--- src/main/java/com/minerl/multiagent/env/EnvServer.java.orig
++++ src/main/java/com/minerl/multiagent/env/EnvServer.java
+@@ -32,6 +32,16 @@
  import net.minecraft.world.GameType;
  import net.minecraft.world.WorldSettings;
  import net.minecraft.world.gen.settings.DimensionGeneratorSettings;
@@ -13,13 +13,19 @@
 +import net.minecraft.world.gen.DimensionSettings;
 +import net.minecraft.world.DimensionType;
 +import net.minecraft.util.RegistryKey;
++import net.minecraft.world.server.ServerWorld;
  import org.apache.logging.log4j.Level;
  import org.apache.logging.log4j.LogManager;
  import org.apache.logging.log4j.Logger;
-@@ -418,9 +427,111 @@
+@@ -417,13 +427,162 @@
+         if (spawnInVillage) {
              MinecraftServer.setSpawnInVillage(true);
          }
-
+-
+-
+-        WorldSettings worldSettings = new WorldSettings(worldName, GameType.SURVIVAL, false, Difficulty.HARD, false, new GameRules(), DatapackCodec.VANILLA_CODEC);
+-        DimensionGeneratorSettings dms = DimensionGeneratorSettings.fromDynamicRegistries(DynamicRegistries.getImpl(), seed, generateFeatures, bonusChest);
++        
 +        // ========== BiomeGenerator Support ==========
 +        // Check if BiomeGenerator is specified in mission XML
 +        BiomeGenerator biomeGen = getBiomeGenerator(missionInit);
@@ -45,12 +51,58 @@
 +            );
 +        }
 +        // ========== End BiomeGenerator Support ==========
- 
-         WorldSettings worldSettings = new WorldSettings(worldName, GameType.SURVIVAL, false, Difficulty.HARD, false, new GameRules(), DatapackCodec.VANILLA_CODEC);
--        DimensionGeneratorSettings dms = DimensionGeneratorSettings.fromDynamicRegistries(DynamicRegistries.getImpl(), seed, generateFeatures, bonusChest);
++        
++        WorldSettings worldSettings = new WorldSettings(worldName, GameType.SURVIVAL, false, Difficulty.HARD, false, new GameRules(), DatapackCodec.VANILLA_CODEC);
          mc.createWorld(worldName, worldSettings, DynamicRegistries.getImpl(), dms);
++        
++        // ========== TimeInitialCondition Support ==========
++        // Apply StartTime from ServerInitialConditions after world creation
++        applyTimeConditions(missionInit);
++        // ========== End TimeInitialCondition Support ==========
      }
-
+ 
++    /**
++     * Apply time conditions from ServerInitialConditions
++     * Added for TimeInitialCondition support
++     */
++    private void applyTimeConditions(MissionInit missionInit) {
++        try {
++            ServerInitialConditions serverInit = getServerInit(missionInit);
++            if (serverInit == null || serverInit.getTime() == null) {
++                return;
++            }
++            
++            Time timeConfig = serverInit.getTime();
++            Integer startTime = timeConfig.getStartTime();
++            Boolean allowPassage = timeConfig.isAllowPassageOfTime();
++            
++            if (startTime != null) {
++                System.out.println("*** TimeInitialCondition: Setting world time to " + startTime + " ***");
++                
++                // Wait for server to be ready
++                Minecraft mc = Minecraft.getInstance();
++                MinecraftServer server = mc.getIntegratedServer();
++                
++                if (server != null) {
++                    for (ServerWorld world : server.getWorlds()) {
++                        world.setDayTime(startTime);
++                        System.out.println("*** Set day time to " + startTime + " for world: " + world.getDimensionKey().getLocation() + " ***");
++                    }
++                }
++            }
++            
++            if (allowPassage != null && !allowPassage) {
++                System.out.println("*** TimeInitialCondition: Disabling daylight cycle ***");
++                MinecraftServer server = Minecraft.getInstance().getIntegratedServer();
++                if (server != null) {
++                    server.getGameRules().get(GameRules.DO_DAYLIGHT_CYCLE).set(false, server);
++                }
++            }
++        } catch (Exception e) {
++            LOGGER.error("Error applying time conditions: ", e);
++        }
++    }
++
 +    /**
 +     * Get BiomeGenerator from MissionInit if present
 +     * Added for BiomeGenerator support
@@ -132,8 +184,8 @@
      private void checkValidBiome(String spawnBiome) {
          Set<String> biomeCategories = DynamicRegistries.getImpl().getRegistry(Registry.BIOME_KEY).getEntries().stream()
                  .map(e -> e.getValue().getCategory().getName())
---- src/main/java/net/minecraft/client/gui/toasts/ToastGui.java.backup	2025-11-20 19:10:01
-+++ src/main/java/net/minecraft/client/gui/toasts/ToastGui.java	2025-11-20 19:11:43
+--- src/main/java/net/minecraft/client/gui/toasts/ToastGui.java.orig
++++ src/main/java/net/minecraft/client/gui/toasts/ToastGui.java
 @@ -62,7 +62,9 @@
     }
  
@@ -145,4 +197,3 @@
     }
  
     public Minecraft getMinecraft() {
-

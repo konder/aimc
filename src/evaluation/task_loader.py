@@ -36,7 +36,13 @@ class TaskLoader:
         """解析所有任务配置"""
         tasks = {}
         
-        # 解析不同类别的任务（支持任意以 _tasks 结尾的键）
+        # 新格式：tasks 字典（eval_tasks.yaml）
+        if 'tasks' in self.config and isinstance(self.config['tasks'], dict):
+            for task_id, task_config in self.config['tasks'].items():
+                task_config['task_id'] = task_id  # 确保 task_id 存在
+                tasks[task_id] = task_config
+        
+        # 旧格式：解析不同类别的任务（支持任意以 _tasks 结尾的键）
         for key in self.config.keys():
             if key.endswith('_tasks') and isinstance(self.config[key], list):
                 for task in self.config[key]:
@@ -63,15 +69,27 @@ class TaskLoader:
         获取任务集
         
         Args:
-            set_name: 任务集名称 (quick_test, baseline_test, harvest_tasks, 或 all)
+            set_name: 任务集名称 (quick_test, baseline_test, harvest_tasks, harvest, 或 all)
             
         Returns:
             任务ID列表
         """
         if set_name == 'all':
             return list(self.tasks.keys())
-        elif set_name.endswith('_tasks'):
-            # 直接从配置中的任务列表获取
+        
+        # 新格式：从 task_sets 字典获取（eval_tasks.yaml）
+        if 'task_sets' in self.config and isinstance(self.config['task_sets'], dict):
+            task_sets = self.config['task_sets']
+            if set_name in task_sets:
+                set_config = task_sets[set_name]
+                # task_sets 中每个任务集有 'tasks' 列表
+                if isinstance(set_config, dict) and 'tasks' in set_config:
+                    return set_config['tasks']
+                elif isinstance(set_config, list):
+                    return set_config
+        
+        # 旧格式：以 _tasks 结尾的键（如 harvest_tasks）
+        if set_name.endswith('_tasks'):
             if set_name in self.config and isinstance(self.config[set_name], list):
                 task_list = self.config[set_name]
                 # 检查列表中的元素类型
@@ -83,11 +101,18 @@ class TaskLoader:
                     return task_list
             else:
                 return []  # 返回空列表而不是抛出异常
-        elif set_name in self.config:
-            # 预定义的任务集（如 quick_test, baseline_test）
-            return self.config[set_name]
-        else:
-            raise ValueError(f"未知的任务集: {set_name}")
+        
+        # 旧格式：预定义的任务集（如 quick_test, baseline_test）
+        if set_name in self.config:
+            task_set_config = self.config[set_name]
+            if isinstance(task_set_config, list):
+                # 检查列表中的元素类型
+                if task_set_config and isinstance(task_set_config[0], dict):
+                    return [task.get('task_id', task) for task in task_set_config]
+                else:
+                    return task_set_config
+        
+        raise ValueError(f"未知的任务集: {set_name}")
     
     def list_task_sets(self) -> List[str]:
         """
@@ -97,9 +122,17 @@ class TaskLoader:
             任务集名称列表
         """
         task_sets = []
+        
+        # 新格式：从 task_sets 字典获取
+        if 'task_sets' in self.config and isinstance(self.config['task_sets'], dict):
+            task_sets.extend(list(self.config['task_sets'].keys()))
+        
+        # 旧格式：以 _tasks 结尾的键
         for key in self.config.keys():
             if key.endswith('_tasks') and isinstance(self.config[key], list):
-                task_sets.append(key)
+                if key not in task_sets:  # 避免重复
+                    task_sets.append(key)
+        
         return task_sets
     
     def get_tasks_by_category(self, category: str) -> List[str]:
