@@ -1450,8 +1450,13 @@ class STEVE1Evaluator:
         except Exception as e:
             pass  # 静默失败
     
-    def close(self):
-        """清理资源，释放内存"""
+    def cleanup_env_only(self):
+        """
+        只清理环境资源，保留模型（用于任务间复用）
+        
+        适用于批量任务评估时，任务之间只需要重建环境，
+        而模型（VPT、STEVE-1、MineCLIP、Prior）可以复用。
+        """
         if self._env is not None:
             try:
                 self._env.close()
@@ -1469,6 +1474,11 @@ class STEVE1Evaluator:
                 logger.info(f"  ✓ 已清理 {removed_count} 个 MineRL 存档，释放 {freed_mb:.1f} MB 空间")
         except Exception as e:
             logger.warning(f"清理 MineRL 存档时出错: {e}")
+    
+    def close(self):
+        """完全清理资源，释放所有内存（包括模型）"""
+        # 先清理环境
+        self.cleanup_env_only()
         
         # 释放模型引用，帮助垃圾回收
         if self._agent is not None:
@@ -1477,6 +1487,8 @@ class STEVE1Evaluator:
             self._mineclip = None
         if self._prior is not None:
             self._prior = None
+        
+        logger.debug("✓ 评估器完全关闭（模型已释放）")
     
     def _save_report_data(
         self, 

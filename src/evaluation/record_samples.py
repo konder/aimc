@@ -947,10 +947,9 @@ class SampleRecorder:
         self.recorded_trials = []  # 重置trial列表
         
         print("\n" + "=" * 80)
-        print(f"🎬 专家演示录制")
+        print(f"🎬 训练样本录制")
         print("=" * 80)
         print(f"\n任务ID: {task_id}")
-        print(f"语言: {language}")
         print(f"指令: {instruction}")
         print(f"最大帧数: {max_frames}")
         print(f"录制帧率: {fps} FPS")

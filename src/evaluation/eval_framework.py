@@ -71,6 +71,7 @@ class EvaluationConfig:
     weights_path: str = "data/weights/steve1/steve1.weights"
     prior_weights: str = "data/weights/steve1/steve1_prior.pt"
     text_cond_scale: float = 6.0
+    visual_cond_scale: float = 7.0
     seed: int = 42
     enable_render: bool = False
     enable_report: bool = False
@@ -210,11 +211,13 @@ class EvaluationFramework:
         else:
             logger.info(f"环境重建策略: 从不重建，只轻量清理（最快，可能不稳定）")
 
-        # 保留 evaluator 参数用于向后兼容，但不在初始化时创建
-        # 每个任务会创建专用的 evaluator，避免环境配置冲突
+        # 保留 evaluator 参数用于向后兼容
         self.evaluator = evaluator  # 通常为 None
         if self.evaluator:
             logger.info("使用提供的评估器实例")
+        
+        # 共享的任务评估器（延迟初始化，模型只加载一次）
+        self._shared_evaluator: Optional[STEVE1Evaluator] = None
         
         # 结果存储
         self.results: List[TaskResult] = []
@@ -295,6 +298,34 @@ class EvaluationFramework:
                 #logger.debug(f"    变体任务: {list(instruction_variants_dict.keys())[:5]}...")
             
         return self._prior_evaluator
+    
+    def _get_shared_evaluator(self) -> STEVE1Evaluator:
+        """
+        获取共享的任务评估器（延迟初始化，模型只加载一次）
+        
+        模型（VPT、STEVE-1、MineCLIP、Prior）只在首次调用时加载，
+        后续调用复用同一实例，只需更新环境配置。
+        """
+        if self._shared_evaluator is None:
+            logger.info("初始化共享评估器（模型只加载一次）...")
+            self._shared_evaluator = STEVE1Evaluator(
+                model_path=self.config.model_path,
+                weights_path=self.config.weights_path,
+                prior_weights=self.config.prior_weights,
+                text_cond_scale=self.config.text_cond_scale,
+                visual_cond_scale=self.config.visual_cond_scale,
+                seed=self.config.seed,
+                env_name=None,  # 环境稍后按任务配置
+                env_config=None,
+                rebuild_interval=self.config.rebuild_interval,
+                checkpoint_manager=self.checkpoint_manager,
+                checkpoint_config=self.checkpoint_config
+            )
+            # 预加载模型（不加载环境）
+            self._shared_evaluator._load_models()
+            logger.info("✓ 共享评估器初始化完成（模型已加载）")
+        
+        return self._shared_evaluator
     
     def _load_instruction_variants_from_config(self) -> Dict:
         """
@@ -653,24 +684,16 @@ class EvaluationFramework:
         if replay_actions_file:
             logger.info(f"  检测到动作序列文件: {replay_actions_file}")
         
-        # 为当前任务创建专用的 evaluator（确保环境配置正确）
-        #logger.info("创建任务专用评估器...")
-        task_evaluator = STEVE1Evaluator(
-            model_path=self.config.model_path,
-            weights_path=self.config.weights_path,
-            prior_weights=self.config.prior_weights,
-            text_cond_scale=self.config.text_cond_scale,
-            seed=self.config.seed,
-            enable_render=self.config.enable_render,
-            video_size=self.config.video_size,  # 视频尺寸，None 表示不录制
-            env_name=env_name,
-            env_config=env_config,  # 传递环境配置（包含 max_episode_steps）
-            enable_report=self.config.enable_report,
-            replay_actions_file=replay_actions_file,  # 传递动作序列文件路径
-            checkpoint_manager=self.checkpoint_manager,  # 传递检查点管理器
-            checkpoint_config=self.checkpoint_config,  # 传递检查点配置
-            rebuild_interval=self.config.rebuild_interval  # 传递重建间隔配置
-        )
+        # 获取共享的评估器（模型只加载一次）
+        task_evaluator = self._get_shared_evaluator()
+        
+        # 更新评估器的任务相关配置（环境配置、渲染设置等）
+        task_evaluator.enable_render = self.config.enable_render
+        task_evaluator.video_size = self.config.video_size
+        task_evaluator.enable_report = self.config.enable_report
+        task_evaluator.replay_actions_file = replay_actions_file
+        task_evaluator.checkpoint_manager = self.checkpoint_manager
+        task_evaluator.checkpoint_config = self.checkpoint_config
         
         logger.info(f"{'='*30}")
         logger.info(f"执行任务: {task_id}")
@@ -766,6 +789,8 @@ class EvaluationFramework:
                     output_dir=output_dir,
                     task_index=task_index,
                     total_tasks=total_tasks,
+                    env_name=env_name,      # 传递环境名称
+                    env_config=env_config,  # 传递环境配置
                 )
                 
                 # 从 Policy 执行结果中提取目标接近度指标
@@ -840,10 +865,10 @@ class EvaluationFramework:
             
             return result, output_dir
         finally:
-            # ⚠️ 重要：立即关闭任务评估器，释放资源
-            logger.info(f"关闭任务评估器，释放环境资源...")
-            task_evaluator.close()
-            logger.info(f"  ✓ 资源已释放")
+            # 只清理环境，不关闭整个评估器（保留模型以便复用）
+            logger.info(f"清理任务环境资源...")
+            task_evaluator.cleanup_env_only()
+            logger.info(f"  ✓ 环境资源已释放")
     
     def _print_task_summary_table(
         self,
@@ -1661,29 +1686,36 @@ class EvaluationFramework:
             except Exception as e:
                 logger.warning(f"    图6生成失败: {e}")
             
-            # === 图7: 逐帧相似度时间线（选第一个任务）===
+            # === 图7: 逐帧相似度时间线（所有任务汇总）===
             try:
                 if all_frame_similarities:
-                    first_task = list(all_frame_similarities.keys())[0]
-                    logger.info(f"  生成图7: 逐帧相似度时间线 ({first_task})...")
-                    self._plot_similarity_timeline(
-                        all_frame_similarities[first_task],
-                        all_camera_similarities.get(first_task, []),
-                        first_task,
+                    # 合并所有任务的数据
+                    merged_frame_sim = []
+                    merged_camera_sim = []
+                    for task_id in all_frame_similarities:
+                        merged_frame_sim.extend(all_frame_similarities[task_id])
+                        if task_id in all_camera_similarities:
+                            merged_camera_sim.extend(all_camera_similarities[task_id])
+                    
+                    n_tasks = len(all_frame_similarities)
+                    logger.info(f"  生成图7: 逐帧相似度时间线（{n_tasks} 个任务汇总）...")
+                    self._plot_similarity_timeline_aggregated(
+                        all_frame_similarities,
+                        all_camera_similarities,
                         output_dir
                     )
             except Exception as e:
                 logger.warning(f"    图7生成失败: {e}")
             
-            # === 图8: 目标接近度对比（专家 vs 模型）===
+            # === 图8: 目标接近度对比（所有任务汇总）===
             try:
                 if all_expert_distances and all_model_distances:
-                    logger.info("  生成图8: 目标接近度对比...")
-                    for task_id in set(all_expert_distances.keys()) & set(all_model_distances.keys()):
-                        self._plot_goal_progress_comparison(
-                            all_expert_distances[task_id],
-                            all_model_distances[task_id],
-                            task_id,
+                    common_tasks = set(all_expert_distances.keys()) & set(all_model_distances.keys())
+                    if common_tasks:
+                        logger.info(f"  生成图8: 目标接近度对比（{len(common_tasks)} 个任务汇总）...")
+                        self._plot_goal_progress_comparison_aggregated(
+                            all_expert_distances,
+                            all_model_distances,
                             output_dir
                         )
             except Exception as e:
@@ -2493,6 +2525,193 @@ class EvaluationFramework:
         plt.savefig(output_dir / f"viz_9_goal_comparison_{task_id}.png", dpi=150, bbox_inches='tight')
         plt.close(fig)
     
+    def _plot_similarity_timeline_aggregated(
+        self,
+        all_frame_similarities: Dict[str, List[float]],
+        all_camera_similarities: Dict[str, List[float]],
+        output_dir: Path
+    ):
+        """
+        图7: 逐帧相似度时间线（所有任务汇总）
+        显示所有任务所有 trial 的平均相似度趋势
+        """
+        import matplotlib.pyplot as plt
+        
+        # 收集所有任务的数据长度
+        all_lengths = [len(sims) for sims in all_frame_similarities.values()]
+        if not all_lengths or max(all_lengths) < 5:
+            return
+        
+        # 归一化到相同长度（100个点）进行平均
+        NORM_LEN = 100
+        
+        def normalize_and_average(all_sims_dict: Dict[str, List[float]]) -> np.ndarray:
+            """将不同长度的序列归一化到相同长度后平均"""
+            normalized_all = []
+            for task_id, sims in all_sims_dict.items():
+                if len(sims) < 2:
+                    continue
+                # 插值到 NORM_LEN 个点
+                x_old = np.linspace(0, 1, len(sims))
+                x_new = np.linspace(0, 1, NORM_LEN)
+                normalized = np.interp(x_new, x_old, sims)
+                normalized_all.append(normalized)
+            
+            if not normalized_all:
+                return np.array([])
+            return np.mean(normalized_all, axis=0)
+        
+        # 计算平均趋势
+        avg_action_sim = normalize_and_average(all_frame_similarities)
+        avg_camera_sim = normalize_and_average(all_camera_similarities) if all_camera_similarities else np.array([])
+        
+        if len(avg_action_sim) < 5:
+            return
+        
+        n_tasks = len(all_frame_similarities)
+        total_frames = sum(len(sims) for sims in all_frame_similarities.values())
+        
+        fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+        steps = np.arange(NORM_LEN)
+        
+        # 1. Action 相似度
+        ax1 = axes[0]
+        ax1.fill_between(steps, avg_action_sim, alpha=0.3, color='#2196F3')
+        ax1.plot(steps, avg_action_sim, color='#2196F3', linewidth=2, label='Avg Action Similarity')
+        
+        # 添加移动平均线
+        window = 10
+        action_ma = np.convolve(avg_action_sim, np.ones(window)/window, mode='valid')
+        ax1.plot(range(window-1, NORM_LEN), action_ma, color='#1565C0', linewidth=2,
+                linestyle='--', label=f'Moving Avg ({window})')
+        
+        ax1.set_ylabel('Action Similarity', fontsize=11)
+        ax1.set_ylim(0, 1.05)
+        ax1.set_title(f'Frame-wise Similarity Timeline (All Tasks Aggregated: {n_tasks} tasks, {total_frames} frames)', 
+                     fontsize=12, fontweight='bold')
+        ax1.legend(loc='lower right')
+        ax1.grid(True, alpha=0.3)
+        
+        # 显示整体平均值
+        overall_avg = np.mean(avg_action_sim)
+        ax1.axhline(y=overall_avg, color='#F44336', linestyle=':', linewidth=1.5, alpha=0.8)
+        ax1.text(NORM_LEN * 0.02, overall_avg + 0.03, f'Overall Avg: {overall_avg:.1%}', 
+                color='#F44336', fontsize=10)
+        
+        # 2. Camera 相似度
+        ax2 = axes[1]
+        if len(avg_camera_sim) > 0:
+            ax2.fill_between(steps, avg_camera_sim, alpha=0.3, color='#4CAF50')
+            ax2.plot(steps, avg_camera_sim, color='#4CAF50', linewidth=2, label='Avg Camera Similarity')
+            
+            camera_ma = np.convolve(avg_camera_sim, np.ones(window)/window, mode='valid')
+            ax2.plot(range(window-1, NORM_LEN), camera_ma, color='#2E7D32', linewidth=2,
+                    linestyle='--', label=f'Moving Avg ({window})')
+            
+            camera_avg = np.mean(avg_camera_sim)
+            ax2.axhline(y=camera_avg, color='#F44336', linestyle=':', linewidth=1.5, alpha=0.8)
+            ax2.text(NORM_LEN * 0.02, camera_avg + 0.03, f'Overall Avg: {camera_avg:.1%}', 
+                    color='#F44336', fontsize=10)
+        
+        ax2.set_ylabel('Camera Similarity', fontsize=11)
+        ax2.set_xlabel('Normalized Progress (%)', fontsize=11)
+        ax2.set_ylim(0, 1.05)
+        ax2.legend(loc='lower right')
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(output_dir / "viz_8_similarity_timeline_aggregated.png", dpi=150, bbox_inches='tight')
+        plt.close(fig)
+    
+    def _plot_goal_progress_comparison_aggregated(
+        self,
+        all_expert_distances: Dict[str, List[float]],
+        all_model_distances: Dict[str, List[float]],
+        output_dir: Path
+    ):
+        """
+        图8: 目标接近度对比图（所有任务汇总）
+        对比所有任务的专家和模型平均目标距离变化
+        """
+        import matplotlib.pyplot as plt
+        
+        # 找到共同的任务
+        common_tasks = set(all_expert_distances.keys()) & set(all_model_distances.keys())
+        if not common_tasks:
+            return
+        
+        # 归一化到相同长度（100个点）
+        NORM_LEN = 100
+        
+        def normalize_to_length(distances: List[float], target_len: int) -> np.ndarray:
+            """将序列插值到目标长度"""
+            if len(distances) < 2:
+                return np.array([distances[0]] * target_len if distances else [0] * target_len)
+            x_old = np.linspace(0, 1, len(distances))
+            x_new = np.linspace(0, 1, target_len)
+            return np.interp(x_new, x_old, distances)
+        
+        # 收集并归一化所有数据
+        expert_normalized = []
+        model_normalized = []
+        
+        for task_id in common_tasks:
+            expert_norm = normalize_to_length(all_expert_distances[task_id], NORM_LEN)
+            model_norm = normalize_to_length(all_model_distances[task_id], NORM_LEN)
+            expert_normalized.append(expert_norm)
+            model_normalized.append(model_norm)
+        
+        # 计算平均值和标准差
+        expert_mean = np.mean(expert_normalized, axis=0)
+        expert_std = np.std(expert_normalized, axis=0)
+        model_mean = np.mean(model_normalized, axis=0)
+        model_std = np.std(model_normalized, axis=0)
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
+        progress = np.linspace(0, 100, NORM_LEN)
+        
+        # 专家平均距离（带置信区间）
+        ax.plot(progress, expert_mean, color='#2196F3', linewidth=2.5, 
+               label=f'Expert Baseline (n={len(common_tasks)})', alpha=0.9)
+        ax.fill_between(progress, expert_mean - expert_std, expert_mean + expert_std,
+                       alpha=0.15, color='#2196F3')
+        
+        # 模型平均距离（带置信区间）
+        ax.plot(progress, model_mean, color='#4CAF50', linewidth=2.5,
+               label=f'Policy Model (n={len(common_tasks)})', alpha=0.9)
+        ax.fill_between(progress, model_mean - model_std, model_mean + model_std,
+                       alpha=0.15, color='#4CAF50')
+        
+        # 标记起点和终点
+        ax.scatter([0], [expert_mean[0]], color='#2196F3', s=100, marker='s', zorder=5)
+        ax.scatter([100], [expert_mean[-1]], color='#2196F3', s=100, marker='D', zorder=5)
+        ax.scatter([0], [model_mean[0]], color='#4CAF50', s=100, marker='s', zorder=5)
+        ax.scatter([100], [model_mean[-1]], color='#4CAF50', s=100, marker='D', zorder=5)
+        
+        # 计算平均进度率
+        expert_progress = (expert_mean[0] - expert_mean[-1]) / expert_mean[0] if expert_mean[0] > 1e-6 else 0
+        model_progress = (model_mean[0] - model_mean[-1]) / model_mean[0] if model_mean[0] > 1e-6 else 0
+        
+        # 添加信息框
+        info_text = (f'Avg Expert Progress: {expert_progress:+.1%}\n'
+                    f'Avg Model Progress: {model_progress:+.1%}\n'
+                    f'Tasks: {len(common_tasks)}')
+        ax.text(0.98, 0.98, info_text, transform=ax.transAxes,
+               fontsize=11, fontweight='bold',
+               ha='right', va='top', 
+               bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='#ddd'))
+        
+        ax.set_xlabel('Progress (%)', fontsize=11)
+        ax.set_ylabel('Distance to Goal\n(lower is better)', fontsize=11)
+        ax.set_title(f'Goal Progress Comparison (All Tasks Aggregated)', fontsize=12, fontweight='bold')
+        ax.legend(loc='upper right', fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)
+        
+        plt.tight_layout()
+        plt.savefig(output_dir / "viz_9_goal_comparison_aggregated.png", dpi=150, bbox_inches='tight')
+        plt.close(fig)
+    
     def _collect_combined_results(self, output_dir: Path) -> Dict[str, Dict]:
         """
         从任务输出目录收集综合评估结果
@@ -2977,9 +3196,16 @@ class EvaluationFramework:
                 f.write("\n")
     
     def close(self):
-        """清理资源"""
+        """清理所有资源"""
+        # 关闭共享的评估器（释放所有模型）
+        if self._shared_evaluator:
+            self._shared_evaluator.close()
+            self._shared_evaluator = None
+        
+        # 向后兼容：如果有独立的 evaluator
         if self.evaluator:
             self.evaluator.close()
+        
         logger.info("评估框架已关闭")
 
 

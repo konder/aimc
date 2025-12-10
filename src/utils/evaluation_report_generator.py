@@ -1732,43 +1732,44 @@ class EvaluationReportGenerator:
             }
         ]
         
-        # 动态添加逐帧相似度时间线图（按任务）
-        for timeline_file in sorted(self.output_dir.glob("viz_8_similarity_timeline_*.png")):
-            task_id = timeline_file.stem.replace("viz_8_similarity_timeline_", "")
+        # 添加汇总的逐帧相似度时间线图（所有任务）
+        aggregated_timeline = self.output_dir / "viz_8_similarity_timeline_aggregated.png"
+        if aggregated_timeline.exists():
             policy_viz_configs.append({
-                'filename': timeline_file.name,
-                'title': f'逐帧相似度时间线',
-                'column': f'时间线分析 ({task_id})',
+                'filename': 'viz_8_similarity_timeline_aggregated.png',
+                'title': '逐帧相似度时间线（所有任务汇总）',
+                'column': '时间线分析',
                 'definition': '''
-                    <strong>定义</strong>：显示模型预测与专家动作的逐帧相似度变化。
-                    上图：Action相似度；下图：Camera相似度。
+                    <strong>定义</strong>：显示所有任务所有 trial 的平均相似度趋势。
+                    X轴为归一化进度（0-100%），上图：Action相似度；下图：Camera相似度。
                     虚线为移动平均，红线为整体平均。
                 ''',
                 'interpretation': '''
                     <strong>解读</strong>：
                     • 高峰值 → 该时段模型与专家行为一致
                     • 低谷 → 模型决策与专家不同
-                    • 趋势下降 → 可能存在累积误差
+                    • 整体趋势反映 Policy 学习效果
                 ''',
                 'full_width': True
             })
         
-        # 动态添加目标接近度对比图（按任务）
-        for comparison_file in sorted(self.output_dir.glob("viz_9_goal_comparison_*.png")):
-            task_id = comparison_file.stem.replace("viz_9_goal_comparison_", "")
+        # 添加汇总的目标接近度对比图（所有任务）
+        aggregated_comparison = self.output_dir / "viz_9_goal_comparison_aggregated.png"
+        if aggregated_comparison.exists():
             policy_viz_configs.append({
-                'filename': comparison_file.name,
-                'title': f'目标接近度: {task_id}',
-                'column': f'接近度对比 ({task_id})',
+                'filename': 'viz_9_goal_comparison_aggregated.png',
+                'title': '目标接近度（所有任务汇总）',
+                'column': '接近度对比',
                 'definition': '''
-                    <strong>定义</strong>：显示距离目标（goal embedding）的变化。
-                    Y轴为余弦距离（越低越好），标记了最近/最远点。
+                    <strong>定义</strong>：显示所有任务的平均目标距离变化。
+                    蓝色为专家基线，绿色为模型输出。阴影区域为标准差。
+                    X轴为归一化进度，Y轴为余弦距离（越低越好）。
                 ''',
                 'interpretation': '''
                     <strong>解读</strong>：
                     • 整体下降 → 正在接近目标
-                    • 波动大 → 执行不稳定
-                    • 比较专家和模型的趋势差异
+                    • 阴影区域大 → 任务间差异大
+                    • 模型曲线低于专家 → Policy 超越专家基线
                 ''',
                 'full_width': True
             })
