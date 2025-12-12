@@ -66,8 +66,9 @@ logger = logging.getLogger(__name__)
 
 # CLIP4MC 数据集 URL
 CLIP4MC_DATASET_URLS = {
-    "test": "https://huggingface.co/datasets/AnonymousUserCLIP4MC/CLIP4MC/raw/main/dataset_test.json",
-    "train": "https://huggingface.co/datasets/AnonymousUserCLIP4MC/CLIP4MC/raw/main/dataset_train.json",
+    "test": "https://huggingface.co/datasets/AnonymousUserCLIP4MC/CLIP4MC/resolve/main/dataset_test.json",
+    "train": "https://huggingface.co/datasets/AnonymousUserCLIP4MC/CLIP4MC/resolve/main/dataset_train_LocalCorrelationFilter.json",
+    "train_no_filter": "https://huggingface.co/datasets/AnonymousUserCLIP4MC/CLIP4MC/resolve/main/dataset_train_NoLocalCorrelationFilter.json",
 }
 
 # 视频帧配置
@@ -800,7 +801,8 @@ def main():
     # download 命令
     dl_parser = subparsers.add_parser('download', help='下载 YouTube 视频')
     dl_parser.add_argument("--output-dir", "-o", type=Path, default=DEFAULT_RAW_DIR, help="输出目录")
-    dl_parser.add_argument("--dataset", "-d", choices=["test", "train"], default="test", help="数据集类型")
+    dl_parser.add_argument("--dataset", "-d", choices=["test", "train", "train_no_filter"], default="test", 
+                           help="数据集类型: test(2K), train(378MB带过滤), train_no_filter(376MB无过滤)")
     dl_parser.add_argument("--max-samples", "-n", type=int, default=None, help="最大样本数，默认全部")
     dl_parser.add_argument("--cookies", "-c", type=str, default=None, help="cookies.txt 文件路径")
     dl_parser.add_argument("--no-resume", action="store_true", help="不从检查点恢复，重新开始")
@@ -819,7 +821,7 @@ def main():
     all_parser = subparsers.add_parser('all', help='下载并预处理')
     all_parser.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR, help="原始视频目录")
     all_parser.add_argument("--training-dir", type=Path, default=DEFAULT_TRAINING_DIR, help="训练数据目录")
-    all_parser.add_argument("--dataset", "-d", choices=["test", "train"], default="test")
+    all_parser.add_argument("--dataset", "-d", choices=["test", "train", "train_no_filter"], default="test")
     all_parser.add_argument("--max-samples", "-n", type=int, default=None)
     all_parser.add_argument("--cookies", "-c", type=str, default=None)
     all_parser.add_argument("--no-resume", action="store_true", help="不从检查点恢复")
