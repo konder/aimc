@@ -482,6 +482,10 @@ def download_videos(
                 })
                 processed_ids.add(sample_id)
                 
+                # 每个成功后立即保存 samples.json
+                with open(samples_file, 'w', encoding='utf-8') as f:
+                    json.dump(processed_samples, f, indent=2, ensure_ascii=False)
+                
                 pbar.update(1)
                 
                 # 每20个成功保存检查点

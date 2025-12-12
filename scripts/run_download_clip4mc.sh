@@ -21,7 +21,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PYTHON="${PYTHON:-python}"
-COOKIES_FILE="${COOKIES_FILE:-data/www.youtube.com_cookies_2.txt}"
+COOKIES_FILE="${COOKIES_FILE:-data/www.youtube.com_cookies.txt}"
 OUTPUT_DIR="${OUTPUT_DIR:-data/raw_videos/clip4mc_youtube}"
 RESOLUTION="${RESOLUTION:-360}"
 KEEP_ORIGINAL="${KEEP_ORIGINAL:-false}"
