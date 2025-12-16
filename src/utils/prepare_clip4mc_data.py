@@ -459,21 +459,38 @@ def main():
         sys.exit(1)
     
     # 划分训练集、验证集和测试集 (CLIP4MC 官方格式)
-    random.seed(args.seed)
-    random.shuffle(successful_dirs)
-    
     n = len(successful_dirs)
-    n_test = max(1, int(n * 0.1))
-    n_val = max(1, int(n * 0.1))
-    n_train = n - n_test - n_val
     
-    train_dirs = successful_dirs[:n_train]
-    val_dirs = successful_dirs[n_train:n_train + n_val]
-    test_dirs = successful_dirs[n_train + n_val:]
+    if args.split_mode == 'all_train':
+        # 全部作为训练集（用于处理官方训练集数据）
+        train_dirs = successful_dirs
+        val_dirs = []
+        test_dirs = []
+        logger.info(f"[split_mode=all_train] 全部 {n} 个样本作为训练集")
+    elif args.split_mode == 'all_test':
+        # 全部作为测试集（用于处理官方测试集数据）
+        train_dirs = []
+        val_dirs = []
+        test_dirs = successful_dirs
+        logger.info(f"[split_mode=all_test] 全部 {n} 个样本作为测试集")
+    else:
+        # 随机划分（默认）
+        random.seed(args.seed)
+        random.shuffle(successful_dirs)
+        
+        n_test = max(1, int(n * 0.1))
+        n_val = max(1, int(n * 0.1))
+        n_train = n - n_test - n_val
+        
+        train_dirs = successful_dirs[:n_train]
+        val_dirs = successful_dirs[n_train:n_train + n_val]
+        test_dirs = successful_dirs[n_train + n_val:]
+        
+        logger.info(f"[split_mode=random] 随机划分:")
     
-    logger.info(f"训练集: {len(train_dirs)} 个样本")
-    logger.info(f"验证集: {len(val_dirs)} 个样本")
-    logger.info(f"测试集: {len(test_dirs)} 个样本")
+    logger.info(f"  训练集: {len(train_dirs)} 个样本")
+    logger.info(f"  验证集: {len(val_dirs)} 个样本")
+    logger.info(f"  测试集: {len(test_dirs)} 个样本")
     
     # 生成 dataset_info.json (CLIP4MC 官方格式)
     dataset_info = {
