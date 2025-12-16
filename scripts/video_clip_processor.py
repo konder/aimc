@@ -108,22 +108,8 @@ def normalize_filename(name: str) -> str:
     return name
 
 
-def extract_keywords(name: str) -> set:
-    """提取文件名中的关键词"""
-    # 移除扩展名
-    name = re.sub(r'\.(mp4|webm|mkv|avi|mov)$', '', name, flags=re.IGNORECASE)
-    # 转小写
-    name = name.lower()
-    # 分词（按非字母数字分割）
-    words = re.split(r'[^a-z0-9]+', name)
-    # 过滤掉太短的词和常见词
-    stopwords = {'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'is', 'it', 'my', 'ep', 'episode', 'part', 'minecraft', 'with', 'vs'}
-    keywords = set(w for w in words if len(w) > 2 and w not in stopwords)
-    return keywords
-
-
-def find_video_file(videos_dir: Path, filename: str, all_files: dict = None, keywords_index: dict = None) -> Optional[Path]:
-    """查找视频文件（支持模糊匹配）"""
+def find_video_file(videos_dir: Path, filename: str, all_files: dict = None) -> Optional[Path]:
+    """查找视频文件（严格匹配）"""
     # 直接匹配
     direct_path = videos_dir / filename
     if direct_path.exists():
@@ -135,58 +121,25 @@ def find_video_file(videos_dir: Path, filename: str, all_files: dict = None, key
         if mp4_path.exists():
             return mp4_path
     
-    # 使用预建的文件索引进行模糊匹配
+    # 标准化后精确匹配
     if all_files is not None:
         normalized = normalize_filename(filename)
-        
-        # 精确匹配标准化后的名字
         if normalized in all_files:
             return all_files[normalized]
-        
-        # 尝试部分匹配
-        for norm_name, path in all_files.items():
-            # 如果标准化后的名字包含关系
-            if len(normalized) > 15 and len(norm_name) > 15:
-                if normalized in norm_name or norm_name in normalized:
-                    return path
-                # 如果前15个字符相同
-                if normalized[:15] == norm_name[:15]:
-                    return path
-        
-        # 关键词匹配
-        if keywords_index:
-            query_keywords = extract_keywords(filename)
-            if len(query_keywords) >= 2:
-                best_match = None
-                best_score = 0
-                for path, file_keywords in keywords_index.items():
-                    # 计算交集
-                    common = query_keywords & file_keywords
-                    score = len(common)
-                    # 至少要有3个关键词匹配，或者匹配率超过50%
-                    min_len = min(len(query_keywords), len(file_keywords))
-                    if score >= 3 or (min_len > 0 and score / min_len > 0.5):
-                        if score > best_score:
-                            best_score = score
-                            best_match = path
-                if best_match:
-                    return best_match
     
     return None
 
 
-def build_file_index(videos_dir: Path) -> Tuple[dict, dict]:
-    """建立视频文件索引，返回 (标准化名字索引, 关键词索引)"""
+def build_file_index(videos_dir: Path) -> dict:
+    """建立视频文件索引"""
     name_index = {}
-    keywords_index = {}
     
     for f in videos_dir.iterdir():
         if f.is_file() and f.suffix.lower() in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
             normalized = normalize_filename(f.name)
             name_index[normalized] = f
-            keywords_index[f] = extract_keywords(f.name)
     
-    return name_index, keywords_index
+    return name_index
 
 
 def extract_clip(
@@ -245,14 +198,14 @@ def process_clips(
     
     # 3. 建立文件索引
     logger.info(f"\n📁 扫描视频目录: {videos_dir}")
-    name_index, keywords_index = build_file_index(videos_dir)
+    name_index = build_file_index(videos_dir)
     logger.info(f"  找到 {len(name_index)} 个视频文件")
     
     # 4. 统计可用视频
     available_videos = {}
     missing_files = []
     for vid, filename in vid_to_filename.items():
-        video_path = find_video_file(videos_dir, filename, name_index, keywords_index)
+        video_path = find_video_file(videos_dir, filename, name_index)
         if video_path:
             available_videos[vid] = video_path
         else:
@@ -263,10 +216,20 @@ def process_clips(
     logger.info(f"  - 文件缺失: {len(missing_files)} 个")
     
     # 显示缺失文件的详情
-    if debug and missing_files:
-        logger.info(f"\n⚠️ 无法匹配的文件 (前 10 个):")
-        for vid, filename in missing_files[:10]:
-            logger.info(f"   {vid}: {filename}")
+    if missing_files:
+        logger.info(f"\n⚠️ 无法匹配的文件清单 ({len(missing_files)} 个):")
+        for vid, filename in missing_files:
+            logger.info(f"   [{vid}] {filename}")
+        
+        # 同时保存到文件
+        missing_file_path = output_dir / "missing_files.txt"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with open(missing_file_path, 'w', encoding='utf-8') as f:
+            f.write(f"# 无法匹配的文件清单 ({len(missing_files)} 个)\n")
+            f.write(f"# 格式: video_id,csv中的文件名\n\n")
+            for vid, filename in missing_files:
+                f.write(f"{vid},{filename}\n")
+        logger.info(f"\n📄 缺失文件清单已保存到: {missing_file_path}")
     
     # 4. 分析匹配情况
     csv_vids = set(vid_to_filename.keys())
