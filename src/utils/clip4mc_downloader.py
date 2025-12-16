@@ -93,23 +93,36 @@ def download_dataset_json(dataset_type: str, cache_dir: Path) -> List[Dict]:
     import requests
     
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / f"dataset_{dataset_type}.json"
     
-    if cache_file.exists():
-        logger.info(f"使用缓存: {cache_file}")
-        with open(cache_file) as f:
-            return json.load(f)
+    # 缓存文件名映射（支持手动下载的原始文件名）
+    cache_file_names = {
+        "test": ["dataset_test.json"],
+        "train": ["dataset_train.json", "dataset_train_LocalCorrelationFilter.json"],
+        "train_no_filter": ["dataset_train_no_filter.json", "dataset_train_NoLocalCorrelationFilter.json"],
+    }
     
+    # 检查所有可能的缓存文件名
+    possible_names = cache_file_names.get(dataset_type, [f"dataset_{dataset_type}.json"])
+    for name in possible_names:
+        cache_file = cache_dir / name
+        if cache_file.exists():
+            logger.info(f"使用缓存: {cache_file}")
+            with open(cache_file) as f:
+                return json.load(f)
+    
+    # 没有缓存，需要下载
     url = CLIP4MC_DATASET_URLS.get(dataset_type)
     if not url:
         raise ValueError(f"未知数据集类型: {dataset_type}")
     
     logger.info(f"下载数据集: {url}")
-    response = requests.get(url, timeout=60)
+    response = requests.get(url, timeout=300)  # 增加超时时间
     response.raise_for_status()
     
     data = response.json()
     
+    # 保存到第一个缓存文件名
+    cache_file = cache_dir / possible_names[0]
     with open(cache_file, 'w') as f:
         json.dump(data, f)
     
@@ -118,7 +131,7 @@ def download_dataset_json(dataset_type: str, cache_dir: Path) -> List[Dict]:
 
 
 class DownloadAbortError(Exception):
-    """403 错误，需要终止下载"""
+    """严重错误，需要终止下载"""
     pass
 
 
@@ -129,6 +142,7 @@ def download_youtube_video(
     cookies_file: str = None,
     resolution: int = DEFAULT_RESOLUTION,
     fps: int = None,
+    max_403_retries: int = 5,
 ) -> bool:
     """
     下载 YouTube 视频 (使用 yt-dlp)
@@ -168,17 +182,31 @@ def download_youtube_video(
             hls_format = "95"
         
         ydl_opts = {
-            'format': f'{hls_format}/91/best',  # HLS 流格式优先
+            'format': f'{hls_format}/91/92/93/best',  # HLS 流格式优先
             'outtmpl': str(output_path.with_suffix('.mp4')),
             'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,  # 显示详细信息用于调试
+            'no_warnings': False,
             'socket_timeout': timeout,
-            'retries': 10,
-            'fragment_retries': 10,
-            'extractor_retries': 3,
+            'retries': 30,  # 增加重试次数
+            'fragment_retries': 30,
+            'extractor_retries': 5,
+            'file_access_retries': 10,
             'proxy': '',  # 禁用代理
+            'sleep_interval': 1,  # 下载间隔
+            'max_sleep_interval': 5,
+            'ignoreerrors': False,
+            'continue': True,  # 支持断点续传
+            'noprogress': True,
         }
+        
+        # 尝试使用 curl_cffi impersonate 功能（如果已安装）
+        # 参考: https://github.com/yt-dlp/yt-dlp#impersonation
+        try:
+            import curl_cffi
+            ydl_opts['impersonate'] = 'chrome'
+        except ImportError:
+            pass  # curl_cffi 未安装，使用默认模式
         
         if cookies_file and Path(cookies_file).exists():
             ydl_opts['cookiefile'] = cookies_file
@@ -206,16 +234,52 @@ def download_youtube_video(
         return False
     except Exception as e:
         error_msg = str(e)
+        # 显示完整错误信息用于调试
+        if not error_msg.strip():
+            import traceback
+            error_msg = traceback.format_exc()
+        
         if "Video unavailable" in error_msg:
             logger.warning(f"视频不可用: {video_id}")
             return False
         elif "Private video" in error_msg:
             logger.warning(f"私密视频: {video_id}")
             return False
+        elif "404" in error_msg or "not found" in error_msg.lower():
+            logger.warning(f"视频不存在 (404): {video_id}")
+            return False  # 404 只跳过这个视频，继续下载其他
+        elif "impersonate" in error_msg.lower() or "curl_cffi" in error_msg.lower():
+            logger.error(f"Impersonate 功能错误: {error_msg[:200]}")
+            logger.error("请安装 curl_cffi: pip install curl_cffi")
+            return False
         elif "403" in error_msg:
-            logger.error(f"❌ 403 Forbidden: {video_id}")
-            logger.error("⚠️ YouTube 拒绝访问，请刷新 cookies 后重试")
-            raise DownloadAbortError("403 Forbidden - 需要刷新 cookies")
+            # 403 错误：指数退避重试
+            for retry in range(max_403_retries):
+                wait_time = 60 * (2 ** retry)  # 1分钟, 2分钟, 4分钟, 8分钟, 16分钟
+                logger.warning(f"⚠️ 403 Forbidden: {video_id}, 等待 {wait_time}秒 后重试 ({retry+1}/{max_403_retries})")
+                time.sleep(wait_time)
+                
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+                    
+                    # 检查输出文件
+                    if output_path.exists():
+                        logger.info(f"✓ 重试成功: {video_id}")
+                        return True
+                    output_with_ext = output_path.with_suffix('.mp4')
+                    if output_with_ext != output_path and output_with_ext.exists():
+                        output_with_ext.rename(output_path)
+                        return True
+                except Exception as retry_e:
+                    if "403" not in str(retry_e):
+                        logger.warning(f"重试时遇到其他错误: {str(retry_e)[:50]}")
+                        break
+            
+            # 所有重试都失败
+            logger.error(f"❌ 403 重试 {max_403_retries} 次后仍失败: {video_id}")
+            logger.error("⚠️ 建议：1) 更换 IP  2) 刷新 cookies  3) 稍后重试")
+            raise DownloadAbortError(f"403 Forbidden - {max_403_retries} 次重试后失败")
         else:
             logger.warning(f"下载失败 {video_id}: {error_msg[:100]}")
             return False
