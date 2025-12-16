@@ -158,6 +158,7 @@ def process_clips(
     info_csv: Path,
     metadata_json: Path,
     output_dir: Path,
+    debug: bool = False,
 ) -> List[Dict]:
     """处理视频切片"""
     
@@ -169,16 +170,43 @@ def process_clips(
         metadata = json.load(f)
     logger.info(f"加载了 {len(metadata)} 条元数据记录")
     
+    # 获取元数据中的唯一 video ID
+    metadata_vids = set(item.get('vid', '') for item in metadata if item.get('vid'))
+    logger.info(f"元数据中唯一视频 ID: {len(metadata_vids)} 个")
+    
     # 3. 统计可用视频
     available_videos = {}
+    missing_files = []
     for vid, filename in vid_to_filename.items():
         video_path = find_video_file(videos_dir, filename)
         if video_path:
             available_videos[vid] = video_path
+        else:
+            missing_files.append((vid, filename))
     
-    logger.info(f"找到 {len(available_videos)} 个已下载的视频")
+    logger.info(f"info.csv 中的视频: {len(vid_to_filename)} 个")
+    logger.info(f"  - 找到文件: {len(available_videos)} 个")
+    logger.info(f"  - 文件缺失: {len(missing_files)} 个")
     
-    # 4. 筛选可处理的元数据
+    # 4. 分析匹配情况
+    csv_vids = set(vid_to_filename.keys())
+    matched_vids = csv_vids & metadata_vids
+    
+    logger.info(f"\n📊 匹配分析:")
+    logger.info(f"  - info.csv 中的 video ID: {len(csv_vids)} 个")
+    logger.info(f"  - dataset 中的 video ID: {len(metadata_vids)} 个")
+    logger.info(f"  - 两者交集 (可处理): {len(matched_vids)} 个")
+    
+    if debug and len(matched_vids) < 20:
+        logger.info(f"  - 匹配的 ID: {list(matched_vids)}")
+    
+    # 显示不匹配的原因
+    unmatched_csv = csv_vids - metadata_vids
+    if unmatched_csv and debug:
+        logger.info(f"\n⚠️ info.csv 中有 {len(unmatched_csv)} 个视频不在 dataset 中")
+        logger.info(f"   前 5 个: {list(unmatched_csv)[:5]}")
+    
+    # 5. 筛选可处理的元数据 (视频文件存在且在元数据中)
     processable = []
     for item in metadata:
         vid = item.get('vid', '')
@@ -191,7 +219,7 @@ def process_clips(
                 'end': item.get('end position', 0),
             })
     
-    logger.info(f"可处理的片段: {len(processable)} 条")
+    logger.info(f"\n✅ 可处理的片段: {len(processable)} 条")
     
     if not processable:
         logger.warning("没有可处理的片段")
@@ -281,6 +309,8 @@ def main():
                        help="CLIP4MC 元数据 JSON 文件")
     parser.add_argument("--output-dir", "-o", type=Path, required=True,
                        help="输出目录")
+    parser.add_argument("--debug", "-d", action="store_true",
+                       help="显示详细调试信息")
     
     args = parser.parse_args()
     
@@ -301,6 +331,7 @@ def main():
         info_csv=args.info_csv,
         metadata_json=args.metadata,
         output_dir=args.output_dir,
+        debug=args.debug,
     )
 
 
