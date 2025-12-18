@@ -696,13 +696,18 @@ def extract_all_frames_gpu_ffmpeg(
         None: 解码失败（自动回退到 CPU）
     """
     try:
-        # GPU 解码所有帧（不使用 select 滤镜 = 不跳帧）
+        # 方法1：尝试使用 cuvid 解码器（GPU解码+GPU resize）
+        # 优点：所有操作在GPU上，无CPU-GPU传输
+        # 缺点：需要指定解码器（h264_cuvid, hevc_cuvid等）
+        
+        # 先尝试 h264_cuvid（最常见）
         ffmpeg_cmd = [
             'ffmpeg',
-            '-hwaccel', 'cuda',          # GPU 硬件解码（NVDEC）
+            '-hwaccel', 'cuda',
             '-hwaccel_device', str(gpu_id),
+            '-c:v', 'h264_cuvid',        # GPU 硬件解码器
+            '-resize', f'{frame_width}x{frame_height}',  # GPU resize
             '-i', str(video_path),
-            '-vf', f'scale={frame_width}:{frame_height}',  # 只 resize，不跳帧
             '-f', 'rawvideo',
             '-pix_fmt', 'rgb24',
         ]
@@ -718,9 +723,31 @@ def extract_all_frames_gpu_ffmpeg(
         result = subprocess.run(ffmpeg_cmd, capture_output=True, timeout=timeout, check=False)
         
         if result.returncode != 0:
-            # GPU 解码失败，自动回退到 CPU
-            logger.debug(f"GPU 解码失败 ({video_path.name})，回退到 CPU: {result.stderr.decode('utf-8', errors='ignore')[:200]}")
-            return extract_all_frames_cv2(video_path, frame_height, frame_width, max_frames)
+            # h264_cuvid 失败，尝试通用 hwaccel 方式（适用于其他编码格式）
+            logger.debug(f"h264_cuvid 解码失败，尝试通用 hwaccel: {video_path.name}")
+            
+            ffmpeg_cmd_fallback = [
+                'ffmpeg',
+                '-hwaccel', 'cuda',
+                '-hwaccel_device', str(gpu_id),
+                '-i', str(video_path),
+                '-vf', f'scale_cuda={frame_width}:{frame_height}',  # GPU scale 滤镜
+                '-f', 'rawvideo',
+                '-pix_fmt', 'rgb24',
+            ]
+            
+            if max_frames:
+                ffmpeg_cmd_fallback.insert(-2, '-frames:v')
+                ffmpeg_cmd_fallback.insert(-2, str(max_frames))
+            
+            ffmpeg_cmd_fallback.append('pipe:1')
+            
+            result = subprocess.run(ffmpeg_cmd_fallback, capture_output=True, timeout=timeout, check=False)
+            
+            if result.returncode != 0:
+                # GPU 解码完全失败，回退到 CPU
+                logger.debug(f"GPU 解码失败 ({video_path.name})，回退到 CPU: {result.stderr.decode('utf-8', errors='ignore')[:200]}")
+                return extract_all_frames_cv2(video_path, frame_height, frame_width, max_frames)
         
         # 解析所有帧
         frame_size = frame_height * frame_width * 3
