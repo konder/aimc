@@ -145,8 +145,37 @@ def parse_info_csv(csv_path: Path) -> Dict[str, str]:
     return vid_to_filename
 
 
+def normalize_netdisk_filename(name: str) -> str:
+    """
+    规范化网盘转存后的文件名（反向转换特殊字符）
+    
+    网盘（如百度网盘）在转存文件时会替换文件系统非法字符：
+    - ⧸ (U+29F8) → /
+    - ？ (U+FF1F) → ?
+    - ： (U+FF1A) → :
+    - &#39; → '
+    - ｜ (U+FF5C) → |
+    - ＊ (U+FF0A) → *
+    - ＂ (U+FF02) → "
+    """
+    replacements = [
+        ('⧸', '/'),   # BIG SOLIDUS → SOLIDUS
+        ('？', '?'),   # FULLWIDTH QUESTION MARK → QUESTION MARK
+        ('：', ':'),   # FULLWIDTH COLON → COLON
+        ('&#39;', "'"), # HTML ENTITY → APOSTROPHE
+        ('｜', '|'),   # FULLWIDTH VERTICAL LINE → VERTICAL LINE
+        ('＊', '*'),   # FULLWIDTH ASTERISK → ASTERISK
+        ('＂', '"'),   # FULLWIDTH QUOTATION MARK → QUOTATION MARK
+    ]
+    
+    for old, new in replacements:
+        name = name.replace(old, new)
+    
+    return name
+
+
 def normalize_filename(name: str) -> str:
-    """标准化文件名"""
+    """标准化文件名（用于模糊匹配）"""
     name = re.sub(r'\.(mp4|webm|mkv|avi|mov)$', '', name, flags=re.IGNORECASE)
     name = name.lower()
     name = re.sub(r'[^a-z0-9]', '', name)
@@ -164,17 +193,53 @@ def build_file_index(videos_dir: Path) -> dict:
 
 
 def find_video_file(videos_dir: Path, filename: str, all_files: dict = None) -> Optional[Path]:
-    """查找视频文件"""
+    """
+    查找视频文件（支持网盘转存后的文件名匹配）
+    
+    匹配策略：
+    1. 直接匹配原始文件名
+    2. 添加 .mp4 后缀匹配
+    3. 使用网盘规范化后匹配（特殊字符反转）
+    4. 使用模糊匹配（移除所有特殊字符）
+    """
+    # 策略 1: 直接匹配
     direct_path = videos_dir / filename
     if direct_path.exists():
         return direct_path
     
+    # 策略 2: 添加 .mp4 后缀
     if not filename.endswith('.mp4'):
         mp4_path = videos_dir / f"{filename}.mp4"
         if mp4_path.exists():
             return mp4_path
     
+    # 策略 3: 网盘转存文件名匹配（特殊字符 → 全角/HTML实体）
+    # 例如：原始 "title: test?" → 网盘 "title： test？"
     if all_files is not None:
+        # 3a. 尝试反向转换：假设 filename 是原始名，转换为网盘格式
+        netdisk_filename = filename
+        netdisk_replacements = [
+            ('/', '⧸'),   # SOLIDUS → BIG SOLIDUS
+            ('?', '？'),  # QUESTION MARK → FULLWIDTH
+            (':', '：'),  # COLON → FULLWIDTH
+            ("'", '&#39;'),  # APOSTROPHE → HTML ENTITY
+            ('|', '｜'),  # VERTICAL LINE → FULLWIDTH
+            ('*', '＊'),  # ASTERISK → FULLWIDTH
+            ('"', '＂'),  # QUOTATION MARK → FULLWIDTH
+        ]
+        for old, new in netdisk_replacements:
+            netdisk_filename = netdisk_filename.replace(old, new)
+        
+        netdisk_path = videos_dir / netdisk_filename
+        if netdisk_path.exists():
+            return netdisk_path
+        
+        if not netdisk_filename.endswith('.mp4'):
+            netdisk_mp4 = videos_dir / f"{netdisk_filename}.mp4"
+            if netdisk_mp4.exists():
+                return netdisk_mp4
+        
+        # 策略 4: 模糊匹配（移除所有特殊字符）
         normalized = normalize_filename(filename)
         if normalized in all_files:
             return all_files[normalized]
@@ -724,7 +789,7 @@ def extract_all_frames_gpu_ffmpeg(
         
         if result.returncode != 0:
             # h264_cuvid 失败，尝试通用 hwaccel 方式（适用于其他编码格式）
-            logger.debug(f"h264_cuvid 解码失败，尝试通用 hwaccel: {video_path.name}")
+            logger.info(f"h264_cuvid解码失败（可能非h264编码），尝试scale_cuda: {video_path.name}")
             
             ffmpeg_cmd_fallback = [
                 'ffmpeg',
@@ -746,7 +811,8 @@ def extract_all_frames_gpu_ffmpeg(
             
             if result.returncode != 0:
                 # GPU 解码完全失败，回退到 CPU
-                logger.debug(f"GPU 解码失败 ({video_path.name})，回退到 CPU: {result.stderr.decode('utf-8', errors='ignore')[:200]}")
+                error_msg = result.stderr.decode('utf-8', errors='ignore')[:200]
+                logger.warning(f"⚠️ GPU解码失败，回退到CPU: {video_path.name} - {error_msg}")
                 return extract_all_frames_cv2(video_path, frame_height, frame_width, max_frames)
         
         # 解析所有帧
@@ -766,10 +832,10 @@ def extract_all_frames_gpu_ffmpeg(
         return frames
     
     except subprocess.TimeoutExpired:
-        logger.warning(f"GPU 解码超时: {video_path.name}")
+        logger.warning(f"⚠️ GPU解码超时，回退到CPU: {video_path.name}")
         return extract_all_frames_cv2(video_path, frame_height, frame_width, max_frames)
     except Exception as e:
-        logger.debug(f"GPU 解码异常 ({video_path.name}): {str(e)}")
+        logger.warning(f"⚠️ GPU解码异常，回退到CPU: {video_path.name} - {str(e)[:100]}")
         return extract_all_frames_cv2(video_path, frame_height, frame_width, max_frames)
 
 
