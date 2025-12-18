@@ -1,5 +1,10 @@
 # CLIP4MC 数据处理流水线使用指南
 
+> **重要更新**: 现已支持编码优化（preset, CRF），性能提升 2-4x！
+> 详见 `docs/guides/CLIP_OPTIMIZATION_CORRECTED.md`
+> 
+> **注意**: 原始视频已经是 360p 30fps，不需要降低分辨率和帧率
+
 **统一工具**: `src/utils/clip4mc_data_pipeline.py`
 
 整合了所有数据处理功能，支持从原始视频到训练数据的完整流程。

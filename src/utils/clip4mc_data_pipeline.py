@@ -188,14 +188,30 @@ def extract_clip_ffmpeg(
     start_time: float,
     end_time: float,
     use_gpu: bool = False,
-    gpu_id: int = 0
+    gpu_id: int = 0,
+    preset: str = "ultrafast",
+    crf: int = 28,
+    use_copy: bool = False,
+    target_height: int = 0,
+    target_fps: float = 0
 ) -> bool:
     """
-    使用 ffmpeg 提取视频片段
+    使用 ffmpeg 提取视频片段（优化版）
     
     Args:
-        use_gpu: 是否使用 GPU 加速编码（不是解码，是编码！）
+        use_gpu: 是否使用 GPU 加速编码
         gpu_id: GPU ID
+        preset: 编码速度预设 (ultrafast/superfast/veryfast/fast/medium)
+        crf: 质量控制 (18-30, 越大越快但质量越低)
+        use_copy: 是否直接复制（不重新编码，极快但精度降低）
+        target_height: 目标分辨率高度（0=保持原样）
+        target_fps: 目标帧率（0=保持原样）
+    
+    性能优化说明:
+        - 快速跳帧 (Input Seek): 已实现，100-300x 加速
+        - preset=ultrafast: 2-3x 加速
+        - crf=28: 1.3x 加速
+        - 注意: CLIP4MC 原始视频已经是 360p 30fps，通常不需要降低分辨率/帧率
     """
     if output_path.exists():
         return True
@@ -203,32 +219,70 @@ def extract_clip_ffmpeg(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = end_time - start_time
     
-    if use_gpu:
-        # GPU 加速编码（使用 h264_nvenc）
+    # 计算实际需要的帧率（确保至少 20 帧）
+    if target_fps > 0:
+        min_fps = 20.0 / max(duration, 1.0)  # 至少 20 帧
+        actual_fps = max(target_fps, min_fps)
+    else:
+        actual_fps = 0
+    
+    if use_copy:
+        # 方案 A: 直接复制（极快，10-50x，但精度 ±1秒）
         cmd = [
             "ffmpeg", "-y",
             "-ss", str(start_time),
             "-i", str(input_path),
             "-t", str(duration),
-            "-c:v", "h264_nvenc",  # GPU 编码器
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-avoid_negative_ts", "1",
+            "-loglevel", "error",
+            str(output_path)
+        ]
+    elif use_gpu:
+        # 方案 B: GPU 编码（不推荐，有并发限制）
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(start_time),
+            "-i", str(input_path),
+            "-t", str(duration),
+            "-c:v", "h264_nvenc",
             "-preset", "fast",
             "-c:a", "aac",
             "-loglevel", "error",
             str(output_path)
         ]
     else:
-        # CPU 编码
+        # 方案 C: CPU 编码（推荐，优化参数 + 分辨率/帧率优化）
+        # 构建视频滤镜
+        vf_filters = []
+        if target_height > 0:
+            vf_filters.append(f"scale=-2:{target_height}")  # 保持宽高比
+        if actual_fps > 0:
+            vf_filters.append(f"fps={actual_fps:.2f}")
+        
         cmd = [
             "ffmpeg", "-y",
             "-ss", str(start_time),
             "-i", str(input_path),
             "-t", str(duration),
+        ]
+        
+        # 添加视频滤镜
+        if vf_filters:
+            cmd.extend(["-vf", ",".join(vf_filters)])
+        
+        cmd.extend([
             "-c:v", "libx264",
+            "-preset", preset,      # 优化: 可配置速度
+            "-crf", str(crf),       # 优化: 可配置质量
             "-c:a", "aac",
-            "-preset", "fast",
+            "-b:a", "64k",          # 优化: 降低音频码率（CLIP4MC 不用音频）
+            "-ac", "1",             # 优化: 单声道
+            "-movflags", "+faststart",
             "-loglevel", "error",
             str(output_path)
-        ]
+        ])
     
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=120)
@@ -236,7 +290,18 @@ def extract_clip_ffmpeg(
         # 如果 GPU 编码失败，回退到 CPU
         if use_gpu and result.returncode != 0:
             cmd[cmd.index("h264_nvenc")] = "libx264"
+            cmd.insert(cmd.index("libx264") + 1, "-preset")
+            cmd.insert(cmd.index("libx264") + 2, preset)
+            cmd.insert(cmd.index("libx264") + 3, "-crf")
+            cmd.insert(cmd.index("libx264") + 4, str(crf))
             result = subprocess.run(cmd, capture_output=True, timeout=120)
+        
+        # 如果 copy 失败，回退到重新编码
+        if use_copy and result.returncode != 0:
+            return extract_clip_ffmpeg(
+                input_path, output_path, start_time, end_time,
+                use_gpu=False, preset=preset, crf=crf, use_copy=False
+            )
         
         return result.returncode == 0 and output_path.exists()
     except Exception:
@@ -254,11 +319,21 @@ def clip_single_video(task: Tuple[int, Dict]) -> Tuple[bool, Optional[Dict], Opt
         clips_dir = item['clips_dir']
         use_gpu = item.get('use_gpu', False)
         gpu_id = item.get('gpu_id', 0)
+        preset = item.get('preset', 'ultrafast')
+        crf = item.get('crf', 28)
+        use_copy = item.get('use_copy', False)
+        target_height = item.get('target_height', 360)
+        target_fps = item.get('target_fps', 2.0)
         
         clip_name = f"{vid}_{int(begin)}_{int(end)}.mp4"
         clip_path = clips_dir / clip_name
         
-        if extract_clip_ffmpeg(item['video_path'], clip_path, begin, end, use_gpu, gpu_id):
+        if extract_clip_ffmpeg(
+            item['video_path'], clip_path, begin, end,
+            use_gpu=use_gpu, gpu_id=gpu_id,
+            preset=preset, crf=crf, use_copy=use_copy,
+            target_height=target_height, target_fps=target_fps
+        ):
             result = {
                 'vid': vid,
                 'clip_path': str(clip_path),
@@ -282,20 +357,38 @@ def clip_videos(
     output_dir: Path,
     num_workers: int = 8,
     use_gpu: bool = False,
-    gpu_ids: List[int] = [0]
+    gpu_ids: List[int] = [0],
+    preset: str = "ultrafast",
+    crf: int = 28,
+    use_copy: bool = False,
+    target_height: int = 0,
+    target_fps: float = 0
 ) -> Tuple[List[Dict], Path]:
     """
-    视频切片阶段 (支持并行 + GPU 编码加速)
+    视频切片阶段 (支持并行 + 编码优化)
     
     Args:
-        use_gpu: 是否使用 GPU 加速编码（h264_nvenc）
-        gpu_ids: GPU IDs 列表，worker 会轮流使用
+        use_gpu: 是否使用 GPU 加速编码（不推荐，有并发限制）
+        gpu_ids: GPU IDs 列表
+        preset: 编码速度预设 (ultrafast/superfast/fast)
+        crf: 质量控制 (18-30)
+        use_copy: 直接复制模式（极快但精度降低）
+        target_height: 目标分辨率高度（0=保持原样）
+        target_fps: 目标帧率（0=保持原样）
     
     Returns:
         (pairs, clips_dir): 文本-视频对列表, 切片目录
     """
     logger.info("=" * 60)
-    logger.info(f"阶段 1: 视频切片 ({'GPU编码' if use_gpu else 'CPU编码'})")
+    if use_copy:
+        mode_desc = "copy模式（不转码）"
+    elif use_gpu:
+        mode_desc = "GPU编码（不推荐）"
+    else:
+        res_desc = f"{target_height}p" if target_height > 0 else "原始分辨率"
+        fps_desc = f"{target_fps}fps" if target_fps > 0 else "原始帧率"
+        mode_desc = f"CPU编码 (preset={preset}, crf={crf}, {res_desc}, {fps_desc})"
+    logger.info(f"阶段 1: 视频切片 ({mode_desc})")
     logger.info("=" * 60)
     
     # 解析映射
@@ -340,7 +433,12 @@ def clip_videos(
                 'size': item.get('size', []),
                 'clips_dir': clips_dir,
                 'use_gpu': use_gpu,
-                'gpu_id': gpu_id
+                'gpu_id': gpu_id,
+                'preset': preset,
+                'crf': crf,
+                'use_copy': use_copy,
+                'target_height': target_height,
+                'target_fps': target_fps
             })
     
     logger.info(f"可处理片段: {len(processable)} 条")
@@ -951,7 +1049,20 @@ def main():
     parser.add_argument("--workers-per-gpu", type=int, default=None,
                        help="每个GPU的worker数 (默认: --num-workers值，推荐4-8)")
     parser.add_argument("--gpu-encode-clip", action='store_true',
-                       help="切片阶段使用 GPU 编码 (h264_nvenc，需配合 --use-gpu)")
+                       help="切片阶段使用 GPU 编码 (h264_nvenc，需配合 --use-gpu，不推荐)")
+    
+    # 切片优化参数
+    parser.add_argument("--clip-preset", type=str, default="ultrafast",
+                       choices=['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium'],
+                       help="ffmpeg 编码速度预设 (默认: ultrafast，最快)")
+    parser.add_argument("--clip-crf", type=int, default=28,
+                       help="ffmpeg 质量控制 CRF (18-30，越大越快，默认: 28)")
+    parser.add_argument("--clip-use-copy", action='store_true',
+                       help="直接复制模式 (不重新编码，极快但精度降低)")
+    parser.add_argument("--clip-height", type=int, default=0,
+                       help="切片目标分辨率高度 (0=保持原样，默认: 0)")
+    parser.add_argument("--clip-fps", type=float, default=0,
+                       help="切片目标帧率 (0=保持原样，默认: 0)")
     
     parser.add_argument("--num-frames", type=int, default=16)
     parser.add_argument("--frame-height", type=int, default=160)
@@ -1033,7 +1144,12 @@ def main():
             args.output_dir,
             num_workers=clip_workers,
             use_gpu=use_gpu_encode,
-            gpu_ids=gpu_ids
+            gpu_ids=gpu_ids,
+            preset=args.clip_preset,
+            crf=args.clip_crf,
+            use_copy=args.clip_use_copy,
+            target_height=args.clip_height,
+            target_fps=args.clip_fps
         )
     
     # 阶段 2: 数据准备
