@@ -476,13 +476,15 @@ def clip_videos(
         if video_path:
             available_videos[vid] = video_path
     
-    logger.info(f"可用视频: {len(available_videos)} / {len(vid_to_filename)}")
+    missing_count = len(vid_to_filename) - len(available_videos)
+    match_rate = len(available_videos) / len(vid_to_filename) * 100 if vid_to_filename else 0
+    logger.info(f"可用视频: {len(available_videos)} / {len(vid_to_filename)} ({match_rate:.1f}%，缺失 {missing_count} 个)")
     
     # 创建切片目录
     clips_dir = output_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
     
-    # 筛选可处理的元数据
+    # 筛选可处理的元数据（一个视频可能对应多个片段）
     processable = []
     for i, item in enumerate(metadata):
         vid = item.get('vid', '')
@@ -506,7 +508,10 @@ def clip_videos(
                 'target_fps': target_fps
             })
     
-    logger.info(f"可处理片段: {len(processable)} 条")
+    # 统计实际使用的视频数（去重）
+    unique_vids = set(item['vid'] for item in processable)
+    avg_clips_per_video = len(processable) / len(unique_vids) if unique_vids else 0
+    logger.info(f"可处理片段: {len(processable)} 条（来自 {len(unique_vids)} 个视频，平均 {avg_clips_per_video:.2f} 片段/视频）")
     logger.info(f"并行进程: {num_workers}")
     if use_gpu:
         logger.info(f"GPU 编码: {len(gpu_ids)} 块 GPU")
