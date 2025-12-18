@@ -186,29 +186,58 @@ def extract_clip_ffmpeg(
     input_path: Path,
     output_path: Path,
     start_time: float,
-    end_time: float
+    end_time: float,
+    use_gpu: bool = False,
+    gpu_id: int = 0
 ) -> bool:
-    """使用 ffmpeg 提取视频片段"""
+    """
+    使用 ffmpeg 提取视频片段
+    
+    Args:
+        use_gpu: 是否使用 GPU 加速编码（不是解码，是编码！）
+        gpu_id: GPU ID
+    """
     if output_path.exists():
         return True
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = end_time - start_time
     
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", str(start_time),
-        "-i", str(input_path),
-        "-t", str(duration),
-        "-c:v", "libx264",
-        "-c:a", "aac",
-        "-preset", "fast",
-        "-loglevel", "error",
-        str(output_path)
-    ]
+    if use_gpu:
+        # GPU 加速编码（使用 h264_nvenc）
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(start_time),
+            "-i", str(input_path),
+            "-t", str(duration),
+            "-c:v", "h264_nvenc",  # GPU 编码器
+            "-preset", "fast",
+            "-c:a", "aac",
+            "-loglevel", "error",
+            str(output_path)
+        ]
+    else:
+        # CPU 编码
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(start_time),
+            "-i", str(input_path),
+            "-t", str(duration),
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-preset", "fast",
+            "-loglevel", "error",
+            str(output_path)
+        ]
     
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=120)
+        
+        # 如果 GPU 编码失败，回退到 CPU
+        if use_gpu and result.returncode != 0:
+            cmd[cmd.index("h264_nvenc")] = "libx264"
+            result = subprocess.run(cmd, capture_output=True, timeout=120)
+        
         return result.returncode == 0 and output_path.exists()
     except Exception:
         return False
@@ -223,11 +252,13 @@ def clip_single_video(task: Tuple[int, Dict]) -> Tuple[bool, Optional[Dict], Opt
         begin = item['begin']
         end = item['end']
         clips_dir = item['clips_dir']
+        use_gpu = item.get('use_gpu', False)
+        gpu_id = item.get('gpu_id', 0)
         
         clip_name = f"{vid}_{int(begin)}_{int(end)}.mp4"
         clip_path = clips_dir / clip_name
         
-        if extract_clip_ffmpeg(item['video_path'], clip_path, begin, end):
+        if extract_clip_ffmpeg(item['video_path'], clip_path, begin, end, use_gpu, gpu_id):
             result = {
                 'vid': vid,
                 'clip_path': str(clip_path),
@@ -249,16 +280,22 @@ def clip_videos(
     info_csv: Path,
     metadata_json: Path,
     output_dir: Path,
-    num_workers: int = 8
+    num_workers: int = 8,
+    use_gpu: bool = False,
+    gpu_ids: List[int] = [0]
 ) -> Tuple[List[Dict], Path]:
     """
-    视频切片阶段 (支持并行)
+    视频切片阶段 (支持并行 + GPU 编码加速)
+    
+    Args:
+        use_gpu: 是否使用 GPU 加速编码（h264_nvenc）
+        gpu_ids: GPU IDs 列表，worker 会轮流使用
     
     Returns:
         (pairs, clips_dir): 文本-视频对列表, 切片目录
     """
     logger.info("=" * 60)
-    logger.info("阶段 1: 视频切片 (并行)")
+    logger.info(f"阶段 1: 视频切片 ({'GPU编码' if use_gpu else 'CPU编码'})")
     logger.info("=" * 60)
     
     # 解析映射
@@ -289,9 +326,11 @@ def clip_videos(
     
     # 筛选可处理的元数据
     processable = []
-    for item in metadata:
+    for i, item in enumerate(metadata):
         vid = item.get('vid', '')
         if vid in available_videos:
+            # 为每个任务分配 GPU（轮流）
+            gpu_id = gpu_ids[i % len(gpu_ids)] if use_gpu else 0
             processable.append({
                 'vid': vid,
                 'video_path': available_videos[vid],
@@ -299,11 +338,15 @@ def clip_videos(
                 'begin': item.get('begin position', item.get('begin', 0)),
                 'end': item.get('end position', item.get('end', 0)),
                 'size': item.get('size', []),
-                'clips_dir': clips_dir  # 传递给 worker
+                'clips_dir': clips_dir,
+                'use_gpu': use_gpu,
+                'gpu_id': gpu_id
             })
     
     logger.info(f"可处理片段: {len(processable)} 条")
     logger.info(f"并行进程: {num_workers}")
+    if use_gpu:
+        logger.info(f"GPU 编码: {len(gpu_ids)} 块 GPU")
     
     if not processable:
         logger.error("没有可处理的片段")
@@ -460,19 +503,37 @@ def extract_frames_gpu_ffmpeg(
         return extract_frames_fast_cv2(video_path, num_frames, frame_height, frame_width)
 
 
+# 全局 tokenizer 缓存（避免重复加载）
+_global_tokenizer = None
+
+def get_tokenizer():
+    """获取或创建 tokenizer（单例模式）"""
+    global _global_tokenizer
+    if _global_tokenizer is None:
+        try:
+            import open_clip
+            _global_tokenizer = open_clip.get_tokenizer('ViT-B-16')
+        except:
+            _global_tokenizer = None
+    return _global_tokenizer
+
+
 def tokenize_text_clip(text: str) -> np.ndarray:
-    """CLIP tokenization"""
-    try:
-        import open_clip
-        tokenizer = open_clip.get_tokenizer('ViT-B-16')
-        tokens = tokenizer([text])
-        return tokens[0].numpy()
-    except:
-        # Fallback
-        tokens = np.zeros(77, dtype=np.int64)
-        tokens[0] = 49406  # SOS
-        tokens[-1] = 49407  # EOS
-        return tokens
+    """CLIP tokenization（优化：复用 tokenizer）"""
+    tokenizer = get_tokenizer()
+    
+    if tokenizer is not None:
+        try:
+            tokens = tokenizer([text])
+            return tokens[0].numpy()
+        except:
+            pass
+    
+    # Fallback
+    tokens = np.zeros(77, dtype=np.int64)
+    tokens[0] = 49406  # SOS
+    tokens[-1] = 49407  # EOS
+    return tokens
 
 
 def process_single_sample_cpu(
@@ -882,13 +943,15 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True, help="输出目录")
     
     # 处理参数
-    parser.add_argument("--num-workers", type=int, default=cpu_count(),
-                       help=f"CPU 进程数或每GPU worker数 (默认: {cpu_count()})")
+    parser.add_argument("--num-workers", type=int, default=None,
+                       help=f"CPU 进程数或每GPU worker数 (默认: 物理核心数，当前系统: {cpu_count()})")
     parser.add_argument("--use-gpu", action='store_true', help="使用 GPU 加速")
     parser.add_argument("--gpu-ids", type=str, default="0",
                        help="GPU IDs (逗号分隔)")
     parser.add_argument("--workers-per-gpu", type=int, default=None,
                        help="每个GPU的worker数 (默认: --num-workers值，推荐4-8)")
+    parser.add_argument("--gpu-encode-clip", action='store_true',
+                       help="切片阶段使用 GPU 编码 (h264_nvenc，需配合 --use-gpu)")
     
     parser.add_argument("--num-frames", type=int, default=16)
     parser.add_argument("--frame-height", type=int, default=160)
@@ -903,6 +966,19 @@ def main():
     parser.add_argument("--checkpoint-file", type=Path, default=Path("checkpoint.json"))
     
     args = parser.parse_args()
+    
+    # 智能设置 num_workers 默认值
+    if args.num_workers is None:
+        # 尝试获取物理核心数（避免超线程）
+        try:
+            import psutil
+            physical_cores = psutil.cpu_count(logical=False)
+            args.num_workers = physical_cores if physical_cores else cpu_count() // 2
+        except ImportError:
+            # 如果没有 psutil，假设超线程，除以 2
+            args.num_workers = max(1, cpu_count() // 2)
+        
+        logger.info(f"自动设置 num_workers = {args.num_workers} (系统 CPU: {cpu_count()})")
     
     # 检查依赖
     if not HAS_CV2:
@@ -919,6 +995,9 @@ def main():
     pairs = None
     clips_dir = None
     
+    # 解析 GPU IDs
+    gpu_ids = [int(x.strip()) for x in args.gpu_ids.split(',')]
+    
     # 阶段 1: 切片
     if args.mode in ['full', 'clip']:
         if not args.videos_dir or not args.info_csv or not args.metadata:
@@ -930,7 +1009,9 @@ def main():
             args.info_csv,
             args.metadata,
             args.output_dir,
-            num_workers=args.num_workers
+            num_workers=args.num_workers,
+            use_gpu=args.use_gpu and args.gpu_encode_clip,
+            gpu_ids=gpu_ids
         )
     
     # 阶段 2: 数据准备
