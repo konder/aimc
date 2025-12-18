@@ -490,6 +490,69 @@ def clip_videos(
 # 第二阶段: 数据准备 (帧提取 + Tokenization)
 # ============================================================
 
+def extract_all_frames_cv2(
+    video_path: Path,
+    frame_height: int = 160,
+    frame_width: int = 256,
+    max_frames: int = None
+) -> Optional[np.ndarray]:
+    """
+    提取视频的所有帧（官方 CLIP4MC 格式）
+    
+    ⚠️ 重要: 官方 CLIP4MC 要求保存视频的所有帧，不是采样的16帧！
+    DataLoader 会在加载时动态采样16帧。
+    
+    Args:
+        video_path: 视频路径
+        frame_height: 目标高度 (默认: 160)
+        frame_width: 目标宽度 (默认: 256)
+        max_frames: 最大帧数限制（可选，防止超长视频，如1000）
+    
+    Returns:
+        np.ndarray: shape (N, H, W, 3) 其中 N 是总帧数
+        
+    Example:
+        对于 10s × 30fps 的视频:
+        返回: (300, 160, 256, 3)
+    """
+    if not HAS_CV2:
+        return None
+    
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return None
+    
+    frames = []
+    frame_count = 0
+    
+    while True:
+        # 检查最大帧数限制
+        if max_frames and frame_count >= max_frames:
+            logger.warning(f"视频帧数超过限制 {max_frames}，截断")
+            break
+        
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # 转换颜色空间 BGR -> RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Resize 到目标尺寸
+        frame = cv2.resize(frame, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
+        
+        frames.append(frame)
+        frame_count += 1
+    
+    cap.release()
+    
+    if len(frames) == 0:
+        return None
+    
+    # 返回所有帧 (N, H, W, 3)
+    return np.array(frames, dtype=np.uint8)
+
+
 def extract_frames_fast_cv2(
     video_path: Path,
     num_frames: int = 16,
@@ -638,11 +701,14 @@ def process_single_sample_cpu(
     task: Tuple[int, Dict[str, Any]],
     clips_dir: Path,
     output_dir: Path,
-    num_frames: int,
     frame_height: int,
     frame_width: int
 ) -> Tuple[bool, Optional[str], Optional[str]]:
-    """处理单个样本 (CPU worker)"""
+    """
+    处理单个样本 (CPU worker)
+    
+    提取视频的所有帧（官方 CLIP4MC 格式）
+    """
     idx, pair = task
     
     try:
@@ -656,11 +722,14 @@ def process_single_sample_cpu(
         if not clip_path.exists():
             return False, None, f"文件不存在: {clip_path}"
         
-        # 提取帧
-        frames = extract_frames_fast_cv2(clip_path, num_frames, frame_height, frame_width)
+        # 提取所有帧（官方 CLIP4MC 格式）
+        frames = extract_all_frames_cv2(clip_path, frame_height, frame_width)
         
         if frames is None:
             return False, None, f"解码失败: {clip_path}"
+        
+        # 获取实际帧数
+        actual_num_frames = frames.shape[0]
         
         # Tokenize
         tokens = tokenize_text_clip(transcript)
@@ -675,17 +744,18 @@ def process_single_sample_cpu(
         with open(sample_dir / "text_input.pkl", "wb") as f:
             pickle.dump({'tokens': tokens}, f, protocol=pickle.HIGHEST_PROTOCOL)
         
-        # Size
+        # Size - 长度应该与实际帧数一致
         if 'size' in pair and isinstance(pair['size'], list) and len(pair['size']) > 0:
             size_values = pair['size']
-            if len(size_values) != num_frames:
-                if len(size_values) >= num_frames:
-                    indices = np.linspace(0, len(size_values) - 1, num_frames, dtype=int)
+            # 重采样到实际帧数
+            if len(size_values) != actual_num_frames:
+                if len(size_values) >= actual_num_frames:
+                    indices = np.linspace(0, len(size_values) - 1, actual_num_frames, dtype=int)
                     size_values = [size_values[i] for i in indices]
                 else:
-                    size_values = size_values + [size_values[-1]] * (num_frames - len(size_values))
+                    size_values = size_values + [size_values[-1]] * (actual_num_frames - len(size_values))
         else:
-            size_values = [0.5] * num_frames
+            size_values = [0.5] * actual_num_frames
         
         with open(sample_dir / "size.json", "w") as f:
             json.dump(size_values, f)
@@ -702,12 +772,16 @@ def gpu_worker(
     result_queue: Queue,
     clips_dir: Path,
     output_dir: Path,
-    num_frames: int,
     frame_height: int,
     frame_width: int,
     stop_event
 ):
-    """GPU 工作进程"""
+    """
+    GPU 工作进程
+    
+    注意: GPU 模式使用 CPU 提取所有帧（官方 CLIP4MC 格式）
+    GPU 仅用于其他加速，不用于帧提取
+    """
     logger.info(f"GPU {gpu_id} worker 启动")
     
     if HAS_TORCH:
@@ -736,14 +810,15 @@ def gpu_worker(
                     result_queue.put((False, None, f"文件不存在: {clip_path}"))
                     continue
                 
-                # GPU 解码
-                frames = extract_frames_gpu_ffmpeg(
-                    clip_path, num_frames, frame_height, frame_width, gpu_id
-                )
+                # 提取所有帧（使用 CPU，官方 CLIP4MC 格式）
+                frames = extract_all_frames_cv2(clip_path, frame_height, frame_width)
                 
                 if frames is None:
                     result_queue.put((False, None, f"解码失败: {clip_path}"))
                     continue
+                
+                # 获取实际帧数
+                actual_num_frames = frames.shape[0]
                 
                 tokens = tokenize_text_clip(transcript)
                 
@@ -756,16 +831,17 @@ def gpu_worker(
                 with open(sample_dir / "text_input.pkl", "wb") as f:
                     pickle.dump({'tokens': tokens}, f, protocol=pickle.HIGHEST_PROTOCOL)
                 
+                # Size - 长度应该与实际帧数一致
                 if 'size' in pair and isinstance(pair['size'], list) and len(pair['size']) > 0:
                     size_values = pair['size']
-                    if len(size_values) != num_frames:
-                        if len(size_values) >= num_frames:
-                            indices = np.linspace(0, len(size_values) - 1, num_frames, dtype=int)
+                    if len(size_values) != actual_num_frames:
+                        if len(size_values) >= actual_num_frames:
+                            indices = np.linspace(0, len(size_values) - 1, actual_num_frames, dtype=int)
                             size_values = [size_values[i] for i in indices]
                         else:
-                            size_values = size_values + [size_values[-1]] * (num_frames - len(size_values))
+                            size_values = size_values + [size_values[-1]] * (actual_num_frames - len(size_values))
                 else:
-                    size_values = [0.5] * num_frames
+                    size_values = [0.5] * actual_num_frames
                 
                 with open(sample_dir / "size.json", "w") as f:
                     json.dump(size_values, f)
@@ -790,12 +866,13 @@ def process_data_cpu(
     clips_dir: Path,
     output_dir: Path,
     num_workers: int,
-    num_frames: int = 16,
     frame_height: int = 160,
     frame_width: int = 256,
     resume_from: Optional[Path] = None
 ) -> List[str]:
-    """CPU 多进程处理"""
+    """
+    CPU 多进程处理（官方 CLIP4MC 格式：提取所有帧）
+    """
     logger.info("=" * 60)
     logger.info("阶段 2: 数据准备 (CPU 多进程)")
     logger.info("=" * 60)
@@ -821,7 +898,6 @@ def process_data_cpu(
         process_single_sample_cpu,
         clips_dir=clips_dir,
         output_dir=output_dir,
-        num_frames=num_frames,
         frame_height=frame_height,
         frame_width=frame_width
     )
@@ -869,13 +945,14 @@ def process_data_gpu(
     output_dir: Path,
     gpu_ids: List[int],
     num_workers_per_gpu: int = 4,
-    num_frames: int = 16,
     frame_height: int = 160,
     frame_width: int = 256,
     resume_from: Optional[Path] = None
 ) -> List[str]:
     """
-    GPU 多进程处理
+    GPU 多进程处理（官方 CLIP4MC 格式：提取所有帧）
+    
+    注意: 使用 CPU 提取所有帧，GPU 仅用于其他加速
     
     Args:
         num_workers_per_gpu: 每个 GPU 运行的 worker 数量
@@ -923,7 +1000,7 @@ def process_data_gpu(
             p = Process(
                 target=gpu_worker,
                 args=(gpu_id, task_queue, result_queue, clips_dir, output_dir,
-                      num_frames, frame_height, frame_width, stop_event),
+                      frame_height, frame_width, stop_event),
                 name=f"GPU-{gpu_id}-Worker-{worker_id}"
             )
             p.start()
@@ -1064,7 +1141,7 @@ def main():
     parser.add_argument("--clip-fps", type=float, default=0,
                        help="切片目标帧率 (0=保持原样，默认: 0)")
     
-    parser.add_argument("--num-frames", type=int, default=16)
+    # 帧提取参数（官方 CLIP4MC 格式：提取所有帧）
     parser.add_argument("--frame-height", type=int, default=160)
     parser.add_argument("--frame-width", type=int, default=256)
     
@@ -1177,7 +1254,6 @@ def main():
             successful_dirs = process_data_gpu(
                 pairs, clips_dir, args.output_dir, gpu_ids,
                 num_workers_per_gpu=workers_per_gpu,
-                num_frames=args.num_frames,
                 frame_height=args.frame_height,
                 frame_width=args.frame_width,
                 resume_from=args.checkpoint_file if args.resume else None
@@ -1185,7 +1261,7 @@ def main():
         else:
             successful_dirs = process_data_cpu(
                 pairs, clips_dir, args.output_dir, args.num_workers,
-                args.num_frames, args.frame_height, args.frame_width,
+                args.frame_height, args.frame_width,
                 args.checkpoint_file if args.resume else None
             )
         
