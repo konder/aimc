@@ -214,20 +214,51 @@ def extract_clip_ffmpeg(
         return False
 
 
+def clip_single_video(task: Tuple[int, Dict]) -> Tuple[bool, Optional[Dict], Optional[str]]:
+    """处理单个视频切片 (worker 函数)"""
+    i, item = task
+    
+    try:
+        vid = item['vid']
+        begin = item['begin']
+        end = item['end']
+        clips_dir = item['clips_dir']
+        
+        clip_name = f"{vid}_{int(begin)}_{int(end)}.mp4"
+        clip_path = clips_dir / clip_name
+        
+        if extract_clip_ffmpeg(item['video_path'], clip_path, begin, end):
+            result = {
+                'vid': vid,
+                'clip_path': str(clip_path),
+                'transcript': item['transcript'],
+                'begin_time': begin,
+                'end_time': end,
+                'duration': end - begin,
+                'size': item.get('size', [])
+            }
+            return True, result, None
+        else:
+            return False, None, f"切片失败: {vid}"
+    except Exception as e:
+        return False, None, f"异常: {str(e)}"
+
+
 def clip_videos(
     videos_dir: Path,
     info_csv: Path,
     metadata_json: Path,
-    output_dir: Path
+    output_dir: Path,
+    num_workers: int = 8
 ) -> Tuple[List[Dict], Path]:
     """
-    视频切片阶段
+    视频切片阶段 (支持并行)
     
     Returns:
         (pairs, clips_dir): 文本-视频对列表, 切片目录
     """
     logger.info("=" * 60)
-    logger.info("阶段 1: 视频切片")
+    logger.info("阶段 1: 视频切片 (并行)")
     logger.info("=" * 60)
     
     # 解析映射
@@ -252,6 +283,10 @@ def clip_videos(
     
     logger.info(f"可用视频: {len(available_videos)} / {len(vid_to_filename)}")
     
+    # 创建切片目录
+    clips_dir = output_dir / "clips"
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    
     # 筛选可处理的元数据
     processable = []
     for item in metadata:
@@ -263,45 +298,42 @@ def clip_videos(
                 'transcript': item.get('transcript', item.get('transcript clip', '')),
                 'begin': item.get('begin position', item.get('begin', 0)),
                 'end': item.get('end position', item.get('end', 0)),
-                'size': item.get('size', [])
+                'size': item.get('size', []),
+                'clips_dir': clips_dir  # 传递给 worker
             })
     
     logger.info(f"可处理片段: {len(processable)} 条")
+    logger.info(f"并行进程: {num_workers}")
     
     if not processable:
         logger.error("没有可处理的片段")
         sys.exit(1)
     
-    # 创建切片目录
-    clips_dir = output_dir / "clips"
-    clips_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 切片处理
+    # 并行切片处理
+    tasks = list(enumerate(processable))
     results = []
-    iterator = enumerate(processable)
-    if HAS_TQDM:
-        iterator = tqdm(list(iterator), desc="🎬 视频切片", unit="clip")
+    failed_count = 0
     
-    for i, item in iterator:
-        vid = item['vid']
-        begin = item['begin']
-        end = item['end']
+    with Pool(num_workers) as pool:
+        if HAS_TQDM:
+            clip_results = tqdm(
+                pool.imap_unordered(clip_single_video, tasks, chunksize=5),
+                total=len(tasks),
+                desc="🎬 视频切片",
+                unit="clip"
+            )
+        else:
+            clip_results = pool.imap_unordered(clip_single_video, tasks, chunksize=5)
         
-        clip_name = f"{vid}_{int(begin)}_{int(end)}.mp4"
-        clip_path = clips_dir / clip_name
-        
-        if extract_clip_ffmpeg(item['video_path'], clip_path, begin, end):
-            results.append({
-                'vid': vid,
-                'clip_path': str(clip_path),
-                'transcript': item['transcript'],
-                'begin_time': begin,
-                'end_time': end,
-                'duration': end - begin,
-                'size': item.get('size', [])
-            })
+        for success, result, error_msg in clip_results:
+            if success:
+                results.append(result)
+            else:
+                failed_count += 1
+                if error_msg and failed_count <= 5:
+                    logger.warning(error_msg)
     
-    logger.info(f"切片完成: {len(results)} 个片段")
+    logger.info(f"切片完成: {len(results)} 个片段 (失败 {failed_count})")
     
     # 保存 pairs JSON
     pairs_json = output_dir / "text_video_pairs.json"
@@ -677,12 +709,21 @@ def process_data_gpu(
     clips_dir: Path,
     output_dir: Path,
     gpu_ids: List[int],
+    num_workers_per_gpu: int = 4,
     num_frames: int = 16,
     frame_height: int = 160,
     frame_width: int = 256,
     resume_from: Optional[Path] = None
 ) -> List[str]:
-    """GPU 多进程处理"""
+    """
+    GPU 多进程处理
+    
+    Args:
+        num_workers_per_gpu: 每个 GPU 运行的 worker 数量
+            - 增加可以提高 GPU 利用率
+            - 但每个 worker 会占用 GPU 显存（~500MB）
+            - 推荐: 2-8 个 worker/GPU
+    """
     logger.info("=" * 60)
     logger.info("阶段 2: 数据准备 (GPU 加速)")
     logger.info("=" * 60)
@@ -700,8 +741,9 @@ def process_data_gpu(
         logger.info("所有样本已处理完成")
         return []
     
+    total_workers = len(gpu_ids) * num_workers_per_gpu
     logger.info(f"待处理: {len(tasks)} 个样本")
-    logger.info(f"使用 GPU: {gpu_ids}")
+    logger.info(f"GPU 配置: {len(gpu_ids)} 块 GPU × {num_workers_per_gpu} workers = {total_workers} 并行进程")
     
     manager = Manager()
     task_queue = manager.Queue()
@@ -711,18 +753,22 @@ def process_data_gpu(
     for task in tasks:
         task_queue.put(task)
     
-    for _ in gpu_ids:
+    # 为每个 worker 添加毒丸信号
+    for _ in range(total_workers):
         task_queue.put(None)
     
+    # 为每个 GPU 创建多个 worker
     workers = []
     for gpu_id in gpu_ids:
-        p = Process(
-            target=gpu_worker,
-            args=(gpu_id, task_queue, result_queue, clips_dir, output_dir,
-                  num_frames, frame_height, frame_width, stop_event)
-        )
-        p.start()
-        workers.append(p)
+        for worker_id in range(num_workers_per_gpu):
+            p = Process(
+                target=gpu_worker,
+                args=(gpu_id, task_queue, result_queue, clips_dir, output_dir,
+                      num_frames, frame_height, frame_width, stop_event),
+                name=f"GPU-{gpu_id}-Worker-{worker_id}"
+            )
+            p.start()
+            workers.append(p)
     
     successful_dirs = []
     failed_count = 0
@@ -837,10 +883,12 @@ def main():
     
     # 处理参数
     parser.add_argument("--num-workers", type=int, default=cpu_count(),
-                       help=f"CPU 进程数 (默认: {cpu_count()})")
+                       help=f"CPU 进程数或每GPU worker数 (默认: {cpu_count()})")
     parser.add_argument("--use-gpu", action='store_true', help="使用 GPU 加速")
     parser.add_argument("--gpu-ids", type=str, default="0",
                        help="GPU IDs (逗号分隔)")
+    parser.add_argument("--workers-per-gpu", type=int, default=None,
+                       help="每个GPU的worker数 (默认: --num-workers值，推荐4-8)")
     
     parser.add_argument("--num-frames", type=int, default=16)
     parser.add_argument("--frame-height", type=int, default=160)
@@ -881,7 +929,8 @@ def main():
             args.videos_dir,
             args.info_csv,
             args.metadata,
-            args.output_dir
+            args.output_dir,
+            num_workers=args.num_workers
         )
     
     # 阶段 2: 数据准备
@@ -904,10 +953,15 @@ def main():
         # 选择处理方式
         if args.use_gpu:
             gpu_ids = [int(x.strip()) for x in args.gpu_ids.split(',')]
+            # 如果指定了 workers-per-gpu，使用它；否则使用 num-workers
+            workers_per_gpu = args.workers_per_gpu if args.workers_per_gpu else args.num_workers
             successful_dirs = process_data_gpu(
                 pairs, clips_dir, args.output_dir, gpu_ids,
-                args.num_frames, args.frame_height, args.frame_width,
-                args.checkpoint_file if args.resume else None
+                num_workers_per_gpu=workers_per_gpu,
+                num_frames=args.num_frames,
+                frame_height=args.frame_height,
+                frame_width=args.frame_width,
+                resume_from=args.checkpoint_file if args.resume else None
             )
         else:
             successful_dirs = process_data_cpu(
