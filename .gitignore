@@ -40,7 +40,7 @@ env/
 logs/
 /data/
 /results/
-/docs/
+docs/
 
 # MineDojo specific
 .minedojo/

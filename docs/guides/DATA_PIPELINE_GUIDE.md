@@ -176,16 +176,21 @@ python src/utils/clip4mc_data_pipeline.py \
     --output-dir /mnt/nvme/processed \
     --use-gpu \
     --gpu-ids 0,1,2,3 \
+    --workers-per-gpu 8 \
     --split-mode all_train \
     --resume
+    # 注意：不要加 --gpu-encode-clip（会变慢）
 ```
 
 **说明**:
-- 使用 4 块 GPU 加速
+- 使用 4 块 GPU 加速（仅用于帧提取，不用于切片编码）
 - 全部样本作为训练集
 - 启用断点续传
+- ⚠️ **不要使用 `--gpu-encode-clip`**（GPU 编码器有并发限制，反而变慢）
 
 **性能预估** (30万视频):
+- 切片阶段: CPU 并行（3-4 clip/s）
+- 帧提取阶段: GPU 加速（8-12 video/s per GPU）
 - 4x 3090: **~4-6 小时**
 - 8x 3090: **~2-3 小时**
 

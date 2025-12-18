@@ -973,12 +973,22 @@ def main():
         try:
             import psutil
             physical_cores = psutil.cpu_count(logical=False)
-            args.num_workers = physical_cores if physical_cores else cpu_count() // 2
+            if physical_cores and physical_cores > 0:
+                args.num_workers = physical_cores
+            else:
+                # psutil 返回 None，保守估计
+                args.num_workers = max(4, cpu_count() // 4)
         except ImportError:
-            # 如果没有 psutil，假设超线程，除以 2
-            args.num_workers = max(1, cpu_count() // 2)
+            # 如果没有 psutil，保守估计
+            # 避免使用过多进程（超线程 + 资源竞争）
+            logical_cores = cpu_count()
+            if logical_cores >= 64:
+                # 大型服务器，假设超线程，除以 4 更安全
+                args.num_workers = max(16, logical_cores // 4)
+            else:
+                args.num_workers = max(4, logical_cores // 2)
         
-        logger.info(f"自动设置 num_workers = {args.num_workers} (系统 CPU: {cpu_count()})")
+        logger.info(f"自动设置 num_workers = {args.num_workers} (系统逻辑核心: {cpu_count()})")
     
     # 检查依赖
     if not HAS_CV2:
@@ -1004,13 +1014,25 @@ def main():
             logger.error("--mode=clip/full 需要: --videos-dir, --info-csv, --metadata")
             sys.exit(1)
         
+        # GPU 编码有并发限制，调整 workers
+        clip_workers = args.num_workers
+        use_gpu_encode = args.use_gpu and args.gpu_encode_clip
+        
+        if use_gpu_encode:
+            # NVENC 只能同时处理 2-3 个会话，限制 workers
+            max_gpu_encode_workers = len(gpu_ids) * 4  # 每个 GPU 最多 4 个并发
+            if clip_workers > max_gpu_encode_workers:
+                logger.warning(f"GPU 编码并发限制: workers {clip_workers} → {max_gpu_encode_workers}")
+                logger.warning(f"建议: 不使用 --gpu-encode-clip (CPU 编码在并行场景下更快)")
+                clip_workers = max_gpu_encode_workers
+        
         pairs, clips_dir = clip_videos(
             args.videos_dir,
             args.info_csv,
             args.metadata,
             args.output_dir,
-            num_workers=args.num_workers,
-            use_gpu=args.use_gpu and args.gpu_encode_clip,
+            num_workers=clip_workers,
+            use_gpu=use_gpu_encode,
             gpu_ids=gpu_ids
         )
     
