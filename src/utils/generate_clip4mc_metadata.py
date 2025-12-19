@@ -142,6 +142,9 @@ def _build_video_index(video_files: List[Path], use_loose_match: bool) -> Dict:
     - 避免重复计算 normalized 版本
     - 在 worker 初始化时只计算一次
     
+    重要：对所有文件名先应用 normalize_netdisk_filename，
+    以处理云存储/网盘的特殊字符替换（全角符号、HTML实体等）
+    
     Args:
         video_files: 视频文件列表
         use_loose_match: 是否使用宽松匹配
@@ -159,38 +162,36 @@ def _build_video_index(video_files: List[Path], use_loose_match: bool) -> Dict:
     if use_loose_match:
         index['loose'] = {}           # 策略 3: 宽松匹配
         index['ultra_loose'] = {}     # 策略 4: 超宽松匹配
-        index['netdisk'] = {}         # 策略 5: 网盘字符匹配
     
     # 预计算所有文件的 normalized 版本
     for video_file in video_files:
         stem = video_file.stem
         
-        # 策略 1: 直接匹配索引
-        index['direct'][stem] = video_file
+        # 🔧 关键修复：先应用网盘字符规范化
+        # 将全角符号、HTML实体等转换为标准字符
+        stem_normalized_netdisk = normalize_netdisk_filename(stem)
+        
+        # 策略 1: 直接匹配索引（使用规范化后的文件名）
+        index['direct'][stem_normalized_netdisk] = video_file
         
         # 策略 2: 规范化匹配索引
-        normalized = normalize_title_for_filename(stem, remove_punctuation=False)
+        normalized = normalize_title_for_filename(stem_normalized_netdisk, remove_punctuation=False)
         if normalized not in index['normalized']:  # 避免覆盖（保留第一个匹配）
             index['normalized'][normalized] = video_file
         
         # 宽松匹配索引（仅在启用时）
         if use_loose_match:
             # 策略 3: 宽松匹配（移除标点符号）
-            loose = normalize_title_for_filename(stem, remove_punctuation=True)
+            loose = normalize_title_for_filename(stem_normalized_netdisk, remove_punctuation=True)
             if loose not in index['loose']:
                 index['loose'][loose] = video_file
             
             # 策略 4: 超宽松匹配（只保留字母和数字）
-            ultra_loose = normalize_for_ultra_loose_match(stem)
+            ultra_loose = normalize_for_ultra_loose_match(stem_normalized_netdisk)
             if ultra_loose not in index['ultra_loose']:
                 index['ultra_loose'][ultra_loose] = video_file
-            
-            # 策略 5: 网盘字符匹配
-            netdisk = normalize_netdisk_filename(normalized)
-            if netdisk not in index['netdisk']:
-                index['netdisk'][netdisk] = video_file
         
-        # vid 包含匹配（需要遍历，但已经预存了 stem 避免重复访问）
+        # vid 包含匹配（需要遍历，使用原始 stem 以保留 vid）
         index['vid_contains'].append((video_file, stem))
     
     return index
@@ -295,23 +296,69 @@ def normalize_netdisk_filename(name: str) -> str:
     """
     规范化网盘转存后的文件名（反向转换特殊字符）
     
-    网盘（如百度网盘）在转存文件时会替换文件系统非法字符：
-    - ⧸ (U+29F8) → /
-    - ？ (U+FF1F) → ?
-    - ： (U+FF1A) → :
-    - &#39; → '
-    - ｜ (U+FF5C) → |
-    - ＊ (U+FF0A) → *
-    - ＂ (U+FF02) → "
+    网盘（如百度网盘）和云存储在转存文件时会替换文件系统非法字符。
+    这个函数将这些替换字符转回原始字符，以便匹配。
+    
+    支持的转换：
+    - 全角标点符号 → 半角
+    - 特殊Unicode字符 → 标准字符
+    - HTML实体 → 原始字符
     """
     replacements = [
-        ('⧸', '/'),   # BIG SOLIDUS → SOLIDUS
-        ('？', '?'),   # FULLWIDTH QUESTION MARK → QUESTION MARK
-        ('：', ':'),   # FULLWIDTH COLON → COLON
-        ('&#39;', "'"), # HTML ENTITY → APOSTROPHE
-        ('｜', '|'),   # FULLWIDTH VERTICAL LINE → VERTICAL LINE
-        ('＊', '*'),   # FULLWIDTH ASTERISK → ASTERISK
-        ('＂', '"'),   # FULLWIDTH QUOTATION MARK → QUOTATION MARK
+        # 特殊Unicode字符（优先处理）
+        ('⧸', '/'),    # BIG SOLIDUS (U+29F8) → SOLIDUS
+        ('⁄', '/'),    # FRACTION SLASH (U+2044) → SOLIDUS
+        ('∕', '/'),    # DIVISION SLASH (U+2215) → SOLIDUS
+        
+        # 全角标点符号 → 半角（最常见）
+        ('！', '!'),   # FULLWIDTH EXCLAMATION MARK
+        ('＂', '"'),   # FULLWIDTH QUOTATION MARK
+        ('＃', '#'),   # FULLWIDTH NUMBER SIGN
+        ('＄', '$'),   # FULLWIDTH DOLLAR SIGN
+        ('％', '%'),   # FULLWIDTH PERCENT SIGN
+        ('＆', '&'),   # FULLWIDTH AMPERSAND
+        ('＇', "'"),   # FULLWIDTH APOSTROPHE
+        ('（', '('),   # FULLWIDTH LEFT PARENTHESIS
+        ('）', ')'),   # FULLWIDTH RIGHT PARENTHESIS
+        ('＊', '*'),   # FULLWIDTH ASTERISK
+        ('＋', '+'),   # FULLWIDTH PLUS SIGN
+        ('，', ','),   # FULLWIDTH COMMA
+        ('－', '-'),   # FULLWIDTH HYPHEN-MINUS
+        ('．', '.'),   # FULLWIDTH FULL STOP
+        ('／', '/'),   # FULLWIDTH SOLIDUS
+        ('：', ':'),   # FULLWIDTH COLON
+        ('；', ';'),   # FULLWIDTH SEMICOLON
+        ('＜', '<'),   # FULLWIDTH LESS-THAN SIGN
+        ('＝', '='),   # FULLWIDTH EQUALS SIGN
+        ('＞', '>'),   # FULLWIDTH GREATER-THAN SIGN
+        ('？', '?'),   # FULLWIDTH QUESTION MARK
+        ('＠', '@'),   # FULLWIDTH COMMERCIAL AT
+        ('［', '['),   # FULLWIDTH LEFT SQUARE BRACKET
+        ('＼', '\\'),  # FULLWIDTH REVERSE SOLIDUS
+        ('］', ']'),   # FULLWIDTH RIGHT SQUARE BRACKET
+        ('＾', '^'),   # FULLWIDTH CIRCUMFLEX ACCENT
+        ('＿', '_'),   # FULLWIDTH LOW LINE
+        ('｀', '`'),   # FULLWIDTH GRAVE ACCENT
+        ('｛', '{'),   # FULLWIDTH LEFT CURLY BRACKET
+        ('｜', '|'),   # FULLWIDTH VERTICAL LINE
+        ('｝', '}'),   # FULLWIDTH RIGHT CURLY BRACKET
+        ('～', '~'),   # FULLWIDTH TILDE
+        
+        # HTML实体编码
+        ('&#39;', "'"),  # APOSTROPHE
+        ('&quot;', '"'), # QUOTATION MARK
+        ('&amp;', '&'),  # AMPERSAND
+        ('&lt;', '<'),   # LESS-THAN
+        ('&gt;', '>'),   # GREATER-THAN
+        
+        # 其他常见替换
+        (''', "'"),   # LEFT SINGLE QUOTATION MARK
+        (''', "'"),   # RIGHT SINGLE QUOTATION MARK
+        ('"', '"'),   # LEFT DOUBLE QUOTATION MARK
+        ('"', '"'),   # RIGHT DOUBLE QUOTATION MARK
+        ('—', '-'),   # EM DASH
+        ('–', '-'),   # EN DASH
+        ('…', '...'), # HORIZONTAL ELLIPSIS
     ]
     
     for old, new in replacements:
@@ -413,9 +460,13 @@ def _find_video_file_with_index(
     """
     使用预计算索引查找视频文件（O(1) 字典查找）
     
+    重要：title 不需要应用 normalize_netdisk_filename，
+    因为索引构建时已经对文件名应用了该函数。
+    直接比较即可。
+    
     Args:
         vid: 视频 ID
-        title: 视频标题
+        title: 视频标题（来自 CSV，标准格式）
         index: 预计算的索引字典
         use_loose_match: 是否使用宽松匹配
     
@@ -423,6 +474,7 @@ def _find_video_file_with_index(
         视频文件路径，未找到则返回 None
     """
     # 策略 1: 直接匹配 O(1)
+    # title 和索引中的 key 都是标准格式，直接比较
     if title in index['direct']:
         return index['direct'][title]
     
@@ -443,20 +495,17 @@ def _find_video_file_with_index(
         if ultra_loose_title in index['ultra_loose']:
             return index['ultra_loose'][ultra_loose_title]
         
-        # 策略 5: 网盘字符匹配 O(1)
-        netdisk_title = normalize_netdisk_filename(normalized_title)
-        if netdisk_title in index['netdisk']:
-            return index['netdisk'][netdisk_title]
-        
-        # 策略 6: vid 包含匹配 O(n) - 仍需遍历，但已预存 stem
+        # 策略 5: vid 包含匹配 O(n) - 仍需遍历，但已预存 stem
         for video_file, stem in index['vid_contains']:
             if vid in stem:
                 return video_file
         
-        # 策略 7: 模糊匹配（前 30 个字符）O(n)
+        # 策略 6: 模糊匹配（前 30 个字符）O(n)
         title_prefix = normalize_title_for_filename(title, remove_punctuation=True)[:30].lower()
         for video_file, stem in index['vid_contains']:
-            file_prefix = normalize_title_for_filename(stem, remove_punctuation=True)[:30].lower()
+            # 对 stem 也应用网盘规范化后再比较
+            stem_normalized = normalize_netdisk_filename(stem)
+            file_prefix = normalize_title_for_filename(stem_normalized, remove_punctuation=True)[:30].lower()
             if title_prefix == file_prefix:
                 return video_file
     else:
@@ -477,6 +526,8 @@ def _find_video_file_linear(
     """
     传统线性查找（向后兼容）
     
+    重要：对文件名应用网盘字符规范化以匹配索引版本的行为
+    
     Args:
         vid: 视频 ID
         title: 视频标题
@@ -488,13 +539,15 @@ def _find_video_file_linear(
     """
     # 策略 1: 直接匹配（总是启用）
     for video_file in video_files:
-        if video_file.stem == title:
+        stem_normalized = normalize_netdisk_filename(video_file.stem)
+        if stem_normalized == title:
             return video_file
     
     # 策略 2: 规范化后匹配（总是启用）
     normalized_title = normalize_title_for_filename(title, remove_punctuation=False)
     for video_file in video_files:
-        normalized_filename = normalize_title_for_filename(video_file.stem, remove_punctuation=False)
+        stem_normalized = normalize_netdisk_filename(video_file.stem)
+        normalized_filename = normalize_title_for_filename(stem_normalized, remove_punctuation=False)
         if normalized_filename == normalized_title:
             return video_file
     
@@ -503,34 +556,29 @@ def _find_video_file_linear(
         # 策略 3: 宽松匹配（移除 emoji + 标点符号）
         loose_title = normalize_title_for_filename(title, remove_punctuation=True)
         for video_file in video_files:
-            loose_filename = normalize_title_for_filename(video_file.stem, remove_punctuation=True)
+            stem_normalized = normalize_netdisk_filename(video_file.stem)
+            loose_filename = normalize_title_for_filename(stem_normalized, remove_punctuation=True)
             if loose_filename == loose_title:
                 return video_file
         
         # 策略 4: 超宽松匹配（只保留字母和数字）
         ultra_loose_title = normalize_for_ultra_loose_match(title)
         for video_file in video_files:
-            ultra_loose_filename = normalize_for_ultra_loose_match(video_file.stem)
+            stem_normalized = normalize_netdisk_filename(video_file.stem)
+            ultra_loose_filename = normalize_for_ultra_loose_match(stem_normalized)
             if ultra_loose_filename == ultra_loose_title:
                 return video_file
         
-        # 策略 5: 规范化 + 网盘字符替换
-        normalized_title_netdisk = normalize_netdisk_filename(normalized_title)
-        for video_file in video_files:
-            normalized_filename = normalize_title_for_filename(video_file.stem, remove_punctuation=False)
-            normalized_filename_netdisk = normalize_netdisk_filename(normalized_filename)
-            if normalized_filename_netdisk == normalized_title_netdisk:
-                return video_file
-        
-        # 策略 6: vid 匹配
+        # 策略 5: vid 匹配
         for video_file in video_files:
             if vid in video_file.stem:
                 return video_file
         
-        # 策略 7: 模糊匹配（前 30 个字符）
+        # 策略 6: 模糊匹配（前 30 个字符）
         title_prefix = normalize_title_for_filename(title, remove_punctuation=True)[:30].lower()
         for video_file in video_files:
-            file_prefix = normalize_title_for_filename(video_file.stem, remove_punctuation=True)[:30].lower()
+            stem_normalized = normalize_netdisk_filename(video_file.stem)
+            file_prefix = normalize_title_for_filename(stem_normalized, remove_punctuation=True)[:30].lower()
             if title_prefix == file_prefix:
                 return video_file
     else:
