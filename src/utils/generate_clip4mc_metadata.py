@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs
 import argparse
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Pool
 from tqdm import tqdm
 
 # 设置日志
@@ -54,6 +54,71 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 全局变量（用于进程池初始化）
+# ============================================================
+_worker_vid_to_title = None
+_worker_video_files = None
+_worker_text_inputs_dir = None
+_worker_use_loose_match = None
+_worker_video_prefix = None
+_worker_text_prefix = None
+
+
+def _init_metadata_worker(
+    vid_to_title: Dict[str, str],
+    video_files: List[Path],
+    text_inputs_dir: Path,
+    use_loose_match: bool,
+    video_prefix: str,
+    text_prefix: str
+):
+    """
+    初始化 worker 进程（每个进程只调用一次）
+    
+    Args:
+        vid_to_title: vid 到 title 的映射
+        video_files: 视频文件列表
+        text_inputs_dir: text_input.pkl 输出目录
+        use_loose_match: 是否使用宽松匹配
+        video_prefix: 视频路径前缀
+        text_prefix: text_input.pkl 路径前缀
+    """
+    global _worker_vid_to_title, _worker_video_files, _worker_text_inputs_dir
+    global _worker_use_loose_match, _worker_video_prefix, _worker_text_prefix
+    
+    _worker_vid_to_title = vid_to_title
+    _worker_video_files = video_files
+    _worker_text_inputs_dir = text_inputs_dir
+    _worker_use_loose_match = use_loose_match
+    _worker_video_prefix = video_prefix
+    _worker_text_prefix = text_prefix
+
+
+def _process_clip_worker(clip: VideoClip) -> Tuple[Optional[Dict], Optional[Dict]]:
+    """
+    Worker 函数：处理单个 clip（使用全局变量）
+    
+    Args:
+        clip: 视频片段
+    
+    Returns:
+        (metadata_item, unmatched_item)
+    """
+    global _worker_vid_to_title, _worker_video_files, _worker_text_inputs_dir
+    global _worker_use_loose_match, _worker_video_prefix, _worker_text_prefix
+    
+    return process_single_clip(
+        clip,
+        _worker_vid_to_title,
+        _worker_video_files,
+        _worker_text_inputs_dir,
+        _worker_use_loose_match,
+        _worker_video_prefix,
+        _worker_text_prefix
+    )
 
 
 @dataclass
@@ -612,40 +677,32 @@ def main():
                 unmatched_items.append(unmatched_item)
                 failed_count += 1
     else:
-        # 多进程模式
-        with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
-            # 提交所有任务
-            futures = {
-                executor.submit(
-                    process_single_clip,
-                    clip, vid_to_title, video_files, args.text_inputs_dir,
-                    args.loose_match, args.video_prefix, args.text_prefix
-                ): clip for clip in clips
-            }
-            
+        # 多进程模式（使用 Pool initializer 避免重复传递数据）
+        with Pool(
+            processes=args.num_workers,
+            initializer=_init_metadata_worker,
+            initargs=(
+                vid_to_title,
+                video_files,
+                args.text_inputs_dir,
+                args.loose_match,
+                args.video_prefix,
+                args.text_prefix
+            )
+        ) as pool:
             # 使用 tqdm 显示进度
-            with tqdm(total=len(clips), desc="处理进度", unit="clip") as pbar:
-                for future in as_completed(futures):
-                    try:
-                        metadata_item, unmatched_item = future.result()
-                        
-                        if metadata_item:
-                            metadata.append(metadata_item)
-                            matched_count += 1
-                        else:
-                            unmatched_items.append(unmatched_item)
-                            failed_count += 1
-                    except Exception as e:
-                        clip = futures[future]
-                        logger.error(f"处理 clip {clip.vid} 失败: {str(e)}")
-                        unmatched_items.append({
-                            'vid': clip.vid,
-                            'reason': 'processing_error',
-                            'message': f'处理异常: {str(e)}'
-                        })
-                        failed_count += 1
-                    
-                    pbar.update(1)
+            for metadata_item, unmatched_item in tqdm(
+                pool.imap(_process_clip_worker, clips),
+                total=len(clips),
+                desc="处理进度",
+                unit="clip"
+            ):
+                if metadata_item:
+                    metadata.append(metadata_item)
+                    matched_count += 1
+                else:
+                    unmatched_items.append(unmatched_item)
+                    failed_count += 1
     
     # 4. 保存元数据
     logger.info("步骤 4: 保存元数据...")
