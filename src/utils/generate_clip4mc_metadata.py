@@ -57,6 +57,21 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+# 数据结构
+# ============================================================
+
+@dataclass
+class VideoClip:
+    """视频片段元数据"""
+    vid: str
+    transcript: str
+    start_time: float
+    end_time: float
+    size: List[float]
+    data_type: str  # 'train', 'test'
+
+
+# ============================================================
 # 全局变量（用于进程池初始化）
 # ============================================================
 _worker_vid_to_title = None
@@ -121,15 +136,9 @@ def _process_clip_worker(clip: VideoClip) -> Tuple[Optional[Dict], Optional[Dict
     )
 
 
-@dataclass
-class VideoClip:
-    """视频片段元数据"""
-    vid: str
-    transcript: str
-    start_time: float
-    end_time: float
-    size: List[float]
-    data_type: str  # 'train', 'test'
+# ============================================================
+# 辅助函数
+# ============================================================
 
 
 def normalize_title_for_filename(title: str, remove_punctuation: bool = False) -> str:
