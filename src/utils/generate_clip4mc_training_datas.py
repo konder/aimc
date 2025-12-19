@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Decord Video Processing Pipeline - DALI-like Architecture
+FFmpeg Video Processing Pipeline - Pure FFmpeg Implementation
 """
 
 import json
@@ -13,10 +13,10 @@ from collections import OrderedDict
 import time
 from multiprocessing import Pool
 from functools import partial
+import subprocess
+import tempfile
 
 import numpy as np
-import decord
-from decord import VideoReader, cpu, gpu
 from tqdm import tqdm
 
 # 配置日志
@@ -158,14 +158,14 @@ class VideoDataSource:
         return iter(self.segments)
 
 
-class DecordProcessor:
+class FFmpegProcessor:
     """
-    Decord 视频处理器 (Processor)
+    FFmpeg 视频处理器 (Processor) - 纯 FFmpeg 实现
     
     负责：
-    1. 使用 Decord 提取视频帧
-    2. Resize 到目标尺寸
-    3. 文本 Tokenization
+    1. 使用 FFmpeg 提取视频帧
+    2. 支持 GPU 硬件加速 (NVDEC)
+    3. Resize 到目标尺寸
     """
     
     def __init__(
@@ -173,27 +173,57 @@ class DecordProcessor:
         frame_height: int = 160,
         frame_width: int = 256,
         device_id: int = 0,
-        use_gpu: bool = True
+        use_gpu: bool = False
     ):
         """
         Args:
             frame_height: 目标帧高度
             frame_width: 目标帧宽度
-            device_id: GPU ID
-            use_gpu: 是否使用 GPU
+            device_id: GPU ID（用于 NVDEC）
+            use_gpu: 是否使用 GPU 硬件加速
         """
         self.frame_height = frame_height
         self.frame_width = frame_width
         self.device_id = device_id
         self.use_gpu = use_gpu
         
-        self.ctx = gpu(device_id) if use_gpu else cpu(0)
+        # 检查 ffmpeg 是否支持 GPU 加速
+        self.gpu_available = False
+        if use_gpu:
+            self.gpu_available = self._check_gpu_support()
+            if not self.gpu_available:
+                logger.warning("GPU 加速不可用，将使用 CPU 模式")
         
-        logger.info(f"DecordProcessor 初始化: {'GPU' if use_gpu else 'CPU'} (device={device_id})")
+        mode = "GPU (NVDEC)" if (use_gpu and self.gpu_available) else "CPU"
+        logger.info(f"FFmpegProcessor 初始化: {mode} (device={device_id})")
+    
+    def _check_gpu_support(self) -> bool:
+        """
+        检查 FFmpeg 是否支持 GPU 硬件加速
+        
+        Returns:
+            bool: 是否支持 GPU
+        """
+        try:
+            # 检查 ffmpeg 是否支持 cuda hwaccel
+            result = subprocess.run(
+                ['ffmpeg', '-hwaccels'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                text=True
+            )
+            
+            if 'cuda' in result.stdout.lower():
+                return True
+            
+            return False
+        except Exception:
+            return False
     
     def extract_frames(self, segment: VideoSegment) -> Optional[np.ndarray]:
         """
-        提取视频帧 (核心方法)
+        使用 FFmpeg 提取视频帧 (核心方法)
         
         Args:
             segment: 视频片段信息
@@ -202,38 +232,137 @@ class DecordProcessor:
             frames: (N, H, W, 3) uint8, RGB 格式
         """
         try:
-            # 创建 VideoReader (Decord 支持初始化时指定 resize)
-            vr = VideoReader(
-                str(segment.video_path),
-                ctx=self.ctx,
-                width=self.frame_width,
-                height=self.frame_height
+            # 计算持续时间
+            duration = segment.end_time - segment.start_time
+            
+            # 构建 ffmpeg 命令
+            cmd = ['ffmpeg']
+            
+            # GPU 加速选项（如果启用）
+            if self.use_gpu and self.gpu_available:
+                # 使用 NVDEC 硬件解码
+                cmd.extend([
+                    '-hwaccel', 'cuda',
+                    '-hwaccel_device', str(self.device_id)
+                ])
+            
+            # 输入和时间参数
+            cmd.extend([
+                '-ss', str(segment.start_time),
+                '-i', str(segment.video_path),
+                '-t', str(duration)
+            ])
+            
+            # 视频滤镜（resize）
+            if self.use_gpu and self.gpu_available:
+                # 尝试使用 GPU 滤镜
+                cmd.extend([
+                    '-vf', f'scale_cuda={self.frame_width}:{self.frame_height}'
+                ])
+            else:
+                # CPU 滤镜
+                cmd.extend([
+                    '-vf', f'scale={self.frame_width}:{self.frame_height}'
+                ])
+            
+            # 输出格式
+            cmd.extend([
+                '-f', 'rawvideo',
+                '-pix_fmt', 'rgb24',
+                '-loglevel', 'error',
+                'pipe:1'
+            ])
+            
+            # 执行 ffmpeg
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30  # 30秒超时
             )
             
-            # 获取视频信息
-            fps = vr.get_avg_fps()
-            total_frames = len(vr)
+            # 如果 GPU 失败，尝试 CPU 模式
+            if result.returncode != 0 and self.use_gpu and self.gpu_available:
+                logger.warning(f"{segment.vid}: GPU 解码失败，尝试 CPU 模式")
+                return self._extract_frames_cpu(segment)
             
-            if total_frames == 0:
+            if result.returncode != 0:
                 return None
             
-            # 计算帧范围
-            start_frame = int(segment.start_time * fps)
-            end_frame = int(segment.end_time * fps)
+            # 解析原始帧数据
+            raw_data = result.stdout
+            frame_size = self.frame_height * self.frame_width * 3
             
-            # 确保索引有效
-            start_frame = max(0, min(start_frame, total_frames - 1))
-            end_frame = max(start_frame + 1, min(end_frame, total_frames))
+            if len(raw_data) < frame_size:
+                return None
             
-            # 批量读取帧（Decord 的核心优势）
-            frame_indices = list(range(start_frame, end_frame))
-            frames = vr.get_batch(frame_indices).asnumpy()
+            # 计算帧数
+            num_frames = len(raw_data) // frame_size
+            if num_frames == 0:
+                return None
             
-            # Decord 输出: (N, H, W, 3) RGB uint8
-            return frames.astype(np.uint8)
+            # 转换为 numpy 数组
+            frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
+            frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+            
+            return frames
+        
+        except subprocess.TimeoutExpired:
+            logger.error(f"{segment.vid}: FFmpeg 超时")
+            return None
+        except Exception as e:
+            logger.error(f"{segment.vid}: FFmpeg 解码失败 - {str(e)}")
+            return None
+    
+    def _extract_frames_cpu(self, segment: VideoSegment) -> Optional[np.ndarray]:
+        """
+        使用 CPU 模式提取视频帧（GPU 失败时的备选）
+        
+        Returns:
+            frames: (N, H, W, 3) uint8, RGB 格式
+        """
+        try:
+            duration = segment.end_time - segment.start_time
+            
+            cmd = [
+                'ffmpeg',
+                '-ss', str(segment.start_time),
+                '-i', str(segment.video_path),
+                '-t', str(duration),
+                '-vf', f'scale={self.frame_width}:{self.frame_height}',
+                '-f', 'rawvideo',
+                '-pix_fmt', 'rgb24',
+                '-loglevel', 'error',
+                'pipe:1'
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                return None
+            
+            raw_data = result.stdout
+            frame_size = self.frame_height * self.frame_width * 3
+            
+            if len(raw_data) < frame_size:
+                return None
+            
+            num_frames = len(raw_data) // frame_size
+            if num_frames == 0:
+                return None
+            
+            frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
+            frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+            
+            return frames
         
         except Exception as e:
-            logger.error(f"{segment.vid}: Decord 解码失败 - {str(e)}")
+            logger.error(f"{segment.vid}: CPU 解码失败 - {str(e)}")
             return None
     
     def process_segment(self, index: int, segment: VideoSegment) -> ProcessedSample:
@@ -404,11 +533,11 @@ def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, 
         output_dir: 输出目录
         frame_size: (height, width)
         device_id: 设备 ID
-        use_gpu: 是否使用 GPU
+        use_gpu: 是否使用 GPU 硬件加速
     """
     global _worker_processor, _worker_saver
     
-    _worker_processor = DecordProcessor(
+    _worker_processor = FFmpegProcessor(
         frame_height=frame_size[0],
         frame_width=frame_size[1],
         device_id=device_id,
@@ -456,14 +585,17 @@ def _process_single_segment_worker(args: Tuple[int, VideoSegment]) -> Dict[str, 
 # Pipeline & Iterator
 # ============================================================
 
-class DecordPipeline:
+class FFmpegPipeline:
     """
-    Decord 视频处理 Pipeline (类似 DALI Pipeline)
+    FFmpeg 视频处理 Pipeline (类似 DALI Pipeline)
     
     架构：
-        VideoDataSource -> DecordProcessor -> SampleSaver -> Iterator
+        VideoDataSource -> FFmpegProcessor -> SampleSaver -> Iterator
     
     特点：
+        - 纯 FFmpeg 实现
+        - 支持 GPU 硬件加速 (NVDEC)
+        - 支持所有视频格式 (H.264, VP9, HEVC, etc.)
         - Pipeline 模式设计
         - 支持批量迭代
         - 进度跟踪
@@ -477,7 +609,7 @@ class DecordPipeline:
         batch_size: int = 1,
         frame_size: Tuple[int, int] = (160, 256),
         device_id: int = 0,
-        use_gpu: bool = True,
+        use_gpu: bool = False,
         num_workers: int = 1,
         show_progress: bool = True
     ):
@@ -487,8 +619,8 @@ class DecordPipeline:
             output_dir: 输出目录
             batch_size: 批量大小（用于进度显示，实际仍是逐个处理）
             frame_size: (height, width) 目标帧尺寸
-            device_id: GPU ID
-            use_gpu: 是否使用 GPU
+            device_id: GPU ID（用于 FFmpeg NVDEC）
+            use_gpu: 是否使用 GPU 硬件加速（FFmpeg NVDEC）
             num_workers: 并行进程数（默认: 1，单线程）
             show_progress: 是否显示进度条
         """
@@ -508,7 +640,7 @@ class DecordPipeline:
         
         # 单进程模式：初始化 processor
         if num_workers == 1:
-            self.processor = DecordProcessor(
+            self.processor = FFmpegProcessor(
                 frame_height=frame_size[0],
                 frame_width=frame_size[1],
                 device_id=device_id,
@@ -534,7 +666,8 @@ class DecordPipeline:
         
         logger.info(f"待处理: {self.stats['total']} 个视频片段")
         logger.info(f"输出目录: {output_dir}")
-        logger.info(f"设备: {'GPU' if use_gpu else 'CPU'} (ID={device_id})")
+        logger.info(f"解码器: FFmpeg (纯实现)")
+        logger.info(f"硬件加速: {'GPU (NVDEC)' if use_gpu else 'CPU'} (ID={device_id})")
         logger.info(f"帧尺寸: {frame_size[0]}x{frame_size[1]}")
         logger.info(f"并行进程: {num_workers}")
         logger.info("=" * 60)
@@ -565,9 +698,10 @@ class DecordPipeline:
         """单进程迭代器"""
         # 创建进度条
         if self.show_progress:
+            mode = "GPU" if self.use_gpu else "CPU"
             pbar = tqdm(
                 total=len(self.data_source),
-                desc="🎬 Decord Pipeline (单进程)",
+                desc=f"🎬 FFmpeg Pipeline ({mode})",
                 unit="video"
             )
         else:
@@ -633,9 +767,10 @@ class DecordPipeline:
         """多进程迭代器"""
         # 创建进度条
         if self.show_progress:
+            mode = "GPU" if self.use_gpu else "CPU"
             pbar = tqdm(
                 total=len(self.data_source),
-                desc=f"🎬 Decord Pipeline ({self.num_workers}进程)",
+                desc=f"🎬 FFmpeg Pipeline ({mode}, {self.num_workers}进程)",
                 unit="video"
             )
         else:
@@ -798,35 +933,29 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Decord Video Processing Pipeline (DALI-like Architecture)",
+        description="FFmpeg Video Processing Pipeline (Pure FFmpeg Implementation)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-    # 基本使用
-    python src/utils/generate_clip4mc_training_datas.py \\
-        --metadata preprocessed_metadata.json \\
-        --output-dir /path/to/output
-
-    # GPU 加速
-    python src/utils/decord_pipeline.py \\
-        --metadata preprocessed_metadata.json \\
-        --output-dir /path/to/output \\
-        --use-gpu \\
-        --device-id 0
-
-    # 多进程加速（10 个进程）
+    # 基本使用 (CPU 模式)
     python src/utils/generate_clip4mc_training_datas.py \\
         --metadata preprocessed_metadata.json \\
         --output-dir /path/to/output \\
-        --num-workers 10
+        --num-workers 8
 
-    # 自定义参数
+    # GPU 加速 (NVDEC)
     python src/utils/generate_clip4mc_training_datas.py \\
         --metadata preprocessed_metadata.json \\
         --output-dir /path/to/output \\
         --use-gpu \\
         --device-id 0 \\
-        --num-workers 4 \\
+        --num-workers 4
+
+    # 自定义参数
+    python src/utils/generate_clip4mc_training_datas.py \\
+        --metadata preprocessed_metadata.json \\
+        --output-dir /path/to/output \\
+        --num-workers 8 \\
         --frame-height 160 \\
         --frame-width 256
 
@@ -861,7 +990,7 @@ def main():
     parser.add_argument("--device-id", type=int, default=0,
                        help="GPU ID (默认: 0)")
     parser.add_argument("--use-gpu", action='store_true',
-                       help="使用 GPU 加速")
+                       help="使用 GPU 硬件加速 (FFmpeg NVDEC)")
     parser.add_argument("--num-workers", type=int, default=1,
                        help="并行进程数 (默认: 1，单线程)")
     parser.add_argument("--batch-size", type=int, default=1,
@@ -872,7 +1001,7 @@ def main():
     args = parser.parse_args()
     
     # 创建 pipeline
-    pipeline = DecordPipeline(
+    pipeline = FFmpegPipeline(
         metadata_path=args.metadata,
         output_dir=args.output_dir,
         batch_size=args.batch_size,
