@@ -391,36 +391,53 @@ class SampleSaver:
             return False
 
 
-def _process_single_segment_worker(
-    args: Tuple[int, VideoSegment, Path, Tuple[int, int], int, bool]
-) -> Dict[str, Any]:
+# 全局变量（用于进程池初始化）
+_worker_processor = None
+_worker_saver = None
+
+
+def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, use_gpu: bool):
     """
-    多进程 worker 函数：处理单个视频片段
+    初始化 worker 进程（每个进程只调用一次）
     
     Args:
-        args: (index, segment, output_dir, frame_size, device_id, use_gpu)
-    
-    Returns:
-        dict: 处理结果
+        output_dir: 输出目录
+        frame_size: (height, width)
+        device_id: 设备 ID
+        use_gpu: 是否使用 GPU
     """
-    index, segment, output_dir, frame_size, device_id, use_gpu = args
+    global _worker_processor, _worker_saver
     
-    # 每个 worker 初始化自己的 processor 和 saver
-    processor = DecordProcessor(
+    _worker_processor = DecordProcessor(
         frame_height=frame_size[0],
         frame_width=frame_size[1],
         device_id=device_id,
         use_gpu=use_gpu
     )
     
-    saver = SampleSaver(output_dir=output_dir)
+    _worker_saver = SampleSaver(output_dir=output_dir)
+
+
+def _process_single_segment_worker(args: Tuple[int, VideoSegment]) -> Dict[str, Any]:
+    """
+    多进程 worker 函数：处理单个视频片段
     
-    # 处理
-    sample = processor.process_segment(index, segment)
+    Args:
+        args: (index, segment)
+    
+    Returns:
+        dict: 处理结果
+    """
+    global _worker_processor, _worker_saver
+    
+    index, segment = args
+    
+    # 使用已初始化的 processor 和 saver
+    sample = _worker_processor.process_segment(index, segment)
     
     # 保存
     if sample.success:
-        success = saver.save_sample(sample)
+        success = _worker_saver.save_sample(sample)
         if not success:
             sample.success = False
     
@@ -624,21 +641,19 @@ class DecordPipeline:
         else:
             pbar = None
         
-        # 准备参数列表
+        # 准备参数列表（只传递 index 和 segment）
         args_list = [
-            (
-                index,
-                segment,
-                self.saver.output_dir,
-                self.frame_size,
-                self.device_id,
-                self.use_gpu
-            )
+            (index, segment)
             for index, segment in enumerate(self.data_source)
         ]
         
         # 使用 Pool.imap 进行并行处理（保持顺序）
-        with Pool(processes=self.num_workers) as pool:
+        # 使用 initializer 让每个进程只初始化一次
+        with Pool(
+            processes=self.num_workers,
+            initializer=_init_worker,
+            initargs=(self.saver.output_dir, self.frame_size, self.device_id, self.use_gpu)
+        ) as pool:
             for result in pool.imap(_process_single_segment_worker, args_list):
                 # 统计
                 if result['success']:

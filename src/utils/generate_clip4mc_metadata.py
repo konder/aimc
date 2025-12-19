@@ -202,7 +202,7 @@ def load_download_log(csv_path: Path) -> Dict[str, str]:
     return vid_to_title
 
 
-def find_video_file(vid: str, title: str, videos_dir: Path, use_loose_match: bool = False) -> Optional[Path]:
+def find_video_file(vid: str, title: str, video_files: List[Path], use_loose_match: bool = False) -> Optional[Path]:
     """
     根据 vid 和 title 查找视频文件
     
@@ -224,15 +224,9 @@ def find_video_file(vid: str, title: str, videos_dir: Path, use_loose_match: boo
     Args:
         vid: 视频 ID
         title: 视频标题
-        videos_dir: 视频目录
+        video_files: 预先收集的视频文件列表
         use_loose_match: 是否使用宽松匹配（默认: False）
     """
-    video_extensions = ['.mp4', '.avi', '.mkv', '.flv', '.mov', '.webm']
-    
-    # 收集所有视频文件
-    video_files = []
-    for ext in video_extensions:
-        video_files.extend(videos_dir.glob(f'*{ext}'))
     
     if not video_files:
         return None
@@ -435,7 +429,7 @@ def generate_text_input_pkl(
 def process_single_clip(
     clip: VideoClip,
     vid_to_title: Dict[str, str],
-    videos_dir: Path,
+    video_files: List[Path],
     text_inputs_dir: Path,
     use_loose_match: bool,
     video_prefix: str,
@@ -447,7 +441,7 @@ def process_single_clip(
     Args:
         clip: 视频片段
         vid_to_title: vid 到 title 的映射
-        videos_dir: 视频目录
+        video_files: 预先收集的视频文件列表
         text_inputs_dir: text_input.pkl 输出目录
         use_loose_match: 是否使用宽松匹配
         video_prefix: 视频路径前缀
@@ -468,7 +462,7 @@ def process_single_clip(
         }
     
     # 查找视频文件
-    video_file = find_video_file(clip.vid, title, videos_dir, use_loose_match=use_loose_match)
+    video_file = find_video_file(clip.vid, title, video_files, use_loose_match=use_loose_match)
     if not video_file:
         return None, {
             'vid': clip.vid,
@@ -586,6 +580,14 @@ def main():
     clips = load_dataset_clips(args.test_json, args.train_json)
     logger.info(f"总共 {len(clips)} 条片段")
     
+    # 2.5. 预先收集所有视频文件（避免每次都扫描目录）
+    logger.info("步骤 2.5: 扫描视频目录...")
+    video_extensions = ['.mp4', '.avi', '.mkv', '.flv', '.mov', '.webm']
+    video_files = []
+    for ext in video_extensions:
+        video_files.extend(args.videos_dir.glob(f'*{ext}'))
+    logger.info(f"  找到 {len(video_files)} 个视频文件")
+    
     # 3. 匹配视频文件并生成元数据
     logger.info("步骤 3: 匹配视频文件并生成 text_input.pkl...")
     logger.info(f"  使用 {args.num_workers} 个进程并行处理")
@@ -599,7 +601,7 @@ def main():
         # 单进程模式
         for clip in tqdm(clips, desc="处理进度", unit="clip"):
             metadata_item, unmatched_item = process_single_clip(
-                clip, vid_to_title, args.videos_dir, args.text_inputs_dir,
+                clip, vid_to_title, video_files, args.text_inputs_dir,
                 args.loose_match, args.video_prefix, args.text_prefix
             )
             
@@ -616,7 +618,7 @@ def main():
             futures = {
                 executor.submit(
                     process_single_clip,
-                    clip, vid_to_title, args.videos_dir, args.text_inputs_dir,
+                    clip, vid_to_title, video_files, args.text_inputs_dir,
                     args.loose_match, args.video_prefix, args.text_prefix
                 ): clip for clip in clips
             }
