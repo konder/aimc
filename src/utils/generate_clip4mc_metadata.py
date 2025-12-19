@@ -30,6 +30,17 @@
         --loose-match \\
         --num-workers 8 \\
         --unmatched-output unmatched.json
+    
+    # 性能测试模式（跳过 text token 生成）
+    python src/utils/generate_clip4mc_metadata.py \\
+        --test-json data/training/dataset_test.json \\
+        --download-log data/training/youtube_download_log.csv \\
+        --videos-dir /path/to/videos \\
+        --text-inputs-dir /tmp/text_inputs \\
+        --output /tmp/metadata.json \\
+        --loose-match \\
+        --num-workers 16 \\
+        --skip-text-generation
 
 依赖：
     - transformers: pip install transformers
@@ -80,6 +91,7 @@ _worker_text_inputs_dir = None
 _worker_use_loose_match = None
 _worker_video_prefix = None
 _worker_text_prefix = None
+_worker_skip_text_generation = None
 
 
 def _init_metadata_worker(
@@ -88,7 +100,8 @@ def _init_metadata_worker(
     text_inputs_dir: Path,
     use_loose_match: bool,
     video_prefix: str,
-    text_prefix: str
+    text_prefix: str,
+    skip_text_generation: bool
 ):
     """
     初始化 worker 进程（每个进程只调用一次）
@@ -100,9 +113,11 @@ def _init_metadata_worker(
         use_loose_match: 是否使用宽松匹配
         video_prefix: 视频路径前缀
         text_prefix: text_input.pkl 路径前缀
+        skip_text_generation: 是否跳过 text token 生成
     """
     global _worker_vid_to_title, _worker_video_files, _worker_text_inputs_dir
     global _worker_use_loose_match, _worker_video_prefix, _worker_text_prefix
+    global _worker_skip_text_generation
     
     _worker_vid_to_title = vid_to_title
     _worker_video_files = video_files
@@ -110,6 +125,7 @@ def _init_metadata_worker(
     _worker_use_loose_match = use_loose_match
     _worker_video_prefix = video_prefix
     _worker_text_prefix = text_prefix
+    _worker_skip_text_generation = skip_text_generation
 
 
 def _process_clip_worker(clip: VideoClip) -> Tuple[Optional[Dict], Optional[Dict]]:
@@ -124,6 +140,7 @@ def _process_clip_worker(clip: VideoClip) -> Tuple[Optional[Dict], Optional[Dict
     """
     global _worker_vid_to_title, _worker_video_files, _worker_text_inputs_dir
     global _worker_use_loose_match, _worker_video_prefix, _worker_text_prefix
+    global _worker_skip_text_generation
     
     return process_single_clip(
         clip,
@@ -132,7 +149,8 @@ def _process_clip_worker(clip: VideoClip) -> Tuple[Optional[Dict], Optional[Dict
         _worker_text_inputs_dir,
         _worker_use_loose_match,
         _worker_video_prefix,
-        _worker_text_prefix
+        _worker_text_prefix,
+        _worker_skip_text_generation
     )
 
 
@@ -507,7 +525,8 @@ def process_single_clip(
     text_inputs_dir: Path,
     use_loose_match: bool,
     video_prefix: str,
-    text_prefix: str
+    text_prefix: str,
+    skip_text_generation: bool = False
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     处理单个视频片段（用于多进程）
@@ -520,6 +539,7 @@ def process_single_clip(
         use_loose_match: 是否使用宽松匹配
         video_prefix: 视频路径前缀
         text_prefix: text_input.pkl 路径前缀
+        skip_text_generation: 是否跳过 text token 生成
     
     Returns:
         (metadata_item, unmatched_item) 元组
@@ -545,18 +565,19 @@ def process_single_clip(
             'message': '未找到视频文件'
         }
     
-    # 生成 text_input.pkl
+    # 生成 text_input.pkl（如果需要）
     text_input_path = text_inputs_dir / f"{clip.vid}_text_input.pkl"
     
-    if not text_input_path.exists():
-        success = generate_text_input_pkl(clip.transcript, text_input_path)
-        if not success:
-            return None, {
-                'vid': clip.vid,
-                'title': title,
-                'reason': 'tokenization_failed',
-                'message': '生成 text_input.pkl 失败'
-            }
+    if not skip_text_generation:
+        if not text_input_path.exists():
+            success = generate_text_input_pkl(clip.transcript, text_input_path)
+            if not success:
+                return None, {
+                    'vid': clip.vid,
+                    'title': title,
+                    'reason': 'tokenization_failed',
+                    'message': '生成 text_input.pkl 失败'
+                }
     
     # 构建路径（使用 prefix）
     video_path = str(video_file.absolute())
@@ -576,7 +597,7 @@ def process_single_clip(
         'transcript': clip.transcript,
         'size': clip.size,
         'data_type': clip.data_type,
-        'text_input_path': text_path
+        'text_input_path': text_path if not skip_text_generation else None
     }
     
     return metadata_item, None
@@ -607,6 +628,10 @@ def main():
     # 匹配参数
     parser.add_argument("--loose-match", action='store_true',
                        help="启用宽松匹配（移除特殊字符、emoji、标点符号）")
+    
+    # Text token 生成参数
+    parser.add_argument("--skip-text-generation", action='store_true',
+                       help="跳过 text_input.pkl 生成（仅测试视频匹配性能）")
     
     # 路径前缀参数
     parser.add_argument("--video-prefix", type=str, default="",
@@ -663,7 +688,11 @@ def main():
     logger.info(f"  找到 {len(video_files)} 个视频文件")
     
     # 3. 匹配视频文件并生成元数据
-    logger.info("步骤 3: 匹配视频文件并生成 text_input.pkl...")
+    if args.skip_text_generation:
+        logger.info("步骤 3: 匹配视频文件（跳过 text_input.pkl 生成）...")
+        logger.info("  ⚠️  性能测试模式：text token 生成已禁用")
+    else:
+        logger.info("步骤 3: 匹配视频文件并生成 text_input.pkl...")
     logger.info(f"  使用 {args.num_workers} 个进程并行处理")
     
     metadata = []
@@ -676,7 +705,8 @@ def main():
         for clip in tqdm(clips, desc="处理进度", unit="clip"):
             metadata_item, unmatched_item = process_single_clip(
                 clip, vid_to_title, video_files, args.text_inputs_dir,
-                args.loose_match, args.video_prefix, args.text_prefix
+                args.loose_match, args.video_prefix, args.text_prefix,
+                args.skip_text_generation
             )
             
             if metadata_item:
@@ -696,7 +726,8 @@ def main():
                 args.text_inputs_dir,
                 args.loose_match,
                 args.video_prefix,
-                args.text_prefix
+                args.text_prefix,
+                args.skip_text_generation
             )
         ) as pool:
             # 使用 tqdm 显示进度
