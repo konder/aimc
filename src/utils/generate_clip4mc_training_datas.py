@@ -231,87 +231,71 @@ class FFmpegProcessor:
         Returns:
             frames: (N, H, W, 3) uint8, RGB 格式
         """
+        # GPU 模式：先尝试 GPU，失败则回退 CPU
+        if self.use_gpu and self.gpu_available:
+            frames = self._try_gpu_decode(segment)
+            if frames is not None:
+                return frames
+            # GPU 失败，回退到 CPU（静默回退，不打印警告）
+        
+        # CPU 模式
+        return self._extract_frames_cpu(segment)
+    
+    def _try_gpu_decode(self, segment: VideoSegment) -> Optional[np.ndarray]:
+        """
+        尝试使用 GPU 解码（NVDEC）
+        
+        策略:
+        1. 先尝试 hwaccel cuda + scale (GPU 解码 + CPU 缩放)
+        2. 失败则返回 None，由主流程回退到纯 CPU
+        
+        Returns:
+            frames: (N, H, W, 3) uint8, RGB 格式，失败返回 None
+        """
         try:
-            # 计算持续时间
             duration = segment.end_time - segment.start_time
             
-            # 构建 ffmpeg 命令
-            cmd = ['ffmpeg']
-            
-            # GPU 加速选项（如果启用）
-            if self.use_gpu and self.gpu_available:
-                # 使用 NVDEC 硬件解码
-                cmd.extend([
-                    '-hwaccel', 'cuda',
-                    '-hwaccel_device', str(self.device_id)
-                ])
-            
-            # 输入和时间参数
-            cmd.extend([
+            # GPU 解码 + CPU 缩放（最兼容的方案）
+            # -ss 放在 -i 前面（输入前 seek，更快）
+            cmd = [
+                'ffmpeg',
+                '-hwaccel', 'cuda',
+                '-hwaccel_device', str(self.device_id),
+                '-hwaccel_output_format', 'cuda',  # 明确指定输出格式
                 '-ss', str(segment.start_time),
                 '-i', str(segment.video_path),
-                '-t', str(duration)
-            ])
-            
-            # 视频滤镜（resize）
-            if self.use_gpu and self.gpu_available:
-                # 尝试使用 GPU 滤镜
-                cmd.extend([
-                    '-vf', f'scale_cuda={self.frame_width}:{self.frame_height}'
-                ])
-            else:
-                # CPU 滤镜
-                cmd.extend([
-                    '-vf', f'scale={self.frame_width}:{self.frame_height}'
-                ])
-            
-            # 输出格式
-            cmd.extend([
+                '-t', str(duration),
+                '-vf', f'hwdownload,format=nv12,scale={self.frame_width}:{self.frame_height}',
                 '-f', 'rawvideo',
                 '-pix_fmt', 'rgb24',
                 '-loglevel', 'error',
                 'pipe:1'
-            ])
+            ]
             
-            # 执行 ffmpeg
             result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=30  # 30秒超时
+                timeout=30
             )
             
-            # 如果 GPU 失败，尝试 CPU 模式
-            if result.returncode != 0 and self.use_gpu and self.gpu_available:
-                logger.warning(f"{segment.vid}: GPU 解码失败，尝试 CPU 模式")
-                return self._extract_frames_cpu(segment)
+            if result.returncode == 0 and len(result.stdout) > 0:
+                raw_data = result.stdout
+                frame_size = self.frame_height * self.frame_width * 3
+                
+                if len(raw_data) >= frame_size:
+                    num_frames = len(raw_data) // frame_size
+                    if num_frames > 0:
+                        frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
+                        frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+                        return frames
             
-            if result.returncode != 0:
-                return None
-            
-            # 解析原始帧数据
-            raw_data = result.stdout
-            frame_size = self.frame_height * self.frame_width * 3
-            
-            if len(raw_data) < frame_size:
-                return None
-            
-            # 计算帧数
-            num_frames = len(raw_data) // frame_size
-            if num_frames == 0:
-                return None
-            
-            # 转换为 numpy 数组
-            frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
-            frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
-            
-            return frames
+            # GPU 解码失败，返回 None
+            return None
         
         except subprocess.TimeoutExpired:
-            logger.error(f"{segment.vid}: FFmpeg 超时")
             return None
-        except Exception as e:
-            logger.error(f"{segment.vid}: FFmpeg 解码失败 - {str(e)}")
+        except Exception:
             return None
     
     def _extract_frames_cpu(self, segment: VideoSegment) -> Optional[np.ndarray]:
