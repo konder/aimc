@@ -10,13 +10,26 @@
 5. 输出元数据 JSON 文件
 
 使用示例：
+    # 单进程模式（默认）
+    python src/utils/generate_clip4mc_metadata.py \\
+        --test-json data/training/dataset_test.json \\
+        --download-log data/training/youtube_download_log.csv \\
+        --videos-dir /path/to/videos \\
+        --text-inputs-dir /path/to/text_inputs \\
+        --output metadata.json \\
+        --loose-match
+    
+    # 多进程模式（推荐，处理大量数据时）
     python src/utils/generate_clip4mc_metadata.py \\
         --test-json data/training/dataset_test.json \\
         --train-json data/training/dataset_train_LocalCorrelationFilter.json \\
         --download-log data/training/youtube_download_log.csv \\
         --videos-dir /path/to/videos \\
         --text-inputs-dir /path/to/text_inputs \\
-        --output metadata.json
+        --output metadata.json \\
+        --loose-match \\
+        --num-workers 8 \\
+        --unmatched-output unmatched.json
 
 依赖：
     - transformers: pip install transformers
@@ -31,6 +44,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
 
 # 设置日志
 logging.basicConfig(
@@ -417,6 +432,88 @@ def generate_text_input_pkl(
         return False
 
 
+def process_single_clip(
+    clip: VideoClip,
+    vid_to_title: Dict[str, str],
+    videos_dir: Path,
+    text_inputs_dir: Path,
+    use_loose_match: bool,
+    video_prefix: str,
+    text_prefix: str
+) -> Tuple[Optional[Dict], Optional[Dict]]:
+    """
+    处理单个视频片段（用于多进程）
+    
+    Args:
+        clip: 视频片段
+        vid_to_title: vid 到 title 的映射
+        videos_dir: 视频目录
+        text_inputs_dir: text_input.pkl 输出目录
+        use_loose_match: 是否使用宽松匹配
+        video_prefix: 视频路径前缀
+        text_prefix: text_input.pkl 路径前缀
+    
+    Returns:
+        (metadata_item, unmatched_item) 元组
+        - 如果成功: (metadata_item, None)
+        - 如果失败: (None, unmatched_item)
+    """
+    # 获取 title
+    title = vid_to_title.get(clip.vid)
+    if not title:
+        return None, {
+            'vid': clip.vid,
+            'reason': 'no_download_record',
+            'message': '未找到下载记录'
+        }
+    
+    # 查找视频文件
+    video_file = find_video_file(clip.vid, title, videos_dir, use_loose_match=use_loose_match)
+    if not video_file:
+        return None, {
+            'vid': clip.vid,
+            'title': title,
+            'reason': 'video_not_found',
+            'message': '未找到视频文件'
+        }
+    
+    # 生成 text_input.pkl
+    text_input_path = text_inputs_dir / f"{clip.vid}_text_input.pkl"
+    
+    if not text_input_path.exists():
+        success = generate_text_input_pkl(clip.transcript, text_input_path)
+        if not success:
+            return None, {
+                'vid': clip.vid,
+                'title': title,
+                'reason': 'tokenization_failed',
+                'message': '生成 text_input.pkl 失败'
+            }
+    
+    # 构建路径（使用 prefix）
+    video_path = str(video_file.absolute())
+    if video_prefix:
+        video_path = video_prefix.rstrip('/') + '/' + video_file.name
+    
+    text_path = str(text_input_path.absolute())
+    if text_prefix:
+        text_path = text_prefix.rstrip('/') + '/' + text_input_path.name
+    
+    # 构建元数据项
+    metadata_item = {
+        'vid': clip.vid,
+        'video_path': video_path,
+        'start_time': clip.start_time,
+        'end_time': clip.end_time,
+        'transcript': clip.transcript,
+        'size': clip.size,
+        'data_type': clip.data_type,
+        'text_input_path': text_path
+    }
+    
+    return metadata_item, None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="生成 Decord Pipeline 元数据文件",
@@ -453,6 +550,10 @@ def main():
     parser.add_argument("--unmatched-output", type=Path,
                        help="未匹配文件和 vid 清单输出路径（JSON 格式）")
     
+    # 多进程参数
+    parser.add_argument("--num-workers", type=int, default=1,
+                       help="并行处理的进程数（默认: 1，建议: CPU核心数）")
+    
     args = parser.parse_args()
     
     # 验证输入
@@ -487,78 +588,62 @@ def main():
     
     # 3. 匹配视频文件并生成元数据
     logger.info("步骤 3: 匹配视频文件并生成 text_input.pkl...")
+    logger.info(f"  使用 {args.num_workers} 个进程并行处理")
     
     metadata = []
     matched_count = 0
     failed_count = 0
     unmatched_items = []  # 收集未匹配的项
     
-    for idx, clip in enumerate(clips):
-        if (idx + 1) % 100 == 0:
-            logger.info(f"处理进度: {idx + 1}/{len(clips)}")
-        
-        # 获取 title
-        title = vid_to_title.get(clip.vid)
-        if not title:
-            unmatched_items.append({
-                'vid': clip.vid,
-                'reason': 'no_download_record',
-                'message': '未找到下载记录'
-            })
-            failed_count += 1
-            continue
-        
-        # 查找视频文件
-        video_file = find_video_file(clip.vid, title, args.videos_dir, use_loose_match=args.loose_match)
-        if not video_file:
-            unmatched_items.append({
-                'vid': clip.vid,
-                'title': title,
-                'reason': 'video_not_found',
-                'message': '未找到视频文件'
-            })
-            failed_count += 1
-            continue
-        
-        # 生成 text_input.pkl
-        text_input_path = args.text_inputs_dir / f"{clip.vid}_text_input.pkl"
-        
-        if not text_input_path.exists():
-            success = generate_text_input_pkl(clip.transcript, text_input_path)
-            if not success:
-                unmatched_items.append({
-                    'vid': clip.vid,
-                    'title': title,
-                    'reason': 'tokenization_failed',
-                    'message': '生成 text_input.pkl 失败'
-                })
+    if args.num_workers == 1:
+        # 单进程模式
+        for clip in tqdm(clips, desc="处理进度", unit="clip"):
+            metadata_item, unmatched_item = process_single_clip(
+                clip, vid_to_title, args.videos_dir, args.text_inputs_dir,
+                args.loose_match, args.video_prefix, args.text_prefix
+            )
+            
+            if metadata_item:
+                metadata.append(metadata_item)
+                matched_count += 1
+            else:
+                unmatched_items.append(unmatched_item)
                 failed_count += 1
-                continue
-        
-        # 构建路径（使用 prefix）
-        video_path = str(video_file.absolute())
-        if args.video_prefix:
-            # 替换路径前缀
-            video_path = args.video_prefix.rstrip('/') + '/' + video_file.name
-        
-        text_path = str(text_input_path.absolute())
-        if args.text_prefix:
-            # 替换路径前缀
-            text_path = args.text_prefix.rstrip('/') + '/' + text_input_path.name
-        
-        # 添加到元数据
-        metadata.append({
-            'vid': clip.vid,
-            'video_path': video_path,
-            'start_time': clip.start_time,
-            'end_time': clip.end_time,
-            'transcript': clip.transcript,
-            'size': clip.size,
-            'data_type': clip.data_type,
-            'text_input_path': text_path
-        })
-        
-        matched_count += 1
+    else:
+        # 多进程模式
+        with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+            # 提交所有任务
+            futures = {
+                executor.submit(
+                    process_single_clip,
+                    clip, vid_to_title, args.videos_dir, args.text_inputs_dir,
+                    args.loose_match, args.video_prefix, args.text_prefix
+                ): clip for clip in clips
+            }
+            
+            # 使用 tqdm 显示进度
+            with tqdm(total=len(clips), desc="处理进度", unit="clip") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        metadata_item, unmatched_item = future.result()
+                        
+                        if metadata_item:
+                            metadata.append(metadata_item)
+                            matched_count += 1
+                        else:
+                            unmatched_items.append(unmatched_item)
+                            failed_count += 1
+                    except Exception as e:
+                        clip = futures[future]
+                        logger.error(f"处理 clip {clip.vid} 失败: {str(e)}")
+                        unmatched_items.append({
+                            'vid': clip.vid,
+                            'reason': 'processing_error',
+                            'message': f'处理异常: {str(e)}'
+                        })
+                        failed_count += 1
+                    
+                    pbar.update(1)
     
     # 4. 保存元数据
     logger.info("步骤 4: 保存元数据...")
