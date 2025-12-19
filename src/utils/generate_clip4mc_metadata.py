@@ -92,6 +92,7 @@ _worker_use_loose_match = None
 _worker_video_prefix = None
 _worker_text_prefix = None
 _worker_skip_text_generation = None
+_worker_video_index = None  # 预计算的视频文件索引（性能优化）
 
 
 def _init_metadata_worker(
@@ -117,7 +118,7 @@ def _init_metadata_worker(
     """
     global _worker_vid_to_title, _worker_video_files, _worker_text_inputs_dir
     global _worker_use_loose_match, _worker_video_prefix, _worker_text_prefix
-    global _worker_skip_text_generation
+    global _worker_skip_text_generation, _worker_video_index
     
     _worker_vid_to_title = vid_to_title
     _worker_video_files = video_files
@@ -126,6 +127,73 @@ def _init_metadata_worker(
     _worker_video_prefix = video_prefix
     _worker_text_prefix = text_prefix
     _worker_skip_text_generation = skip_text_generation
+    
+    # 🚀 性能优化：预计算视频文件索引（O(n) → O(1) 查找）
+    # 这将查找从线性遍历（2092次）变为字典查找（1次）
+    _worker_video_index = _build_video_index(video_files, use_loose_match)
+
+
+def _build_video_index(video_files: List[Path], use_loose_match: bool) -> Dict:
+    """
+    构建视频文件索引（预计算所有 normalized 版本）
+    
+    这是性能优化的关键：
+    - 将 O(n) 线性查找优化为 O(1) 字典查找
+    - 避免重复计算 normalized 版本
+    - 在 worker 初始化时只计算一次
+    
+    Args:
+        video_files: 视频文件列表
+        use_loose_match: 是否使用宽松匹配
+    
+    Returns:
+        索引字典，包含多个匹配策略的索引
+    """
+    index = {
+        'direct': {},           # 策略 1: 直接匹配
+        'normalized': {},       # 策略 2: 规范化匹配
+        'vid_contains': [],     # 最后策略: vid 包含匹配（仍需遍历）
+    }
+    
+    # 如果启用宽松匹配，添加额外索引
+    if use_loose_match:
+        index['loose'] = {}           # 策略 3: 宽松匹配
+        index['ultra_loose'] = {}     # 策略 4: 超宽松匹配
+        index['netdisk'] = {}         # 策略 5: 网盘字符匹配
+    
+    # 预计算所有文件的 normalized 版本
+    for video_file in video_files:
+        stem = video_file.stem
+        
+        # 策略 1: 直接匹配索引
+        index['direct'][stem] = video_file
+        
+        # 策略 2: 规范化匹配索引
+        normalized = normalize_title_for_filename(stem, remove_punctuation=False)
+        if normalized not in index['normalized']:  # 避免覆盖（保留第一个匹配）
+            index['normalized'][normalized] = video_file
+        
+        # 宽松匹配索引（仅在启用时）
+        if use_loose_match:
+            # 策略 3: 宽松匹配（移除标点符号）
+            loose = normalize_title_for_filename(stem, remove_punctuation=True)
+            if loose not in index['loose']:
+                index['loose'][loose] = video_file
+            
+            # 策略 4: 超宽松匹配（只保留字母和数字）
+            ultra_loose = normalize_for_ultra_loose_match(stem)
+            if ultra_loose not in index['ultra_loose']:
+                index['ultra_loose'][ultra_loose] = video_file
+            
+            # 策略 5: 网盘字符匹配
+            netdisk = normalize_netdisk_filename(normalized)
+            if netdisk not in index['netdisk']:
+                index['netdisk'][netdisk] = video_file
+        
+        # vid 包含匹配（需要遍历，但已经预存了 stem 避免重复访问）
+        index['vid_contains'].append((video_file, stem))
+    
+    return index
 
 
 def _process_clip_worker(clip: VideoClip) -> Tuple[Optional[Dict], Optional[Dict]]:
@@ -296,7 +364,11 @@ def load_download_log(csv_path: Path) -> Dict[str, str]:
 
 def find_video_file(vid: str, title: str, video_files: List[Path], use_loose_match: bool = False) -> Optional[Path]:
     """
-    根据 vid 和 title 查找视频文件
+    根据 vid 和 title 查找视频文件（使用预计算索引优化）
+    
+    性能优化：
+    - 在多进程环境下，使用 _worker_video_index 预计算索引（O(1) 查找）
+    - 在单进程环境下，使用传统线性查找（向后兼容）
     
     匹配策略：
     - 不使用宽松匹配（默认，3层）：
@@ -319,10 +391,101 @@ def find_video_file(vid: str, title: str, video_files: List[Path], use_loose_mat
         video_files: 预先收集的视频文件列表
         use_loose_match: 是否使用宽松匹配（默认: False）
     """
+    global _worker_video_index
     
     if not video_files:
         return None
     
+    # 🚀 使用预计算索引（如果可用）
+    if _worker_video_index is not None:
+        return _find_video_file_with_index(vid, title, _worker_video_index, use_loose_match)
+    
+    # 传统线性查找（向后兼容，单进程模式）
+    return _find_video_file_linear(vid, title, video_files, use_loose_match)
+
+
+def _find_video_file_with_index(
+    vid: str,
+    title: str,
+    index: Dict,
+    use_loose_match: bool
+) -> Optional[Path]:
+    """
+    使用预计算索引查找视频文件（O(1) 字典查找）
+    
+    Args:
+        vid: 视频 ID
+        title: 视频标题
+        index: 预计算的索引字典
+        use_loose_match: 是否使用宽松匹配
+    
+    Returns:
+        视频文件路径，未找到则返回 None
+    """
+    # 策略 1: 直接匹配 O(1)
+    if title in index['direct']:
+        return index['direct'][title]
+    
+    # 策略 2: 规范化匹配 O(1)
+    normalized_title = normalize_title_for_filename(title, remove_punctuation=False)
+    if normalized_title in index['normalized']:
+        return index['normalized'][normalized_title]
+    
+    # 宽松匹配策略（仅在启用时）
+    if use_loose_match:
+        # 策略 3: 宽松匹配 O(1)
+        loose_title = normalize_title_for_filename(title, remove_punctuation=True)
+        if loose_title in index['loose']:
+            return index['loose'][loose_title]
+        
+        # 策略 4: 超宽松匹配 O(1)
+        ultra_loose_title = normalize_for_ultra_loose_match(title)
+        if ultra_loose_title in index['ultra_loose']:
+            return index['ultra_loose'][ultra_loose_title]
+        
+        # 策略 5: 网盘字符匹配 O(1)
+        netdisk_title = normalize_netdisk_filename(normalized_title)
+        if netdisk_title in index['netdisk']:
+            return index['netdisk'][netdisk_title]
+        
+        # 策略 6: vid 包含匹配 O(n) - 仍需遍历，但已预存 stem
+        for video_file, stem in index['vid_contains']:
+            if vid in stem:
+                return video_file
+        
+        # 策略 7: 模糊匹配（前 30 个字符）O(n)
+        title_prefix = normalize_title_for_filename(title, remove_punctuation=True)[:30].lower()
+        for video_file, stem in index['vid_contains']:
+            file_prefix = normalize_title_for_filename(stem, remove_punctuation=True)[:30].lower()
+            if title_prefix == file_prefix:
+                return video_file
+    else:
+        # 默认模式：vid 包含匹配
+        for video_file, stem in index['vid_contains']:
+            if vid in stem:
+                return video_file
+    
+    return None
+
+
+def _find_video_file_linear(
+    vid: str,
+    title: str,
+    video_files: List[Path],
+    use_loose_match: bool
+) -> Optional[Path]:
+    """
+    传统线性查找（向后兼容）
+    
+    Args:
+        vid: 视频 ID
+        title: 视频标题
+        video_files: 视频文件列表
+        use_loose_match: 是否使用宽松匹配
+    
+    Returns:
+        视频文件路径，未找到则返回 None
+    """
     # 策略 1: 直接匹配（总是启用）
     for video_file in video_files:
         if video_file.stem == title:
@@ -701,7 +864,12 @@ def main():
     unmatched_items = []  # 收集未匹配的项
     
     if args.num_workers == 1:
-        # 单进程模式
+        # 单进程模式（也使用预计算索引优化性能）
+        global _worker_video_index
+        logger.info("  构建视频文件索引...")
+        _worker_video_index = _build_video_index(video_files, args.loose_match)
+        logger.info(f"  索引构建完成（{len(video_files)} 个文件）")
+        
         for clip in tqdm(clips, desc="处理进度", unit="clip"):
             metadata_item, unmatched_item = process_single_clip(
                 clip, vid_to_title, video_files, args.text_inputs_dir,
