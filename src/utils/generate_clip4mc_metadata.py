@@ -163,8 +163,8 @@ def _build_video_index(video_files: List[Path], use_loose_match: bool) -> Dict:
         index['loose'] = {}           # 策略 3: 宽松匹配
         index['ultra_loose'] = {}     # 策略 4: 超宽松匹配
     
-    # 预计算所有文件的 normalized 版本
-    for video_file in video_files:
+    # 预计算所有文件的 normalized 版本（显示进度）
+    for video_file in tqdm(video_files, desc="🔨 构建视频索引", unit="file", leave=False):
         stem = video_file.stem
         
         # 🔧 关键修复：先应用网盘字符规范化
@@ -914,9 +914,9 @@ def main():
     if args.num_workers == 1:
         # 单进程模式（也使用预计算索引优化性能）
         global _worker_video_index
-        logger.info("  构建视频文件索引...")
+        logger.info(f"  构建视频文件索引（{len(video_files)} 个文件）...")
         _worker_video_index = _build_video_index(video_files, args.loose_match)
-        logger.info(f"  索引构建完成（{len(video_files)} 个文件）")
+        logger.info("  ✅ 索引构建完成")
         
         for clip in tqdm(clips, desc="处理进度", unit="clip"):
             metadata_item, unmatched_item = process_single_clip(
@@ -933,6 +933,7 @@ def main():
                 failed_count += 1
     else:
         # 多进程模式（使用 Pool initializer 避免重复传递数据）
+        logger.info(f"  每个 worker 进程将独立构建视频索引（{len(video_files)} 个文件）")
         with Pool(
             processes=args.num_workers,
             initializer=_init_metadata_worker,
