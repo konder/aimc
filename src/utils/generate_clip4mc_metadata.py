@@ -405,7 +405,7 @@ def load_download_log(csv_path: Path) -> Dict[str, str]:
             if vid and title:
                 vid_to_title[vid] = title
     
-    logger.info(f"加载了 {len(vid_to_title)} 条下载记录")
+    logger.info(f"  构建 {len(vid_to_title)} 条 vid→title 映射")
     return vid_to_title
 
 
@@ -605,7 +605,7 @@ def load_dataset_clips(
     
     # 加载 test 数据
     if test_json_path and test_json_path.exists():
-        logger.info(f"加载 test 数据: {test_json_path}")
+        logger.info(f"  加载 test 数据: {test_json_path}")
         with open(test_json_path, 'r', encoding='utf-8') as f:
             test_data = json.load(f)
         
@@ -630,11 +630,11 @@ def load_dataset_clips(
             )
             clips.append(clip)
         
-        logger.info(f"加载了 {len(test_data)} 条 test 数据（有效: {len(clips)}, 跳过: {skipped_count}）")
+        logger.info(f"    test: {len(clips)} 个有效片段（总计{len(test_data)}，跳过{skipped_count}个无效）")
     
     # 加载 train 数据
     if train_json_path and train_json_path.exists():
-        logger.info(f"加载 train 数据: {train_json_path}")
+        logger.info(f"  加载 train 数据: {train_json_path}")
         
         # train 数据可能是流式 JSON（每行一个 JSON 对象）
         train_data = []
@@ -656,6 +656,7 @@ def load_dataset_clips(
         
         train_skipped_count = 0
         train_valid_count = 0
+        train_start_idx = len(clips)
         for item in train_data:
             # 获取时间，确保 None 被转换为默认值
             start_time = item.get('begin position')
@@ -677,7 +678,7 @@ def load_dataset_clips(
             clips.append(clip)
             train_valid_count += 1
         
-        logger.info(f"加载了 {len(train_data)} 条 train 数据（有效: {train_valid_count}, 跳过: {train_skipped_count}）")
+        logger.info(f"    train: {train_valid_count} 个有效片段（总计{len(train_data)}，跳过{train_skipped_count}个无效）")
     
     return clips
 
@@ -881,29 +882,29 @@ def main():
     logger.info("开始生成 Decord Pipeline 元数据")
     logger.info("=" * 60)
     
-    # 1. 加载下载日志
-    logger.info("步骤 1: 加载下载日志...")
+    # 1. 加载数据集（作为片段索引）
+    logger.info("步骤 1: 加载片段索引...")
+    clips = load_dataset_clips(args.test_json, args.train_json)
+    logger.info(f"  需要处理 {len(clips)} 个片段")
+    
+    # 2. 加载下载日志（vid→title映射）
+    logger.info("步骤 2: 加载下载日志...")
     vid_to_title = load_download_log(args.download_log)
     
-    # 2. 加载数据集
-    logger.info("步骤 2: 加载数据集...")
-    clips = load_dataset_clips(args.test_json, args.train_json)
-    logger.info(f"总共 {len(clips)} 条片段")
-    
-    # 2.5. 预先收集所有视频文件（避免每次都扫描目录）
-    logger.info("步骤 2.5: 扫描视频目录...")
+    # 3. 扫描视频目录（实际存在的视频文件）
+    logger.info("步骤 3: 扫描视频目录...")
     video_extensions = ['.mp4', '.avi', '.mkv', '.flv', '.mov', '.webm']
     video_files = []
     for ext in video_extensions:
         video_files.extend(args.videos_dir.glob(f'*{ext}'))
-    logger.info(f"  找到 {len(video_files)} 个视频文件")
+    logger.info(f"  找到 {len(video_files)} 个视频文件（一个视频可对应多个片段）")
     
-    # 3. 匹配视频文件并生成元数据
+    # 4. 匹配视频文件并生成元数据
     if args.skip_text_generation:
-        logger.info("步骤 3: 匹配视频文件（跳过 text_input.pkl 生成）...")
+        logger.info("步骤 4: 匹配视频文件（跳过 text_input.pkl 生成）...")
         logger.info("  ⚠️  性能测试模式：text token 生成已禁用")
     else:
-        logger.info("步骤 3: 匹配视频文件并生成 text_input.pkl...")
+        logger.info("步骤 4: 匹配视频文件并生成 text_input.pkl...")
     logger.info(f"  使用 {args.num_workers} 个进程并行处理")
     
     metadata = []
@@ -961,27 +962,34 @@ def main():
                     unmatched_items.append(unmatched_item)
                     failed_count += 1
     
-    # 4. 保存元数据
-    logger.info("步骤 4: 保存元数据...")
+    # 5. 保存元数据
+    logger.info("步骤 5: 保存元数据...")
     with open(args.output, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
     
-    # 5. 保存未匹配清单（如果指定）
+    # 6. 保存未匹配清单（如果指定）
     if args.unmatched_output and unmatched_items:
-        logger.info("步骤 5: 保存未匹配清单...")
+        logger.info("步骤 6: 保存未匹配清单...")
         with open(args.unmatched_output, 'w', encoding='utf-8') as f:
             json.dump(unmatched_items, f, indent=2, ensure_ascii=False)
         logger.info(f"  未匹配清单: {args.unmatched_output}")
     
     # 完成
     logger.info("=" * 60)
-    logger.info("元数据生成完成！")
-    logger.info(f"  总片段数: {len(clips)}")
-    logger.info(f"  匹配成功: {matched_count}")
-    logger.info(f"  匹配失败: {failed_count}")
-    logger.info(f"  输出文件: {args.output}")
+    logger.info("✅ 元数据生成完成！")
+    logger.info("=" * 60)
+    logger.info(f"数据流概览:")
+    logger.info(f"  1️⃣  片段索引 (dataset): {len(clips)} 个片段")
+    logger.info(f"  2️⃣  下载记录 (csv): {len(vid_to_title)} 条映射")
+    logger.info(f"  3️⃣  视频文件 (实际): {len(video_files)} 个文件")
+    logger.info(f"  4️⃣  匹配结果:")
+    logger.info(f"      ✅ 成功: {matched_count} 个片段")
+    logger.info(f"      ❌ 失败: {failed_count} 个片段")
+    logger.info(f"")
+    logger.info(f"输出文件:")
+    logger.info(f"  📄 metadata.json: {args.output}")
     if args.unmatched_output and unmatched_items:
-        logger.info(f"  未匹配文件: {args.unmatched_output} ({len(unmatched_items)} 项)")
+        logger.info(f"  📄 unmatched.json: {args.unmatched_output} ({len(unmatched_items)} 项)")
     logger.info("=" * 60)
     
     return 0
