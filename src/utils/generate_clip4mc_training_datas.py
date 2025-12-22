@@ -252,6 +252,7 @@ class FFmpegProcessor:
             # 检查 ffmpeg 是否支持 cuda hwaccel
             result = subprocess.run(
                 ['ffmpeg', '-hwaccels'],
+                stdin=subprocess.DEVNULL,  # 防止继承stdin，避免占用终端
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=5,
@@ -275,6 +276,7 @@ class FFmpegProcessor:
         try:
             result = subprocess.run(
                 ['ffmpeg', '-filters'],
+                stdin=subprocess.DEVNULL,  # 防止继承stdin，避免占用终端
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=5,
@@ -353,6 +355,7 @@ class FFmpegProcessor:
             
             result = subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,  # 防止继承stdin，避免占用终端
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=30
@@ -404,6 +407,7 @@ class FFmpegProcessor:
             
             result = subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,  # 防止继承stdin，避免占用终端
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=30
@@ -451,6 +455,7 @@ class FFmpegProcessor:
             
             result = subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,  # 防止继承stdin，避免占用终端
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=30
@@ -883,50 +888,33 @@ class FFmpegPipeline:
             pbar = tqdm(
                 total=len(self.data_source),
                 desc=f"🎬 FFmpeg Pipeline ({mode})",
-                unit="video",
-                leave=True  # 保留进度条，避免清理问题
+                unit="video"
             )
         else:
             pbar = None
         
-        try:
-            # 逐个处理
-            for index, segment in enumerate(self.data_source):
-                # 1. 处理
-                sample = self.processor.process_segment(index, segment)
-                
-                # 2. 保存
-                if sample.success:
-                    save_success = self.saver.save_sample(sample)
-                    if save_success:
-                        self.stats['success'] += 1
-                        self.stats['successful_samples'].append({
-                            'sample_dir': str(sample.sample_dir),
-                            'data_type': sample.data_type,
-                            'vid': sample.vid
-                        })
-                    else:
-                        self.stats['failed'] += 1
-                        failure_detail = {
-                            'vid': sample.vid,
-                            'data_type': sample.data_type,
-                            'error_msg': sample.error_msg,
-                            'error_reason': sample.error_reason or 'save_failed',
-                            'video_path': sample.video_path,
-                            'transcript': sample.transcript,
-                            'start_time': sample.start_time,
-                            'end_time': sample.end_time,
-                            'duration': sample.duration,
-                            'text_input_path': sample.text_input_path
-                        }
-                        self.stats['failed_samples'].append(failure_detail)
+        # 逐个处理
+        for index, segment in enumerate(self.data_source):
+            # 1. 处理
+            sample = self.processor.process_segment(index, segment)
+            
+            # 2. 保存
+            if sample.success:
+                save_success = self.saver.save_sample(sample)
+                if save_success:
+                    self.stats['success'] += 1
+                    self.stats['successful_samples'].append({
+                        'sample_dir': str(sample.sample_dir),
+                        'data_type': sample.data_type,
+                        'vid': sample.vid
+                    })
                 else:
                     self.stats['failed'] += 1
                     failure_detail = {
                         'vid': sample.vid,
                         'data_type': sample.data_type,
                         'error_msg': sample.error_msg,
-                        'error_reason': sample.error_reason,
+                        'error_reason': sample.error_reason or 'save_failed',
                         'video_path': sample.video_path,
                         'transcript': sample.transcript,
                         'start_time': sample.start_time,
@@ -935,38 +923,49 @@ class FFmpegPipeline:
                         'text_input_path': sample.text_input_path
                     }
                     self.stats['failed_samples'].append(failure_detail)
-                    if self.stats['failed'] <= 10:
-                        pass#logger.warning(f"处理失败: {sample.vid} - {sample.error_reason}: {sample.error_msg}")
-                
-                self.stats['processed'] += 1
-                
-                # 3. 更新进度
-                if pbar:
-                    pbar.update(1)
-                    pbar.set_postfix({
-                        'success': self.stats['success'],
-                        'failed': self.stats['failed']
-                    })
-                
-                # 4. Yield 批次结果
-                yield {
-                    'index': index,
-                    'vid': segment.vid,
-                    'success': sample.success,
-                    'num_frames': sample.frames.shape[0] if sample.success and sample.frames is not None else 0,
-                    'sample_dir': str(sample.sample_dir) if sample.sample_dir else None,
+            else:
+                self.stats['failed'] += 1
+                failure_detail = {
+                    'vid': sample.vid,
+                    'data_type': sample.data_type,
                     'error_msg': sample.error_msg,
-                    'batch_size': 1,
-                    'num_success': self.stats['success'],
-                    'num_failed': self.stats['failed']
+                    'error_reason': sample.error_reason,
+                    'video_path': sample.video_path,
+                    'transcript': sample.transcript,
+                    'start_time': sample.start_time,
+                    'end_time': sample.end_time,
+                    'duration': sample.duration,
+                    'text_input_path': sample.text_input_path
                 }
-        finally:
-            # 确保进度条一定会被关闭并刷新缓冲区
+                self.stats['failed_samples'].append(failure_detail)
+                if self.stats['failed'] <= 10:
+                    pass#logger.warning(f"处理失败: {sample.vid} - {sample.error_reason}: {sample.error_msg}")
+            
+            self.stats['processed'] += 1
+            
+            # 3. 更新进度
             if pbar:
-                pbar.close()
-                import sys
-                sys.stdout.flush()
-                sys.stderr.flush()
+                pbar.update(1)
+                pbar.set_postfix({
+                    'success': self.stats['success'],
+                    'failed': self.stats['failed']
+                })
+            
+            # 4. Yield 批次结果
+            yield {
+                'index': index,
+                'vid': segment.vid,
+                'success': sample.success,
+                'num_frames': sample.frames.shape[0] if sample.success and sample.frames is not None else 0,
+                'sample_dir': str(sample.sample_dir) if sample.sample_dir else None,
+                'error_msg': sample.error_msg,
+                'batch_size': 1,
+                'num_success': self.stats['success'],
+                'num_failed': self.stats['failed']
+            }
+        
+        if pbar:
+            pbar.close()
     
     def _iter_multi_process(self) -> Iterator[Dict[str, Any]]:
         """多进程迭代器"""
@@ -981,9 +980,7 @@ class FFmpegPipeline:
             pbar = tqdm(
                 total=len(self.data_source),
                 desc=f"🎬 FFmpeg Pipeline ({mode}, {self.num_workers}进程)",
-                unit="video",
-                leave=True,  # 保留进度条，避免清理问题
-                position=0   # 固定位置，避免多进程冲突
+                unit="video"
             )
         else:
             pbar = None
@@ -994,65 +991,58 @@ class FFmpegPipeline:
             for index, segment in enumerate(self.data_source)
         ]
         
-        try:
-            # 使用 Pool.imap 进行并行处理（保持顺序）
-            # 使用 initializer 让每个进程只初始化一次
-            with Pool(
-                processes=self.num_workers,
-                initializer=_init_worker,
-                initargs=(self.saver.output_dir, self.frame_size, self.device_id, self.decode_mode)
-            ) as pool:
-                for result in pool.imap(_process_single_segment_worker, args_list):
-                    # 统计
-                    if result['success']:
-                        self.stats['success'] += 1
-                        self.stats['successful_samples'].append({
-                            'sample_dir': result['sample_dir'],
-                            'data_type': result['data_type'],
-                            'vid': result['vid']
-                        })
-                    else:
-                        self.stats['failed'] += 1
-                        failure_detail = {
-                            'vid': result['vid'],
-                            'data_type': result['data_type'],
-                            'error_msg': result.get('error_msg'),
-                            'error_reason': result.get('error_reason'),
-                            'video_path': result.get('video_path'),
-                            'transcript': result.get('transcript'),
-                            'start_time': result.get('start_time'),
-                            'end_time': result.get('end_time'),
-                            'duration': result.get('duration'),
-                            'text_input_path': result.get('text_input_path')
-                        }
-                        self.stats['failed_samples'].append(failure_detail)
-                        if self.stats['failed'] <= 10:
-                            pass#logger.warning(f"处理失败: {result['vid']} - {result.get('error_reason')}: {result.get('error_msg')}")
-                    
-                    self.stats['processed'] += 1
-                    
-                    # 更新进度
-                    if pbar:
-                        pbar.update(1)
-                        pbar.set_postfix({
-                            'success': self.stats['success'],
-                            'failed': self.stats['failed']
-                        })
-                    
-                    # Yield 结果（添加额外字段保持兼容）
-                    result['batch_size'] = 1
-                    result['num_success'] = self.stats['success']
-                    result['num_failed'] = self.stats['failed']
-                    yield result
-        finally:
-            # 确保进度条一定会被关闭并刷新缓冲区
-            if pbar:
-                pbar.close()
-                import sys
-                sys.stdout.flush()
-                sys.stderr.flush()
-                # 打印换行，确保终端光标位置正确
-                print()
+        # 使用 Pool.imap 进行并行处理（保持顺序）
+        # 使用 initializer 让每个进程只初始化一次
+        with Pool(
+            processes=self.num_workers,
+            initializer=_init_worker,
+            initargs=(self.saver.output_dir, self.frame_size, self.device_id, self.decode_mode)
+        ) as pool:
+            for result in pool.imap(_process_single_segment_worker, args_list):
+                # 统计
+                if result['success']:
+                    self.stats['success'] += 1
+                    self.stats['successful_samples'].append({
+                        'sample_dir': result['sample_dir'],
+                        'data_type': result['data_type'],
+                        'vid': result['vid']
+                    })
+                else:
+                    self.stats['failed'] += 1
+                    failure_detail = {
+                        'vid': result['vid'],
+                        'data_type': result['data_type'],
+                        'error_msg': result.get('error_msg'),
+                        'error_reason': result.get('error_reason'),
+                        'video_path': result.get('video_path'),
+                        'transcript': result.get('transcript'),
+                        'start_time': result.get('start_time'),
+                        'end_time': result.get('end_time'),
+                        'duration': result.get('duration'),
+                        'text_input_path': result.get('text_input_path')
+                    }
+                    self.stats['failed_samples'].append(failure_detail)
+                    if self.stats['failed'] <= 10:
+                        pass#logger.warning(f"处理失败: {result['vid']} - {result.get('error_reason')}: {result.get('error_msg')}")
+                
+                self.stats['processed'] += 1
+                
+                # 更新进度
+                if pbar:
+                    pbar.update(1)
+                    pbar.set_postfix({
+                        'success': self.stats['success'],
+                        'failed': self.stats['failed']
+                    })
+                
+                # Yield 结果（添加额外字段保持兼容）
+                result['batch_size'] = 1
+                result['num_success'] = self.stats['success']
+                result['num_failed'] = self.stats['failed']
+                yield result
+        
+        if pbar:
+            pbar.close()
     
     def run(self) -> Dict[str, Any]:
         """
@@ -1336,32 +1326,10 @@ def main():
     # 打印摘要
     pipeline.summary()
     
-    # 确保终端状态正常（刷新所有缓冲区）
-    import sys
-    sys.stdout.flush()
-    sys.stderr.flush()
-    
     return 0
 
 
 if __name__ == "__main__":
     import sys
-    try:
-        exit_code = main()
-    except KeyboardInterrupt:
-        print("\n\n⚠️  用户中断")
-        sys.stdout.flush()
-        sys.stderr.flush()
-        exit_code = 130
-    except Exception as e:
-        print(f"\n\n❌ 错误: {e}")
-        sys.stdout.flush()
-        sys.stderr.flush()
-        exit_code = 1
-    finally:
-        # 最终确保终端状态正常
-        sys.stdout.flush()
-        sys.stderr.flush()
-    
-    sys.exit(exit_code)
+    sys.exit(main())
 
