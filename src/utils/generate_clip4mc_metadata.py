@@ -754,17 +754,24 @@ def process_single_clip(
         skip_text_generation: 是否跳过 text token 生成
     
     Returns:
-        (metadata_item, unmatched_item) 元组
+        (metadata_item, failure_item) 元组
         - 如果成功: (metadata_item, None)
-        - 如果失败: (None, unmatched_item)
+        - 如果失败: (None, failure_item)
     """
     # 获取 title
     title = vid_to_title.get(clip.vid)
     if not title:
         return None, {
             'vid': clip.vid,
+            'data_type': clip.data_type,
+            'transcript': clip.transcript,
+            'start_time': clip.start_time,
+            'end_time': clip.end_time,
+            'duration': clip.end_time - clip.start_time,
+            'title': None,
             'reason': 'no_download_record',
-            'message': '未找到下载记录'
+            'message': '在下载日志中未找到此vid的记录',
+            'suggestion': '检查vid是否正确，或该视频是否在下载日志CSV中'
         }
     
     # 查找视频文件
@@ -772,9 +779,15 @@ def process_single_clip(
     if not video_file:
         return None, {
             'vid': clip.vid,
+            'data_type': clip.data_type,
+            'transcript': clip.transcript,
+            'start_time': clip.start_time,
+            'end_time': clip.end_time,
+            'duration': clip.end_time - clip.start_time,
             'title': title,
             'reason': 'video_not_found',
-            'message': '未找到视频文件'
+            'message': f'下载日志中有记录，但在视频目录中找不到对应文件',
+            'suggestion': f'检查文件名是否匹配: 期望"{title}.mp4"或相似名称'
         }
     
     # 生成 text_input.pkl（如果需要）
@@ -786,9 +799,16 @@ def process_single_clip(
             if not success:
                 return None, {
                     'vid': clip.vid,
+                    'data_type': clip.data_type,
+                    'transcript': clip.transcript,
+                    'start_time': clip.start_time,
+                    'end_time': clip.end_time,
+                    'duration': clip.end_time - clip.start_time,
                     'title': title,
+                    'video_file': str(video_file),
                     'reason': 'tokenization_failed',
-                    'message': '生成 text_input.pkl 失败'
+                    'message': '视频文件找到，但生成text_input.pkl失败',
+                    'suggestion': '检查transcript内容是否有效，或transformers库是否正常'
                 }
     
     # 构建路径（使用 prefix）
@@ -851,9 +871,9 @@ def main():
     parser.add_argument("--text-prefix", type=str, default="",
                        help="text_input.pkl 路径前缀（例如：/mnt/data/）")
     
-    # 未匹配文件输出
+    # 失败分析报告输出
     parser.add_argument("--unmatched-output", type=Path,
-                       help="未匹配文件和 vid 清单输出路径（JSON 格式）")
+                       help="失败分析报告输出路径（JSON格式，包含详细失败原因和统计）")
     
     # 多进程参数
     parser.add_argument("--num-workers", type=int, default=1,
@@ -910,7 +930,7 @@ def main():
     metadata = []
     matched_count = 0
     failed_count = 0
-    unmatched_items = []  # 收集未匹配的项
+    failure_items = []  # 收集失败项（含详细信息）
     
     if args.num_workers == 1:
         # 单进程模式（也使用预计算索引优化性能）
@@ -920,7 +940,7 @@ def main():
         logger.info("  ✅ 索引构建完成")
         
         for clip in tqdm(clips, desc="处理进度", unit="clip"):
-            metadata_item, unmatched_item = process_single_clip(
+            metadata_item, failure_item = process_single_clip(
                 clip, vid_to_title, video_files, args.text_inputs_dir,
                 args.loose_match, args.video_prefix, args.text_prefix,
                 args.skip_text_generation
@@ -930,7 +950,7 @@ def main():
                 metadata.append(metadata_item)
                 matched_count += 1
             else:
-                unmatched_items.append(unmatched_item)
+                failure_items.append(failure_item)
                 failed_count += 1
     else:
         # 多进程模式（使用 Pool initializer 避免重复传递数据）
@@ -949,7 +969,7 @@ def main():
             )
         ) as pool:
             # 使用 tqdm 显示进度
-            for metadata_item, unmatched_item in tqdm(
+            for metadata_item, failure_item in tqdm(
                 pool.imap(_process_clip_worker, clips),
                 total=len(clips),
                 desc="处理进度",
@@ -959,7 +979,7 @@ def main():
                     metadata.append(metadata_item)
                     matched_count += 1
                 else:
-                    unmatched_items.append(unmatched_item)
+                    failure_items.append(failure_item)
                     failed_count += 1
     
     # 5. 保存元数据
@@ -967,12 +987,63 @@ def main():
     with open(args.output, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
     
-    # 6. 保存未匹配清单（如果指定）
-    if args.unmatched_output and unmatched_items:
-        logger.info("步骤 6: 保存未匹配清单...")
+    # 6. 生成并保存失败分析报告（如果指定）
+    if args.unmatched_output and failure_items:
+        logger.info("步骤 6: 生成失败分析报告...")
+        
+        # 统计各种失败原因
+        failure_stats = {}
+        for item in failure_items:
+            reason = item['reason']
+            failure_stats[reason] = failure_stats.get(reason, 0) + 1
+        
+        # 按data_type分类
+        failure_by_type = {'test': [], 'train': []}
+        for item in failure_items:
+            data_type = item.get('data_type', 'unknown')
+            if data_type in failure_by_type:
+                failure_by_type[data_type].append(item)
+        
+        # 构建完整报告
+        failure_report = {
+            'summary': {
+                'total_clips': len(clips),
+                'matched': matched_count,
+                'failed': failed_count,
+                'success_rate': f"{matched_count/len(clips)*100:.2f}%",
+                'failure_breakdown': failure_stats,
+                'failure_by_data_type': {
+                    'test': len(failure_by_type['test']),
+                    'train': len(failure_by_type['train'])
+                }
+            },
+            'failure_analysis': {
+                'no_download_record': {
+                    'description': 'vid在下载日志CSV中不存在',
+                    'count': failure_stats.get('no_download_record', 0),
+                    'solution': '1. 检查vid是否正确\n2. 确认该视频是否已下载\n3. 检查CSV文件是否完整'
+                },
+                'video_not_found': {
+                    'description': 'vid在下载日志中存在，但找不到对应视频文件',
+                    'count': failure_stats.get('video_not_found', 0),
+                    'solution': '1. 检查视频文件是否存在\n2. 检查文件名是否匹配\n3. 尝试使用--loose-match参数'
+                },
+                'tokenization_failed': {
+                    'description': '视频文件找到，但生成text_input.pkl失败',
+                    'count': failure_stats.get('tokenization_failed', 0),
+                    'solution': '1. 检查transcript内容\n2. 检查transformers库是否正常\n3. 检查磁盘空间'
+                }
+            },
+            'failed_clips': failure_items
+        }
+        
         with open(args.unmatched_output, 'w', encoding='utf-8') as f:
-            json.dump(unmatched_items, f, indent=2, ensure_ascii=False)
-        logger.info(f"  未匹配清单: {args.unmatched_output}")
+            json.dump(failure_report, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"  失败分析报告: {args.unmatched_output}")
+        logger.info(f"  失败原因统计:")
+        for reason, count in failure_stats.items():
+            logger.info(f"    - {reason}: {count} 个片段")
     
     # 完成
     logger.info("=" * 60)
@@ -988,8 +1059,8 @@ def main():
     logger.info(f"")
     logger.info(f"输出文件:")
     logger.info(f"  📄 metadata.json: {args.output}")
-    if args.unmatched_output and unmatched_items:
-        logger.info(f"  📄 unmatched.json: {args.unmatched_output} ({len(unmatched_items)} 项)")
+    if args.unmatched_output and failure_items:
+        logger.info(f"  📄 失败分析报告: {args.unmatched_output}")
     logger.info("=" * 60)
     
     return 0
