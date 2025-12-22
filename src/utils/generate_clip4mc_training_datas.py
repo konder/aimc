@@ -64,10 +64,24 @@ class ProcessedSample:
     success: bool
     data_type: str = 'train'    # 数据类型：'train', 'val', 'test'
     error_msg: Optional[str] = None
+    error_reason: Optional[str] = None  # 失败原因代码
+    
+    # 额外元数据（用于失败分析）
+    video_path: Optional[str] = None
+    transcript: Optional[str] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    text_input_path: Optional[str] = None
     
     @property
     def num_frames(self) -> int:
         return self.frames.shape[0] if self.frames is not None else 0
+    
+    @property
+    def duration(self) -> float:
+        if self.start_time is not None and self.end_time is not None:
+            return self.end_time - self.start_time
+        return 0.0
 
 
 # ============================================================
@@ -471,8 +485,33 @@ class FFmpegProcessor:
         Returns:
             ProcessedSample: 包含处理结果的数据结构
         """
+        # 基础元数据（用于失败分析）
+        base_metadata = {
+            'video_path': str(segment.video_path),
+            'transcript': segment.transcript,
+            'start_time': segment.start_time,
+            'end_time': segment.end_time,
+            'text_input_path': segment.text_input_path
+        }
+        
         try:
-            # 1. 提取帧
+            # 1. 检查视频文件是否存在
+            if not segment.video_path.exists():
+                return ProcessedSample(
+                    index=index,
+                    vid=segment.vid,
+                    frames=None,
+                    tokens=None,
+                    size=None,
+                    sample_dir=None,
+                    success=False,
+                    data_type=segment.data_type,
+                    error_msg=f"视频文件不存在: {segment.video_path}",
+                    error_reason="video_file_not_found",
+                    **base_metadata
+                )
+            
+            # 2. 提取帧
             frames = self.extract_frames(segment)
             if frames is None or len(frames) == 0:
                 return ProcessedSample(
@@ -484,10 +523,12 @@ class FFmpegProcessor:
                     sample_dir=None,
                     success=False,
                     data_type=segment.data_type,
-                    error_msg="帧提取失败"
+                    error_msg=f"FFmpeg帧提取失败（可能原因：视频损坏、编码不支持、时间范围无效）",
+                    error_reason="frame_extraction_failed",
+                    **base_metadata
                 )
             
-            # 2. 检查 text_input_path
+            # 3. 检查 text_input_path
             if not segment.text_input_path:
                 return ProcessedSample(
                     index=index,
@@ -498,7 +539,9 @@ class FFmpegProcessor:
                     sample_dir=None,
                     success=False,
                     data_type=segment.data_type,
-                    error_msg="元数据缺少 text_input_path"
+                    error_msg="元数据中缺少 text_input_path 字段",
+                    error_reason="missing_text_input_path",
+                    **base_metadata
                 )
             
             text_input_path = Path(segment.text_input_path)
@@ -512,10 +555,12 @@ class FFmpegProcessor:
                     sample_dir=None,
                     success=False,
                     data_type=segment.data_type,
-                    error_msg=f"text_input.pkl 文件不存在: {text_input_path}"
+                    error_msg=f"text_input.pkl 文件不存在: {text_input_path}",
+                    error_reason="text_input_file_not_found",
+                    **base_metadata
                 )
             
-            # 3. 处理 size 数据
+            # 4. 处理 size 数据
             # 注意：官方 CLIP4MC 的 size 数组固定为 16 个值
             # 这些值对应 DataLoader 动态采样的 16 帧，而非实际提取的所有帧
             # 因此直接使用元数据中的 size，不做任何处理
@@ -533,7 +578,8 @@ class FFmpegProcessor:
                 size=size_values,
                 sample_dir=None,  # 稍后由 Saver 填充
                 success=True,
-                data_type=segment.data_type
+                data_type=segment.data_type,
+                **base_metadata
             )
         
         except Exception as e:
@@ -546,7 +592,9 @@ class FFmpegProcessor:
                 sample_dir=None,
                 success=False,
                 data_type=segment.data_type,
-                error_msg=f"处理异常: {str(e)}"
+                error_msg=f"处理异常: {str(e)}",
+                error_reason="unknown_exception",
+                **base_metadata
             )
 
 
@@ -654,7 +702,7 @@ def _process_single_segment_worker(args: Tuple[int, VideoSegment]) -> Dict[str, 
         args: (index, segment)
     
     Returns:
-        dict: 处理结果
+        dict: 处理结果（包含详细的失败信息）
     """
     global _worker_processor, _worker_saver
     
@@ -668,16 +716,32 @@ def _process_single_segment_worker(args: Tuple[int, VideoSegment]) -> Dict[str, 
         success = _worker_saver.save_sample(sample)
         if not success:
             sample.success = False
+            sample.error_reason = "save_failed"
+            sample.error_msg = f"保存失败: {sample.error_msg}"
     
-    # 返回结果
-    return {
+    # 返回结果（包含详细的失败信息）
+    result = {
         'index': index,
         'vid': segment.vid,
         'success': sample.success,
         'error_msg': sample.error_msg,
+        'error_reason': sample.error_reason,
         'sample_dir': str(sample.sample_dir) if sample.sample_dir else None,
         'data_type': segment.data_type
     }
+    
+    # 如果失败，添加额外的元数据用于分析
+    if not sample.success:
+        result.update({
+            'video_path': sample.video_path,
+            'transcript': sample.transcript,
+            'start_time': sample.start_time,
+            'end_time': sample.end_time,
+            'duration': sample.duration,
+            'text_input_path': sample.text_input_path
+        })
+    
+    return result
 
 
 # ============================================================
@@ -841,18 +905,36 @@ class FFmpegPipeline:
                     })
                 else:
                     self.stats['failed'] += 1
-                    self.stats['failed_samples'].append({
+                    failure_detail = {
                         'vid': sample.vid,
-                        'error': sample.error_msg
-                    })
+                        'data_type': sample.data_type,
+                        'error_msg': sample.error_msg,
+                        'error_reason': sample.error_reason or 'save_failed',
+                        'video_path': sample.video_path,
+                        'transcript': sample.transcript,
+                        'start_time': sample.start_time,
+                        'end_time': sample.end_time,
+                        'duration': sample.duration,
+                        'text_input_path': sample.text_input_path
+                    }
+                    self.stats['failed_samples'].append(failure_detail)
             else:
                 self.stats['failed'] += 1
-                self.stats['failed_samples'].append({
+                failure_detail = {
                     'vid': sample.vid,
-                    'error': sample.error_msg
-                })
+                    'data_type': sample.data_type,
+                    'error_msg': sample.error_msg,
+                    'error_reason': sample.error_reason,
+                    'video_path': sample.video_path,
+                    'transcript': sample.transcript,
+                    'start_time': sample.start_time,
+                    'end_time': sample.end_time,
+                    'duration': sample.duration,
+                    'text_input_path': sample.text_input_path
+                }
+                self.stats['failed_samples'].append(failure_detail)
                 if self.stats['failed'] <= 10:
-                    logger.warning(f"处理失败: {sample.vid} - {sample.error_msg}")
+                    pass#logger.warning(f"处理失败: {sample.vid} - {sample.error_reason}: {sample.error_msg}")
             
             self.stats['processed'] += 1
             
@@ -922,12 +1004,21 @@ class FFmpegPipeline:
                     })
                 else:
                     self.stats['failed'] += 1
-                    self.stats['failed_samples'].append({
+                    failure_detail = {
                         'vid': result['vid'],
-                        'error': result['error_msg']
-                    })
+                        'data_type': result['data_type'],
+                        'error_msg': result.get('error_msg'),
+                        'error_reason': result.get('error_reason'),
+                        'video_path': result.get('video_path'),
+                        'transcript': result.get('transcript'),
+                        'start_time': result.get('start_time'),
+                        'end_time': result.get('end_time'),
+                        'duration': result.get('duration'),
+                        'text_input_path': result.get('text_input_path')
+                    }
+                    self.stats['failed_samples'].append(failure_detail)
                     if self.stats['failed'] <= 10:
-                        logger.warning(f"处理失败: {result['vid']} - {result['error_msg']}")
+                        pass#logger.warning(f"处理失败: {result['vid']} - {result.get('error_reason')}: {result.get('error_msg')}")
                 
                 self.stats['processed'] += 1
                 
@@ -972,7 +1063,7 @@ class FFmpegPipeline:
         return stats
     
     def summary(self):
-        """打印摘要"""
+        """打印摘要并生成详细的失败分析报告"""
         stats = self.get_stats()
         
         logger.info("\n" + "=" * 60)
@@ -986,17 +1077,102 @@ class FFmpegPipeline:
             logger.info(f"耗时: {stats['elapsed_time']/60:.2f} 分钟")
             logger.info(f"速度: {stats['speed']:.2f} 视频/秒")
         
-        # 保存失败列表
+        # 生成并保存详细的失败分析报告
         if stats['failed_samples']:
-            failed_json = self.saver.output_dir / "failed_samples.json"
-            with open(failed_json, 'w', encoding='utf-8') as f:
-                json.dump(stats['failed_samples'], f, indent=2, ensure_ascii=False)
-            logger.info(f"失败列表: {failed_json}")
+            self._generate_failure_analysis_report(stats['failed_samples'])
         
         # 生成 dataset_info.json
         self._generate_dataset_info(stats['successful_samples'])
         
         logger.info("=" * 60)
+    
+    def _generate_failure_analysis_report(self, failed_samples: List[Dict]):
+        """
+        生成详细的失败分析报告
+        
+        Args:
+            failed_samples: 失败样本列表
+        """
+        # 统计各种失败原因
+        failure_stats = {}
+        for item in failed_samples:
+            reason = item.get('error_reason', 'unknown')
+            failure_stats[reason] = failure_stats.get(reason, 0) + 1
+        
+        # 按data_type分类
+        failure_by_type = {'train': [], 'val': [], 'test': []}
+        for item in failed_samples:
+            data_type = item.get('data_type', 'unknown')
+            if data_type in failure_by_type:
+                failure_by_type[data_type].append(item)
+        
+        # 构建完整报告
+        failure_report = {
+            'summary': {
+                'total_samples': self.stats['total'],
+                'successful': self.stats['success'],
+                'failed': self.stats['failed'],
+                'success_rate': f"{self.stats['success']/self.stats['total']*100:.2f}%" if self.stats['total'] > 0 else "0%",
+                'failure_breakdown': failure_stats,
+                'failure_by_data_type': {
+                    'train': len(failure_by_type['train']),
+                    'val': len(failure_by_type['val']),
+                    'test': len(failure_by_type['test'])
+                }
+            },
+            'failure_analysis': {
+                'video_file_not_found': {
+                    'description': '视频文件不存在（元数据中指定的路径无效）',
+                    'count': failure_stats.get('video_file_not_found', 0),
+                    'solution': '1. 检查元数据中的video_path是否正确\n2. 确认视频文件是否存在\n3. 检查文件权限'
+                },
+                'frame_extraction_failed': {
+                    'description': 'FFmpeg无法提取视频帧',
+                    'count': failure_stats.get('frame_extraction_failed', 0),
+                    'solution': '1. 检查视频文件是否损坏\n2. 确认视频编码格式是否支持\n3. 检查时间范围(start_time/end_time)是否有效\n4. 尝试用ffmpeg手动播放该视频'
+                },
+                'missing_text_input_path': {
+                    'description': '元数据中缺少text_input_path字段',
+                    'count': failure_stats.get('missing_text_input_path', 0),
+                    'solution': '1. 运行generate_clip4mc_metadata.py重新生成元数据\n2. 确保元数据包含text_input_path字段'
+                },
+                'text_input_file_not_found': {
+                    'description': 'text_input.pkl文件不存在',
+                    'count': failure_stats.get('text_input_file_not_found', 0),
+                    'solution': '1. 运行generate_clip4mc_metadata.py生成text_input.pkl\n2. 检查text_input_path路径是否正确\n3. 确认文件权限'
+                },
+                'save_failed': {
+                    'description': '数据保存失败',
+                    'count': failure_stats.get('save_failed', 0),
+                    'solution': '1. 检查磁盘空间是否充足\n2. 确认输出目录权限\n3. 检查文件系统是否正常'
+                },
+                'unknown_exception': {
+                    'description': '未知异常',
+                    'count': failure_stats.get('unknown_exception', 0),
+                    'solution': '1. 查看详细的error_msg\n2. 检查日志文件\n3. 可能需要调试代码'
+                }
+            },
+            'failed_samples': failed_samples
+        }
+        
+        # 保存报告
+        failed_json = self.saver.output_dir / "failure_analysis.json"
+        with open(failed_json, 'w', encoding='utf-8') as f:
+            json.dump(failure_report, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"\n失败分析报告: {failed_json}")
+        logger.info(f"失败原因统计:")
+        for reason, count in failure_stats.items():
+            logger.info(f"  - {reason}: {count} 个样本")
+        
+        # 显示一些示例失败案例（前3个）
+        if len(failed_samples) > 0:
+            logger.info(f"\n失败案例示例（前3个）:")
+            for i, sample in enumerate(failed_samples[:3], 1):
+                logger.info(f"  {i}. vid={sample['vid']}, reason={sample.get('error_reason')}")
+                logger.info(f"     {sample.get('error_msg', 'N/A')[:80]}")
+        
+        return failure_report
     
     def _generate_dataset_info(self, successful_samples: List[Dict[str, str]]):
         """
