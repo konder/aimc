@@ -810,7 +810,12 @@ class FFmpegPipeline:
         """单进程迭代器"""
         # 创建进度条
         if self.show_progress:
-            mode = "GPU" if self.use_gpu else "CPU"
+            mode_desc = {
+                'cpu': 'CPU',
+                'gpu': 'GPU',
+                'mixed': 'Mixed'
+            }
+            mode = mode_desc.get(self.decode_mode, self.decode_mode)
             pbar = tqdm(
                 total=len(self.data_source),
                 desc=f"🎬 FFmpeg Pipeline ({mode})",
@@ -879,7 +884,12 @@ class FFmpegPipeline:
         """多进程迭代器"""
         # 创建进度条
         if self.show_progress:
-            mode = "GPU" if self.use_gpu else "CPU"
+            mode_desc = {
+                'cpu': 'CPU',
+                'gpu': 'GPU',
+                'mixed': 'Mixed'
+            }
+            mode = mode_desc.get(self.decode_mode, self.decode_mode)
             pbar = tqdm(
                 total=len(self.data_source),
                 desc=f"🎬 FFmpeg Pipeline ({mode}, {self.num_workers}进程)",
@@ -899,7 +909,7 @@ class FFmpegPipeline:
         with Pool(
             processes=self.num_workers,
             initializer=_init_worker,
-            initargs=(self.saver.output_dir, self.frame_size, self.device_id, self.use_gpu)
+            initargs=(self.saver.output_dir, self.frame_size, self.device_id, self.decode_mode)
         ) as pool:
             for result in pool.imap(_process_single_segment_worker, args_list):
                 # 统计
@@ -1103,8 +1113,6 @@ def main():
                        help="目标帧高度 (默认: 160)")
     parser.add_argument("--frame-width", type=int, default=256,
                        help="目标帧宽度 (默认: 256)")
-    parser.add_argument("--device-id", type=int, default=0,
-                       help="GPU ID (默认: 0)")
     parser.add_argument("--decode-mode", type=str, default='mixed',
                        choices=['cpu', 'gpu', 'mixed'],
                        help="解码模式: cpu(纯CPU) | gpu(全GPU scale_cuda) | mixed(GPU解码+CPU缩放,推荐)")
