@@ -166,6 +166,11 @@ class FFmpegProcessor:
     1. 使用 FFmpeg 提取视频帧
     2. 支持 GPU 硬件加速 (NVDEC)
     3. Resize 到目标尺寸
+    
+    支持三种模式:
+        - cpu: 纯 CPU 解码 + CPU 缩放
+        - gpu: 全 GPU（GPU 解码 + GPU 缩放 scale_cuda）
+        - mixed: GPU 解码 + CPU 缩放（推荐，兼容性最好）
     """
     
     def __init__(
@@ -173,29 +178,54 @@ class FFmpegProcessor:
         frame_height: int = 160,
         frame_width: int = 256,
         device_id: int = 0,
-        use_gpu: bool = False
+        decode_mode: str = 'mixed'
     ):
         """
         Args:
             frame_height: 目标帧高度
             frame_width: 目标帧宽度
             device_id: GPU ID（用于 NVDEC）
-            use_gpu: 是否使用 GPU 硬件加速
+            decode_mode: 解码模式 ('cpu', 'gpu', 'mixed')
+                - 'cpu': 纯 CPU 解码 + CPU 缩放
+                - 'gpu': 全 GPU（GPU 解码 + GPU 缩放 scale_cuda）
+                - 'mixed': GPU 解码 + CPU 缩放（推荐，兼容性最好）
         """
         self.frame_height = frame_height
         self.frame_width = frame_width
         self.device_id = device_id
-        self.use_gpu = use_gpu
+        self.decode_mode = decode_mode.lower()
         
-        # 检查 ffmpeg 是否支持 GPU 加速
+        # 验证模式
+        if self.decode_mode not in ('cpu', 'gpu', 'mixed'):
+            raise ValueError(f"无效的 decode_mode: {decode_mode}，必须是 'cpu', 'gpu', 或 'mixed'")
+        
+        # 检查 GPU 可用性
         self.gpu_available = False
-        if use_gpu:
-            self.gpu_available = self._check_gpu_support()
-            if not self.gpu_available:
-                logger.warning("GPU 加速不可用，将使用 CPU 模式")
+        self.scale_cuda_available = False
         
-        mode = "GPU (NVDEC)" if (use_gpu and self.gpu_available) else "CPU"
-        logger.info(f"FFmpegProcessor 初始化: {mode} (device={device_id})")
+        if self.decode_mode in ('gpu', 'mixed'):
+            self.gpu_available = self._check_gpu_support()
+            
+            if self.decode_mode == 'gpu':
+                # GPU 模式需要检查 scale_cuda
+                if not self.gpu_available:
+                    raise RuntimeError("GPU 模式已启用，但 FFmpeg CUDA 支持不可用！")
+                self.scale_cuda_available = self._check_scale_cuda()
+                if not self.scale_cuda_available:
+                    logger.warning("scale_cuda 滤镜不可用，GPU 模式将回退到 Mixed 模式")
+                    self.decode_mode = 'mixed'
+            
+            if self.decode_mode == 'mixed' and not self.gpu_available:
+                logger.warning("GPU 不可用，Mixed 模式将回退到 CPU 模式")
+                self.decode_mode = 'cpu'
+        
+        # 显示模式信息
+        mode_desc = {
+            'cpu': 'CPU (CPU解码 + CPU缩放)',
+            'gpu': 'GPU (GPU解码 + GPU缩放 scale_cuda)',
+            'mixed': f"Mixed (GPU解码 + CPU缩放) [GPU={'可用' if self.gpu_available else '不可用'}]"
+        }
+        logger.info(f"FFmpegProcessor 初始化: {mode_desc[self.decode_mode]} (device={device_id})")
     
     def _check_gpu_support(self) -> bool:
         """
@@ -221,9 +251,37 @@ class FFmpegProcessor:
         except Exception:
             return False
     
+    def _check_scale_cuda(self) -> bool:
+        """
+        检查 FFmpeg 是否支持 scale_cuda 滤镜
+        
+        Returns:
+            bool: 是否支持 scale_cuda
+        """
+        try:
+            result = subprocess.run(
+                ['ffmpeg', '-filters'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                text=True
+            )
+            
+            if 'scale_cuda' in result.stdout.lower():
+                return True
+            
+            return False
+        except Exception:
+            return False
+    
     def extract_frames(self, segment: VideoSegment) -> Optional[np.ndarray]:
         """
         使用 FFmpeg 提取视频帧 (核心方法)
+        
+        根据 decode_mode 选择解码策略:
+            - cpu: 纯 CPU 解码 + CPU 缩放
+            - gpu: GPU 解码 + GPU 缩放 (scale_cuda)
+            - mixed: GPU 解码 + CPU 缩放
         
         Args:
             segment: 视频片段信息
@@ -231,23 +289,31 @@ class FFmpegProcessor:
         Returns:
             frames: (N, H, W, 3) uint8, RGB 格式
         """
-        # GPU 模式：先尝试 GPU，失败则回退 CPU
-        if self.use_gpu and self.gpu_available:
-            frames = self._try_gpu_decode(segment)
-            if frames is not None:
-                return frames
-            # GPU 失败，回退到 CPU（静默回退，不打印警告）
+        # CPU 模式：纯 CPU
+        if self.decode_mode == 'cpu':
+            return self._extract_frames_cpu(segment)
         
-        # CPU 模式
+        # GPU 模式：GPU 解码 + GPU 缩放 (scale_cuda)
+        if self.decode_mode == 'gpu':
+            return self._try_gpu_full(segment)
+        
+        # Mixed 模式：GPU 解码 + CPU 缩放
+        if self.decode_mode == 'mixed':
+            return self._try_gpu_mixed(segment)
+        
+        # 不应该到这里
         return self._extract_frames_cpu(segment)
     
     def _try_gpu_decode(self, segment: VideoSegment) -> Optional[np.ndarray]:
         """
-        尝试使用 GPU 解码（NVDEC）
-        
-        策略:
-        1. 先尝试 hwaccel cuda + scale (GPU 解码 + CPU 缩放)
-        2. 失败则返回 None，由主流程回退到纯 CPU
+        [已废弃] 旧的 GPU 解码方法，保留以防引用
+        现在使用 _try_gpu_full 和 _try_gpu_mixed
+        """
+        return self._try_gpu_mixed(segment)
+    
+    def _try_gpu_full(self, segment: VideoSegment) -> Optional[np.ndarray]:
+        """
+        全 GPU 模式：GPU 解码 + GPU 缩放 (scale_cuda)
         
         Returns:
             frames: (N, H, W, 3) uint8, RGB 格式，失败返回 None
@@ -255,13 +321,63 @@ class FFmpegProcessor:
         try:
             duration = segment.end_time - segment.start_time
             
-            # GPU 解码 + CPU 缩放（最兼容的方案）
-            # -ss 放在 -i 前面（输入前 seek，更快）
+            # 全 GPU 流程：GPU 解码 → GPU 缩放 → 传回 CPU
             cmd = [
                 'ffmpeg',
                 '-hwaccel', 'cuda',
                 '-hwaccel_device', str(self.device_id),
-                '-hwaccel_output_format', 'cuda',  # 明确指定输出格式
+                '-hwaccel_output_format', 'cuda',
+                '-ss', str(segment.start_time),
+                '-i', str(segment.video_path),
+                '-t', str(duration),
+                '-vf', f'scale_cuda={self.frame_width}:{self.frame_height},hwdownload,format=nv12',
+                '-f', 'rawvideo',
+                '-pix_fmt', 'rgb24',
+                '-loglevel', 'error',
+                'pipe:1'
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30
+            )
+            
+            if result.returncode == 0 and len(result.stdout) > 0:
+                raw_data = result.stdout
+                frame_size = self.frame_height * self.frame_width * 3
+                
+                if len(raw_data) >= frame_size:
+                    num_frames = len(raw_data) // frame_size
+                    if num_frames > 0:
+                        frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
+                        frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+                        return frames
+            
+            return None
+        
+        except subprocess.TimeoutExpired:
+            return None
+        except Exception:
+            return None
+    
+    def _try_gpu_mixed(self, segment: VideoSegment) -> Optional[np.ndarray]:
+        """
+        Mixed 模式：GPU 解码 + CPU 缩放
+        
+        Returns:
+            frames: (N, H, W, 3) uint8, RGB 格式，失败返回 None
+        """
+        try:
+            duration = segment.end_time - segment.start_time
+            
+            # GPU 解码 + CPU 缩放（兼容性最好）
+            cmd = [
+                'ffmpeg',
+                '-hwaccel', 'cuda',
+                '-hwaccel_device', str(self.device_id),
+                '-hwaccel_output_format', 'cuda',
                 '-ss', str(segment.start_time),
                 '-i', str(segment.video_path),
                 '-t', str(duration),
@@ -290,7 +406,6 @@ class FFmpegProcessor:
                         frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
                         return frames
             
-            # GPU 解码失败，返回 None
             return None
         
         except subprocess.TimeoutExpired:
@@ -509,7 +624,7 @@ _worker_processor = None
 _worker_saver = None
 
 
-def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, use_gpu: bool):
+def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, decode_mode: str):
     """
     初始化 worker 进程（每个进程只调用一次）
     
@@ -517,7 +632,7 @@ def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, 
         output_dir: 输出目录
         frame_size: (height, width)
         device_id: 设备 ID
-        use_gpu: 是否使用 GPU 硬件加速
+        decode_mode: 解码模式 ('cpu', 'gpu', 'mixed')
     """
     global _worker_processor, _worker_saver
     
@@ -525,7 +640,7 @@ def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, 
         frame_height=frame_size[0],
         frame_width=frame_size[1],
         device_id=device_id,
-        use_gpu=use_gpu
+        decode_mode=decode_mode
     )
     
     _worker_saver = SampleSaver(output_dir=output_dir)
@@ -593,7 +708,7 @@ class FFmpegPipeline:
         batch_size: int = 1,
         frame_size: Tuple[int, int] = (160, 256),
         device_id: int = 0,
-        use_gpu: bool = False,
+        decode_mode: str = 'mixed',
         num_workers: int = 1,
         show_progress: bool = True
     ):
@@ -604,7 +719,10 @@ class FFmpegPipeline:
             batch_size: 批量大小（用于进度显示，实际仍是逐个处理）
             frame_size: (height, width) 目标帧尺寸
             device_id: GPU ID（用于 FFmpeg NVDEC）
-            use_gpu: 是否使用 GPU 硬件加速（FFmpeg NVDEC）
+            decode_mode: 解码模式 ('cpu', 'gpu', 'mixed')
+                - 'cpu': 纯 CPU 解码 + CPU 缩放
+                - 'gpu': 全 GPU (GPU解码 + GPU缩放 scale_cuda)
+                - 'mixed': GPU 解码 + CPU 缩放（推荐）
             num_workers: 并行进程数（默认: 1，单线程）
             show_progress: 是否显示进度条
         """
@@ -613,11 +731,15 @@ class FFmpegPipeline:
         self.num_workers = num_workers
         self.frame_size = frame_size
         self.device_id = device_id
-        self.use_gpu = use_gpu
+        self.decode_mode = decode_mode.lower()
+        
+        # 验证模式
+        if self.decode_mode not in ('cpu', 'gpu', 'mixed'):
+            raise ValueError(f"无效的 decode_mode: {decode_mode}，必须是 'cpu', 'gpu', 或 'mixed'")
         
         # 1. 初始化组件
         logger.info("=" * 60)
-        logger.info("初始化 Decord Pipeline")
+        logger.info("初始化 FFmpeg Pipeline")
         logger.info("=" * 60)
         
         self.data_source = VideoDataSource(metadata_path=metadata_path)
@@ -628,7 +750,7 @@ class FFmpegPipeline:
                 frame_height=frame_size[0],
                 frame_width=frame_size[1],
                 device_id=device_id,
-                use_gpu=use_gpu
+                decode_mode=decode_mode
             )
         else:
             # 多进程模式：不在主进程初始化 processor（每个子进程会初始化自己的）
@@ -648,10 +770,16 @@ class FFmpegPipeline:
             'end_time': None
         }
         
+        mode_desc = {
+            'cpu': 'CPU (CPU解码 + CPU缩放)',
+            'gpu': 'GPU (GPU解码 + GPU缩放 scale_cuda)',
+            'mixed': 'Mixed (GPU解码 + CPU缩放, 推荐)'
+        }
+        
         logger.info(f"待处理: {self.stats['total']} 个视频片段")
         logger.info(f"输出目录: {output_dir}")
-        logger.info(f"解码器: FFmpeg (纯实现)")
-        logger.info(f"硬件加速: {'GPU (NVDEC)' if use_gpu else 'CPU'} (ID={device_id})")
+        logger.info(f"解码器: FFmpeg")
+        logger.info(f"解码模式: {mode_desc[self.decode_mode]} (device={device_id})")
         logger.info(f"帧尺寸: {frame_size[0]}x{frame_size[1]}")
         logger.info(f"并行进程: {num_workers}")
         logger.info("=" * 60)
@@ -921,27 +1049,31 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-    # 基本使用 (CPU 模式)
+    # CPU 模式（纯 CPU 解码 + 缩放）
     python src/utils/generate_clip4mc_training_datas.py \\
-        --metadata preprocessed_metadata.json \\
-        --output-dir /path/to/output \\
+        --metadata metadata.json \\
+        --output-dir output \\
+        --decode-mode cpu \\
         --num-workers 8
 
-    # GPU 加速 (NVDEC)
+    # Mixed 模式（GPU解码 + CPU缩放，推荐）
     python src/utils/generate_clip4mc_training_datas.py \\
-        --metadata preprocessed_metadata.json \\
-        --output-dir /path/to/output \\
-        --use-gpu \\
-        --device-id 0 \\
+        --metadata metadata.json \\
+        --output-dir output \\
+        --decode-mode mixed \\
         --num-workers 4
 
-    # 自定义参数
+    # GPU 模式（全 GPU：GPU解码 + GPU缩放）
     python src/utils/generate_clip4mc_training_datas.py \\
-        --metadata preprocessed_metadata.json \\
-        --output-dir /path/to/output \\
-        --num-workers 8 \\
-        --frame-height 160 \\
-        --frame-width 256
+        --metadata metadata.json \\
+        --output-dir output \\
+        --decode-mode gpu \\
+        --num-workers 2
+
+三种解码模式:
+    - cpu:   纯 CPU 解码 + CPU 缩放（最稳定）
+    - mixed: GPU 解码 + CPU 缩放（推荐，兼容性好）
+    - gpu:   GPU 解码 + GPU 缩放 scale_cuda（最快，需要完整CUDA支持）
 
 元数据 JSON 格式:
     [
@@ -953,7 +1085,7 @@ def main():
             "transcript": "player mining diamond",
             "size": [0.3, 0.4, 0.5, ...],  # 16 个值
             "data_type": "train",  # 'train', 'val', 'test'
-            "text_input_path": "/path/to/abc123_text_input.pkl"  # 预生成的 text_input.pkl
+            "text_input_path": "/path/to/abc123_text_input.pkl"
         },
         ...
     ]
@@ -973,8 +1105,11 @@ def main():
                        help="目标帧宽度 (默认: 256)")
     parser.add_argument("--device-id", type=int, default=0,
                        help="GPU ID (默认: 0)")
-    parser.add_argument("--use-gpu", action='store_true',
-                       help="使用 GPU 硬件加速 (FFmpeg NVDEC)")
+    parser.add_argument("--decode-mode", type=str, default='mixed',
+                       choices=['cpu', 'gpu', 'mixed'],
+                       help="解码模式: cpu(纯CPU) | gpu(全GPU scale_cuda) | mixed(GPU解码+CPU缩放,推荐)")
+    parser.add_argument("--device-id", type=int, default=0,
+                       help="GPU 设备 ID (默认: 0)")
     parser.add_argument("--num-workers", type=int, default=1,
                        help="并行进程数 (默认: 1，单线程)")
     parser.add_argument("--batch-size", type=int, default=1,
@@ -991,7 +1126,7 @@ def main():
         batch_size=args.batch_size,
         frame_size=(args.frame_height, args.frame_width),
         device_id=args.device_id,
-        use_gpu=args.use_gpu,
+        decode_mode=args.decode_mode,
         num_workers=args.num_workers,
         show_progress=not args.no_progress
     )
