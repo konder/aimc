@@ -1236,7 +1236,7 @@ class FFmpegPipeline:
         }
         
         for sample in successful_samples:
-            sample_dir = sample['sample_dir']
+            sample_dir = self.saver.output_dir + "/" + sample['sample_dir']
             data_type = sample.get('data_type', 'train')
             
             # 确保 data_type 有效
