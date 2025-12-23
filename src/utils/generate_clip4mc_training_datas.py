@@ -191,6 +191,7 @@ class FFmpegProcessor:
         self,
         frame_height: int = 160,
         frame_width: int = 256,
+        target_fps: int = None,
         device_id: int = 0,
         decode_mode: str = 'mixed'
     ):
@@ -198,6 +199,7 @@ class FFmpegProcessor:
         Args:
             frame_height: 目标帧高度
             frame_width: 目标帧宽度
+            target_fps: 目标帧率 (None=保持原始帧率, 推荐10-20以节省空间)
             device_id: GPU ID（用于 NVDEC）
             decode_mode: 解码模式 ('cpu', 'gpu', 'mixed')
                 - 'cpu': 纯 CPU 解码 + CPU 缩放
@@ -206,6 +208,7 @@ class FFmpegProcessor:
         """
         self.frame_height = frame_height
         self.frame_width = frame_width
+        self.target_fps = target_fps
         self.device_id = device_id
         self.decode_mode = decode_mode.lower()
         
@@ -337,6 +340,13 @@ class FFmpegProcessor:
         try:
             duration = segment.end_time - segment.start_time
             
+            # 构建视频滤镜
+            vf_filters = []
+            if self.target_fps:
+                vf_filters.append(f'fps={self.target_fps}')
+            vf_filters.append(f'scale_cuda={self.frame_width}:{self.frame_height},hwdownload,format=nv12')
+            vf_str = ','.join(vf_filters)
+            
             # 全 GPU 流程：GPU 解码 → GPU 缩放 → 传回 CPU
             cmd = [
                 'ffmpeg',
@@ -346,7 +356,7 @@ class FFmpegProcessor:
                 '-ss', str(segment.start_time),
                 '-i', str(segment.video_path),
                 '-t', str(duration),
-                '-vf', f'scale_cuda={self.frame_width}:{self.frame_height},hwdownload,format=nv12',
+                '-vf', vf_str,
                 '-f', 'rawvideo',
                 '-pix_fmt', 'rgb24',
                 '-loglevel', 'error',
@@ -389,6 +399,13 @@ class FFmpegProcessor:
         try:
             duration = segment.end_time - segment.start_time
             
+            # 构建视频滤镜
+            vf_filters = ['hwdownload', 'format=nv12']
+            if self.target_fps:
+                vf_filters.append(f'fps={self.target_fps}')
+            vf_filters.append(f'scale={self.frame_width}:{self.frame_height}')
+            vf_str = ','.join(vf_filters)
+            
             # GPU 解码 + CPU 缩放（兼容性最好）
             cmd = [
                 'ffmpeg',
@@ -398,7 +415,7 @@ class FFmpegProcessor:
                 '-ss', str(segment.start_time),
                 '-i', str(segment.video_path),
                 '-t', str(duration),
-                '-vf', f'hwdownload,format=nv12,scale={self.frame_width}:{self.frame_height}',
+                '-vf', vf_str,
                 '-f', 'rawvideo',
                 '-pix_fmt', 'rgb24',
                 '-loglevel', 'error',
@@ -441,12 +458,19 @@ class FFmpegProcessor:
         try:
             duration = segment.end_time - segment.start_time
             
+            # 构建视频滤镜
+            vf_filters = []
+            if self.target_fps:
+                vf_filters.append(f'fps={self.target_fps}')
+            vf_filters.append(f'scale={self.frame_width}:{self.frame_height}')
+            vf_str = ','.join(vf_filters)
+            
             cmd = [
                 'ffmpeg',
                 '-ss', str(segment.start_time),
                 '-i', str(segment.video_path),
                 '-t', str(duration),
-                '-vf', f'scale={self.frame_width}:{self.frame_height}',
+                '-vf', vf_str,
                 '-f', 'rawvideo',
                 '-pix_fmt', 'rgb24',
                 '-loglevel', 'error',
@@ -677,13 +701,14 @@ _worker_processor = None
 _worker_saver = None
 
 
-def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, decode_mode: str):
+def _init_worker(output_dir: Path, frame_size: Tuple[int, int], target_fps: int, device_id: int, decode_mode: str):
     """
     初始化 worker 进程（每个进程只调用一次）
     
     Args:
         output_dir: 输出目录
         frame_size: (height, width)
+        target_fps: 目标帧率
         device_id: 设备 ID
         decode_mode: 解码模式 ('cpu', 'gpu', 'mixed')
     """
@@ -692,6 +717,7 @@ def _init_worker(output_dir: Path, frame_size: Tuple[int, int], device_id: int, 
     _worker_processor = FFmpegProcessor(
         frame_height=frame_size[0],
         frame_width=frame_size[1],
+        target_fps=target_fps,
         device_id=device_id,
         decode_mode=decode_mode
     )
@@ -776,6 +802,7 @@ class FFmpegPipeline:
         output_dir: Path,
         batch_size: int = 1,
         frame_size: Tuple[int, int] = (160, 256),
+        target_fps: int = None,
         device_id: int = 0,
         decode_mode: str = 'mixed',
         num_workers: int = 1,
@@ -787,6 +814,7 @@ class FFmpegPipeline:
             output_dir: 输出目录
             batch_size: 批量大小（用于进度显示，实际仍是逐个处理）
             frame_size: (height, width) 目标帧尺寸
+            target_fps: 目标帧率（None=保持原始帧率，推荐10-20以节省空间）
             device_id: GPU ID（用于 FFmpeg NVDEC）
             decode_mode: 解码模式 ('cpu', 'gpu', 'mixed')
                 - 'cpu': 纯 CPU 解码 + CPU 缩放
@@ -799,6 +827,7 @@ class FFmpegPipeline:
         self.show_progress = show_progress
         self.num_workers = num_workers
         self.frame_size = frame_size
+        self.target_fps = target_fps
         self.device_id = device_id
         self.decode_mode = decode_mode.lower()
         
@@ -818,6 +847,7 @@ class FFmpegPipeline:
             self.processor = FFmpegProcessor(
                 frame_height=frame_size[0],
                 frame_width=frame_size[1],
+                target_fps=target_fps,
                 device_id=device_id,
                 decode_mode=decode_mode
             )
@@ -996,7 +1026,7 @@ class FFmpegPipeline:
         with Pool(
             processes=self.num_workers,
             initializer=_init_worker,
-            initargs=(self.saver.output_dir, self.frame_size, self.device_id, self.decode_mode)
+            initargs=(self.saver.output_dir, self.frame_size, self.target_fps, self.device_id, self.decode_mode)
         ) as pool:
             for result in pool.imap(_process_single_segment_worker, args_list):
                 # 统计
@@ -1294,6 +1324,8 @@ def main():
                        help="目标帧高度 (默认: 160)")
     parser.add_argument("--frame-width", type=int, default=256,
                        help="目标帧宽度 (默认: 256)")
+    parser.add_argument("--target-fps", type=int, default=None,
+                       help="目标帧率 (默认: None保持原始帧率，推荐10-20以节省67%%空间)")
     parser.add_argument("--decode-mode", type=str, default='mixed',
                        choices=['cpu', 'gpu', 'mixed'],
                        help="解码模式: cpu(纯CPU) | gpu(全GPU scale_cuda) | mixed(GPU解码+CPU缩放,推荐)")
@@ -1314,6 +1346,7 @@ def main():
         output_dir=args.output_dir,
         batch_size=args.batch_size,
         frame_size=(args.frame_height, args.frame_width),
+        target_fps=args.target_fps,
         device_id=args.device_id,
         decode_mode=args.decode_mode,
         num_workers=args.num_workers,
