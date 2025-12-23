@@ -323,19 +323,12 @@ class FFmpegProcessor:
         # 不应该到这里
         return self._extract_frames_cpu(segment)
     
-    def _try_gpu_decode(self, segment: VideoSegment) -> Optional[np.ndarray]:
-        """
-        [已废弃] 旧的 GPU 解码方法，保留以防引用
-        现在使用 _try_gpu_full 和 _try_gpu_mixed
-        """
-        return self._try_gpu_mixed(segment)
-    
     def _try_gpu_full(self, segment: VideoSegment) -> Optional[np.ndarray]:
         """
         全 GPU 模式：GPU 解码 + GPU 缩放 (scale_cuda)
         
         Returns:
-            frames: (N, H, W, 3) uint8, RGB 格式，失败返回 None
+            frames: (N, H, W, 3) uint8, RGB 格式，N是16的倍数，失败返回 None
         """
         try:
             duration = segment.end_time - segment.start_time
@@ -380,6 +373,8 @@ class FFmpegProcessor:
                     if num_frames > 0:
                         frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
                         frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+                        # ⭐ 调整帧数为16的倍数
+                        frames = self._adjust_frame_count(frames)
                         return frames
             
             return None
@@ -439,6 +434,8 @@ class FFmpegProcessor:
                     if num_frames > 0:
                         frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
                         frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+                        # ⭐ 调整帧数为16的倍数
+                        frames = self._adjust_frame_count(frames)
                         return frames
             
             return None
@@ -448,12 +445,47 @@ class FFmpegProcessor:
         except Exception:
             return None
     
+    def _adjust_frame_count(self, frames: np.ndarray) -> np.ndarray:
+        """
+        调整帧数为16的倍数，确保与CLIP4MC训练兼容
+        
+        Args:
+            frames: (N, H, W, 3) 原始帧数组
+            
+        Returns:
+            frames: (N', H, W, 3) 调整后的帧数组，N'是16的倍数
+        """
+        if frames is None or len(frames) == 0:
+            return frames
+        
+        num_frames = frames.shape[0]
+        
+        # 计算目标帧数（向上取整到16的倍数）
+        target_frames = ((num_frames + 15) // 16) * 16
+        
+        if num_frames == target_frames:
+            # 已经是16的倍数，直接返回
+            return frames
+        
+        elif num_frames < target_frames:
+            # 需要填充
+            padding_frames = target_frames - num_frames
+            # 使用最后一帧填充（比零填充更自然）
+            last_frame = frames[-1:].repeat(padding_frames, axis=0)
+            frames = np.vstack([frames, last_frame])
+            
+        else:
+            # 需要裁剪（理论上不会发生，因为target_frames是向上取整）
+            frames = frames[:target_frames]
+        
+        return frames
+    
     def _extract_frames_cpu(self, segment: VideoSegment) -> Optional[np.ndarray]:
         """
         使用 CPU 模式提取视频帧（GPU 失败时的备选）
         
         Returns:
-            frames: (N, H, W, 3) uint8, RGB 格式
+            frames: (N, H, W, 3) uint8, RGB 格式，N是16的倍数
         """
         try:
             duration = segment.end_time - segment.start_time
@@ -500,6 +532,9 @@ class FFmpegProcessor:
             
             frames = np.frombuffer(raw_data[:num_frames * frame_size], dtype=np.uint8)
             frames = frames.reshape((num_frames, self.frame_height, self.frame_width, 3))
+            
+            # ⭐ 调整帧数为16的倍数
+            frames = self._adjust_frame_count(frames)
             
             return frames
         
